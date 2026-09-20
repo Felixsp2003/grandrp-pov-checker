@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V31
+/* Grand RP DC Checker V29
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,9 +10,9 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V31';
-  const META_KEY='grandrp_pov_meta_v31';
-  const DB_NAME='grandrp_pov_db_v31';
+  const BUILD='V29';
+  const META_KEY='grandrp_pov_meta_v29';
+  const DB_NAME='grandrp_pov_db_v29';
   const STORE='videos';
 
   const ALLOWED_REASONS=[
@@ -501,92 +501,140 @@
       finally{item.processing=false;}
     }
   }
-  function getClientIdFromField(){
-    const entered=String(document.querySelector('#clientId')?.value||'').trim();
-    if(entered){ state.clientId=entered; localStorage.setItem('yt_client_id',entered); }
-    return String(state.clientId||'').trim();
-  }
-  function validGoogleClientId(clientId){
+  function validClientId(clientId){
     return /^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(String(clientId||'').trim());
   }
-  function setYoutubeButton(loading=false){
-    const btn=document.querySelector('#connectYoutube');
-    if(!btn)return;
-    btn.disabled=!!loading;
-    btn.textContent=loading?'Google wird geöffnet…':(state.accessToken?'YouTube verbunden':'Mit YouTube verbinden');
+
+  function setYoutubeButton(text, disabled=false){
+    const btn=$('#connectYoutube');
+    if(btn){btn.disabled=disabled;btn.textContent=text;}
   }
-  function buildGoogleTokenClient(){
-    const clientId=getClientIdFromField();
-    if(!clientId) throw new Error('Bitte zuerst die Google OAuth Client-ID in Einstellungen eintragen.');
-    if(!validGoogleClientId(clientId)) throw new Error('Die Google OAuth Client-ID sieht ungültig aus.');
-    const oauth=window.google?.accounts?.oauth2;
-    if(!oauth) throw new Error('Google OAuth wurde nicht geladen. Prüfe Internetverbindung, Brave/Adblocker und ob accounts.google.com erlaubt ist.');
-    const tokenClient=oauth.initTokenClient({
-      client_id:clientId,
+
+  function showYoutubeHelp(text, kind=''){ 
+    const help=$('#ytConnectHelp');
+    if(help){help.textContent=text;help.style.color=kind==='error'?'#ff8ebd':kind==='good'?'#69e1af':'';}
+  }
+
+  function configureYoutubeClient(clientId){
+    const id=String(clientId||'').trim();
+    state.clientId=id;
+    if(!id){state.tokenClient=null;return false;}
+    if(!validClientId(id)) throw new Error('Die Google OAuth Client-ID sieht ungültig aus.');
+    if(!(window.google?.accounts?.oauth2)) throw new Error('Google OAuth ist noch nicht geladen. Bitte Seite neu laden.');
+    state.tokenClient=window.google.accounts.oauth2.initTokenClient({
+      client_id:id,
       scope:'https://www.googleapis.com/auth/youtube.upload',
       include_granted_scopes:true,
       callback:(resp)=>{
-        const help=document.querySelector('#ytConnectHelp');
+        clearTimeout(state.oauthTimeout);
         if(resp?.error){
-          state.accessToken=''; sessionStorage.removeItem('yt_access_token'); updateYtStatus();
-          const msg=`YouTube OAuth-Fehler: ${resp.error}${resp.error_description?` – ${resp.error_description}`:''}`;
-          if(help)help.textContent=msg; toast(msg); setYoutubeButton(false); return;
+          const detail=resp.error_description||resp.error||'Unbekannter OAuth-Fehler';
+          showYoutubeHelp(`YouTube OAuth: ${detail}`,'error');
+          toast(`YouTube OAuth: ${detail}`);
+          state.accessToken='';
+          updateYtStatus(false);
+          setYoutubeButton('Mit YouTube verbinden',false);
+          return;
         }
         if(!resp?.access_token){
-          state.accessToken=''; sessionStorage.removeItem('yt_access_token'); updateYtStatus();
           const msg='Google hat kein Zugriffstoken zurückgegeben.';
-          if(help)help.textContent=msg; toast(msg); setYoutubeButton(false); return;
+          showYoutubeHelp(msg,'error');
+          toast(msg);
+          setYoutubeButton('Mit YouTube verbinden',false);
+          return;
         }
         state.accessToken=resp.access_token;
         sessionStorage.setItem('yt_access_token',resp.access_token);
-        updateYtStatus();
-        if(help)help.textContent='YouTube ist verbunden.';
-        setYoutubeButton(false); toast('YouTube verbunden.');
+        updateYtStatus(true);
+        showYoutubeHelp('YouTube ist verbunden.','good');
+        toast('YouTube verbunden.');
+        setYoutubeButton('YouTube verbunden',false);
+      },
+      error_callback:(err)=>{
+        clearTimeout(state.oauthTimeout);
+        const type=err?.type||'oauth_error';
+        const detail=err?.message||'';
+        let msg='Google OAuth wurde nicht abgeschlossen.';
+        if(type==='popup_failed_to_open') msg='Google-Popup wurde vom Browser blockiert. Erlaube Popups für felixsp2003.github.io und klicke erneut.';
+        else if(type==='popup_closed') msg='Google-Anmeldung wurde geschlossen.';
+        else if(detail) msg=`Google OAuth: ${detail}`;
+        showYoutubeHelp(msg,'error');
+        toast(msg);
+        setYoutubeButton('Mit YouTube verbinden',false);
       }
     });
-    tokenClient.__clientId=clientId;
-    state.tokenClient=tokenClient;
-    return tokenClient;
+    return true;
   }
-  function prepareGoogleOAuth(){
-    try{
-      if(window.google?.accounts?.oauth2){
-        if(getClientIdFromField()) buildGoogleTokenClient();
-        return;
-      }
-      let attempts=0;
-      const timer=setInterval(()=>{
-        attempts++;
-        try{
-          if(window.google?.accounts?.oauth2){
-            if(getClientIdFromField()) buildGoogleTokenClient();
-            clearInterval(timer);
-          }else if(attempts>=120){clearInterval(timer);}
-        }catch{ if(attempts>=120)clearInterval(timer); }
-      },100);
-    }catch{}
-  }
+
   function initYoutube(){
-    const help=document.querySelector('#ytConnectHelp');
-    if(help)help.textContent='';
-    const clientId=getClientIdFromField();
-    if(!clientId){const msg='Bitte zuerst die Google OAuth Client-ID in Einstellungen eintragen.';if(help)help.textContent=msg;toast(msg);return false;}
-    if(!validGoogleClientId(clientId)){const msg='Die Google OAuth Client-ID sieht ungültig aus.';if(help)help.textContent=msg;toast(msg);return false;}
-    if(!window.google?.accounts?.oauth2){const msg='Google OAuth wurde nicht geladen. Prüfe Internetverbindung und Brave/Adblocker.';if(help)help.textContent=msg;toast(msg);return false;}
+    const help=$('#ytConnectHelp');
+    const btn=$('#connectYoutube');
+    const entered=String($('#clientId')?.value||'').trim();
+    if(entered){state.clientId=entered;localStorage.setItem('yt_client_id',entered);}
+    const clientId=String(state.clientId||'').trim();
+    if(help) help.textContent='';
+    if(!clientId){
+      const msg='Bitte zuerst die Google OAuth Client-ID in Einstellungen eintragen.';
+      showYoutubeHelp(msg,'error'); toast(msg); return;
+    }
+    if(!window.google?.accounts?.oauth2){
+      const msg='Google OAuth ist noch nicht geladen. Deaktiviere ggf. Shields/Adblock für diese Website und lade die Seite neu.';
+      showYoutubeHelp(msg,'error'); toast(msg); return;
+    }
     try{
-      if(!state.tokenClient||state.tokenClient.__clientId!==clientId)buildGoogleTokenClient();
-      setYoutubeButton(true);
-      // IMPORTANT: this call must stay in the synchronous user-gesture stack.
-      state.tokenClient.requestAccessToken({prompt:'consent'});
-      return true;
+      setYoutubeButton('Google wird geöffnet…',true);
+      configureYoutubeClient(clientId);
+      showYoutubeHelp('Google-Anmeldung wird geöffnet… Wenn du bereits bestätigt hast, wird der Zugriff ohne erneute Einwilligung angefordert.');
+      state.oauthTimeout=setTimeout(()=>{
+        if(!state.accessToken){
+          const msg='Google OAuth antwortet nicht. Prüfe, ob das Google-Popup blockiert wird, und erlaube Popups für diese Website.';
+          showYoutubeHelp(msg,'error');
+          setYoutubeButton('Mit YouTube verbinden',false);
+          toast(msg);
+        }
+      },15000);
+      // IMPORTANT: no await / promise before this line. This is the direct click gesture.
+      state.tokenClient.requestAccessToken({prompt:''});
     }catch(err){
-      setYoutubeButton(false);
+      clearTimeout(state.oauthTimeout);
       const msg=err?.message||String(err);
-      if(help)help.textContent=msg; toast(msg); return false;
+      showYoutubeHelp(msg,'error');
+      toast(msg);
+      setYoutubeButton('Mit YouTube verbinden',false);
+    }
+  }
+
+  function reauthorizeYoutube(){
+    const help=$('#ytConnectHelp');
+    const btn=$('#connectYoutube');
+    try{
+      if(!state.tokenClient){
+        const entered=String($('#clientId')?.value||'').trim();
+        if(entered){state.clientId=entered;localStorage.setItem('yt_client_id',entered);}
+        configureYoutubeClient(state.clientId);
+      }
+      if(!state.tokenClient){throw new Error('Google OAuth ist noch nicht vorbereitet.');}
+      setYoutubeButton('Berechtigung wird geöffnet…',true);
+      if(help) help.textContent='Google fragt die YouTube-Berechtigung erneut ab…';
+      state.oauthTimeout=setTimeout(()=>{
+        if(!state.accessToken){
+          const msg='Google antwortet nicht. Öffne Popups für felixsp2003.github.io und versuche es erneut.';
+          showYoutubeHelp(msg,'error');
+          setYoutubeButton('Mit YouTube verbinden',false);
+          toast(msg);
+        }
+      },12000);
+      state.tokenClient.requestAccessToken({prompt:'consent'});
+    }catch(err){
+      const msg=err?.message||String(err);
+      showYoutubeHelp(msg,'error');
+      toast(msg);
+      setYoutubeButton('Mit YouTube verbinden',false);
     }
   }
   window.connectYouTubeNow=initYoutube;
-
+  window.reauthorizeYouTube=reauthorizeYoutube;
+  function updateYtStatus(){const connected=!!state.accessToken;$('#ytStatus').textContent=connected?'● Verbunden':'● Nicht verbunden';$('#ytStatus').style.color=connected?'#69e1af':'#7f7488';}
   async function uploadYoutube(file,title,token,onProgress){
     if(!file||!token)throw new Error('YouTube nicht verbunden.');
     const safeTitle=String(title||file.name||'Grand RP POV').replace(/\.[^.]+$/,'').slice(0,100);
@@ -605,17 +653,17 @@
     if(!r.ok)throw new Error((await r.text()).slice(0,500));
   }
   function setupSettings(){
-    state.settings.frames=Number(localStorage.getItem('v31_frames')||24);state.settings.window=Number(localStorage.getItem('v31_window')||4.5);state.settings.step=Number(localStorage.getItem('v31_step')||.5);
+    state.settings.frames=Number(localStorage.getItem('v29_frames')||24);state.settings.window=Number(localStorage.getItem('v29_window')||4.5);state.settings.step=Number(localStorage.getItem('v29_step')||.5);
     $('#frameCount').value=state.settings.frames;$('#refineWindow').value=state.settings.window;$('#refineStep').value=state.settings.step;
-    $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v31_frames',state.settings.frames)};
-    $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v31_window',state.settings.window)};
-    $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v31_step',state.settings.step)};
-    $('#clientId').addEventListener('input',e=>{const v=String(e.target.value||'').trim();state.clientId=v;localStorage.setItem('yt_client_id',v);});
-    $('#clientId').addEventListener('change',e=>{const v=String(e.target.value||'').trim();state.clientId=v;localStorage.setItem('yt_client_id',v);});
-    $('#connectYoutube').onclick=(ev)=>{ev.preventDefault();ev.stopPropagation();initYoutube();};
-    $('#disconnectYoutube').onclick=()=>{state.accessToken='';sessionStorage.removeItem('yt_access_token');updateYtStatus();const h=$('#ytConnectHelp');if(h)h.textContent='YouTube-Verbindung entfernt.';};
-    if($('#reloadBtn'))$('#reloadBtn').onclick=()=>location.reload();
-    setTimeout(prepareGoogleOAuth,0);
+    $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v29_frames',state.settings.frames)};
+    $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v29_window',state.settings.window)};
+    $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v29_step',state.settings.step)};
+    $('#clientId').addEventListener('input',e=>{const v=String(e.target.value||'').trim();state.clientId=v;localStorage.setItem('yt_client_id',v);try{if(v)configureYoutubeClient(v);}catch(err){const help=$('#ytConnectHelp');if(help)help.textContent=err.message;}});
+    $('#clientId').addEventListener('change',e=>{const v=String(e.target.value||'').trim();state.clientId=v;localStorage.setItem('yt_client_id',v);try{if(v)configureYoutubeClient(v);}catch(err){const help=$('#ytConnectHelp');if(help)help.textContent=err.message;}});
+    $('#connectYoutube').onclick=initYoutube;
+    const reauth=$('#reauthorizeYoutube'); if(reauth) reauth.onclick=reauthorizeYoutube;
+    $('#disconnectYoutube').onclick=()=>{state.accessToken='';state.tokenClient=null;sessionStorage.removeItem('yt_access_token');updateYtStatus();$('#ytConnectHelp').textContent='YouTube-Verbindung entfernt.';};
+    try{if(state.clientId)configureYoutubeClient(state.clientId);}catch(err){const help=$('#ytConnectHelp');if(help)help.textContent=err.message;}
     $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen?'))return;state.entries=[];state.queue=[];saveMeta();await clearDB();renderArchive();renderCases();renderCsv();renderQueue();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }

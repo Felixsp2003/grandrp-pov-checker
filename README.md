@@ -1,10 +1,11 @@
-Grand RP POV Checker V30
+Grand RP POV Checker V33
 
-YouTube OAuth fixes:
-- Google Identity Services is loaded synchronously before app.js.
-- OAuth waits for google.accounts.oauth2 and shows a visible status/error.
-- The button calls requestAccessToken() from the user's click, which is what opens Google's consent/login popup.
-- app.js and CSS use cache-buster v30.
-- connect handler no longer starts POV processing; it only authenticates YouTube.
+YouTube OAuth V33:
+- Uses Google Identity Services token client.
+- Main connect button requests an access token with prompt="" after the user has already granted access.
+- A separate re-authorize action can force consent.
+- No await occurs between the button click and requestAccessToken().
+- Visible diagnostic status is shown below the YouTube button.
+- Cache-buster is V33 in index.html.
 
-Workflow remains: YouTube upload -> 100% -> local OCR -> manual review -> final filename/title.
+Workflow: YouTube upload -> 100% -> local OCR -> manual review -> final filename/title.
