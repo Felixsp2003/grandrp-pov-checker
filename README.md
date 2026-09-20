@@ -1,2 +1,6 @@
-# Grand RP POV Checker V6
-Browser-based POV checker. Uploads are processed locally; OCR checks the last 40 seconds and separates target ID, reason, SC, server and date. Uncertain OCR is sent to manual review. YouTube upload uses OAuth and unlisted privacy.
+Grand RP POV Checker V8
+- 60 default OCR frames (20-120 configurable)
+- Multi-frame consensus
+- Separate ID/Grund/SC parsing including wrapped SC and Social Club ID layouts
+- Yellow server badge detection with consensus; uncertain server remains blank for manual confirmation
+- YouTube unlisted upload support

@@ -26,35 +26,50 @@ function loaded(v){return new Promise((res,rej)=>{let done=false;const ok=()=>{i
 function seek(v,t){return new Promise((res,rej)=>{let done=false;const ok=()=>{if(done)return;done=true;cleanup();res()};const bad=()=>{if(done)return;done=true;cleanup();rej(new Error('Video-Suche Timeout'))};const cleanup=()=>v.removeEventListener('seeked',ok);v.addEventListener('seeked',ok,{once:true});v.currentTime=Math.min(Math.max(0,t),Math.max(0,v.duration-.05));setTimeout(bad,12000)})}
 function crop(v,x,y,w,h,scale=1.35){const c=document.createElement('canvas'),vw=v.videoWidth,vh=v.videoHeight;c.width=Math.max(1,Math.round(vw*w*scale));c.height=Math.max(1,Math.round(vh*h*scale));const ctx=c.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.drawImage(v,Math.round(vw*x),Math.round(vh*y),Math.round(vw*w),Math.round(vh*h),0,0,c.width,c.height);return c}
 function preprocess(src,mode='normal'){const c=document.createElement('canvas');c.width=src.width;c.height=src.height;const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(src,0,0);if(mode==='normal')return c;const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;for(let i=0;i<d.length;i+=4){const r=d[i],g=d[i+1],b=d[i+2];let v=.299*r+.587*g+.114*b;if(mode==='high')v=v<105?0:255;else if(mode==='dark')v=v<135?0:255;else if(mode==='light')v=v<175?0:255;d[i]=d[i+1]=d[i+2]=v}ctx.putImageData(im,0,0);return c}
-function yellowDigitCrop(v){
-  const base=crop(v,.955,.012,.045,.065,5.0),ctx=base.getContext('2d',{willReadFrequently:true});
+function serverDigitCrops(v){
+  // Grand-style HUD: server badge is the small yellow badge at the extreme top-right.
+  // Detect the yellow badge by color/shape instead of OCR'ing the whole HUD.
+  const base=crop(v,.88,0,.12,.14,4.5),ctx=base.getContext('2d',{willReadFrequently:true});
   const im=ctx.getImageData(0,0,base.width,base.height),d=im.data,w=base.width,h=base.height;
   const mask=new Uint8Array(w*h);
-  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
     const i=(y*w+x)*4,r=d[i],g=d[i+1],b=d[i+2];
-    mask[y*w+x]=(r>150&&g>125&&b<120&&r>b*1.45&&g>b*1.25)?1:0;
+    mask[y*w+x]=(r>155&&g>120&&b<120&&r>b*1.5&&g>b*1.25)?1:0;
   }
-  const seen=new Uint8Array(w*h),comps=[];
-  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
-    const p=y*w+x; if(!mask[p]||seen[p]) continue;
-    const q=[p]; seen[p]=1; let minX=x,maxX=x,minY=y,maxY=y,n=0;
+  const seen=new Uint8Array(w*h), comps=[];
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+    const p=y*w+x;if(!mask[p]||seen[p])continue;
+    const q=[p];seen[p]=1;let minX=x,maxX=x,minY=y,maxY=y,n=0;
     for(let qi=0;qi<q.length;qi++){
-      const z=q[qi],zx=z%w,zy=(z-zx)/w; n++;
-      if(zx<minX)minX=zx;if(zx>maxX)maxX=zx;if(zy<minY)minY=zy;if(zy>maxY)maxY=zy;
-      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
-        const nx=zx+dx,ny=zy+dy;if(nx<0||ny<0||nx>=w||ny>=h)continue;
-        const np=ny*w+nx;if(mask[np]&&!seen[np]){seen[np]=1;q.push(np)}
-      }
+      const z=q[qi],zx=z%w,zy=(z-zx)/w;n++;minX=Math.min(minX,zx);maxX=Math.max(maxX,zx);minY=Math.min(minY,zy);maxY=Math.max(maxY,zy);
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const nx=zx+dx,ny=zy+dy;if(nx<0||ny<0||nx>=w||ny>=h)continue;const np=ny*w+nx;if(mask[np]&&!seen[np]){seen[np]=1;q.push(np)}}
     }
-    if(n>25) comps.push({n,minX,maxX,minY,maxY});
+    const cw=maxX-minX+1,ch=maxY-minY+1,fill=n/(cw*ch);
+    if(n>80&&cw>=12&&ch>=12&&cw<=base.width*.7&&ch<=base.height*.7&&cw/ch>.55&&cw/ch<1.8&&fill>.28){
+      comps.push({n,minX,maxX,minY,maxY,fill});
+    }
   }
-  comps.sort((a,b)=>b.n-a.n);
-  if(!comps.length)return base;
-  const cands=comps.filter(o=>o.minX>w*.45),box=cands[0]||comps[0],pad=12;
-  const c=document.createElement('canvas');
-  const sx=Math.max(0,box.minX-pad),sy=Math.max(0,box.minY-pad),ex=Math.min(w,box.maxX+pad+1),ey=Math.min(h,box.maxY+pad+1);
-  c.width=ex-sx;c.height=ey-sy; c.getContext('2d').putImageData(ctx.getImageData(sx,sy,c.width,c.height),0,0); return c;
+  comps.sort((a,b)=>a.minY-b.minY||b.n-a.n);
+  const out=[];
+  for(const box of comps.slice(0,5)){
+    const pad=Math.max(10,Math.round(Math.min(box.maxX-box.minX+1,box.maxY-box.minY+1)*.45));
+    const sx=Math.max(0,box.minX-pad),sy=Math.max(0,box.minY-pad),ex=Math.min(w,box.maxX+pad+1),ey=Math.min(h,box.maxY+pad+1);
+    const c=document.createElement('canvas');c.width=ex-sx;c.height=ey-sy;c.getContext('2d').putImageData(ctx.getImageData(sx,sy,c.width,c.height),0,0);out.push(c);
+  }
+  // Fallback: a deliberately narrow fixed crop around the badge, not the rest of the HUD.
+  if(!out.length)out.push(crop(v,.955,.004,.04,.045,7));
+  return out;
 }
+function serverVotesFromTexts(texts){
+  const vals=[];
+  for(const t of texts){
+    const s=String(t||'').replace(/[^1-4]/g,'');
+    if(s.length===1)vals.push(s);
+    else if(/\b[1-4]\b/.test(t))vals.push(t.match(/\b([1-4])\b/)?.[1]||'');
+  }
+  return vals.filter(Boolean);
+}
+
 function normalizeOcr(s){
   return String(s||'')
     .replace(/\r/g,'')
@@ -81,12 +96,88 @@ function cleanText(s){
 
 function normalizeId(s){return String(s||'').toUpperCase().replace(/[OIQL]/g,'1').replace(/[Z]/g,'2').replace(/[S]/g,'5').replace(/[G]/g,'6').replace(/[T]/g,'7').replace(/[B]/g,'8').replace(/[^0-9]/g,'')}
 function normalizeHex(s){return String(s||'').replace(/[OoQq]/g,'0').replace(/[IiLl|]/g,'1').replace(/[Ss]/g,'5').replace(/[Zz]/g,'2').replace(/[Gg]/g,'6').replace(/[^0-9A-Fa-f]/g,'')}
+function extractScFromText(src){
+  const m=src.match(/(?:\bSC\s*[:\-]?|Social\s+Club\s+ID)\s*([\s\S]*)/i);
+  if(!m)return '';
+  let tail=m[1];
+  // Only inspect a short window after the marker. This prevents IPs and later chat lines from contaminating the SC.
+  tail=tail.split(/\n\s*(?:\[AC\]|\[A\]|Administrator\b|Grund\s*:)/i)[0];
+  const compact=normalizeHex(tail);
+  const exact=compact.match(/[0-9A-F]{40}/i);
+  if(exact)return exact[0].toLowerCase();
+  if(compact.length>=36 && compact.length<=44)return compact.slice(0,40).toLowerCase();
+  // OCR can split the 40-character SC over two lines.
+  const lines=tail.split(/\n/).map(x=>normalizeHex(x)).filter(Boolean);
+  let joined='';
+  for(const line of lines){joined+=line;if(joined.length>=40)break}
+  const j=joined.match(/[0-9A-F]{40}/i);
+  return j?j[0].toLowerCase():'';
+}
 function bestVote(values,normalizer,minLen=1){const vals=values.map(v=>normalizer(v)).filter(v=>v&&v.length>=minLen);if(!vals.length)return'';const counts=new Map();for(const v of vals)counts.set(v,(counts.get(v)||0)+1);return [...counts.entries()].sort((a,b)=>b[1]-a[1]||b[0].length-a[0].length)[0][0]}
 function inferTypes(reason){const r=String(reason||'').toLowerCase(),out=[];if(/pc\s*[- ]?check/.test(r))out.push('pccheck');if(/cheat|cheater|cheating/.test(r))out.push('cheater');if(/soc(?:ial)?\s*[- ]?ban|soc[- ]?ban/.test(r))out.push('socban');if(/hard\s*ban|hardban/.test(r))out.push('hardban');if(/negativ/.test(r))out.push('negativ');return out}
 async function ocr(worker,canvas,params={}){await worker.setParameters({tessedit_pageseg_mode:params.psm??6,tessedit_char_whitelist:params.whitelist||'',preserve_interword_spaces:'1',user_defined_dpi:'300'});const r=await worker.recognize(canvas);return r.data||{text:''}}
-async function analyzeVideo(video,duration,onProgress){const frames=Math.max(12,Math.min(60,Number(localStorage.getItem('frame_count')||30)));const start=Math.max(0,duration-40),span=Math.max(.1,duration-start);const worker=await Tesseract.createWorker('eng',1);const ids=[],reasons=[],scs=[],servers=[],dates=[];try{for(let i=0;i<frames;i++){await seek(video,start+span*((i+.35)/frames));const left=preprocess(crop(video,0,.08,.68,.25,2.2),'normal');const left2=preprocess(left,'high');const leftData=await ocr(worker,left,{psm:6});const leftData2=await ocr(worker,left2,{psm:6});const texts=[leftData.text||'',leftData2.text||''];const parsed=parseSingleFrame(texts);if(parsed.id)ids.push(parsed.id);if(parsed.reason)reasons.push(parsed.reason);if(parsed.sc)scs.push(parsed.sc);const serverCanvas=yellowDigitCrop(video);const sd=await ocr(worker,serverCanvas,{psm:10,whitelist:'1234'});const sd2=await ocr(worker,preprocess(serverCanvas,'high'),{psm:10,whitelist:'1234'});const srv=(sd.text+' '+sd2.text).match(/[1-4]/)?.[0]||'';if(srv)servers.push(srv);const dateCanvas=preprocess(crop(video,.86,.87,.14,.13,3),'normal');const dd=await ocr(worker,dateCanvas,{psm:7,whitelist:'0123456789./-'});const dt=extractDate(dd.text||'');if(dt)dates.push(dt);onProgress(15+(i+1)/frames*80,`Präzisions-OCR · Frame ${i+1}/${frames}`)} }finally{await worker.terminate()}const id=bestVote(ids,normalizeId,3),reason=bestVote(reasons,cleanText,3),sc=bestVote(scs,normalizeHex,16),server=bestVote(servers,normalizeId,1),date=bestVote(dates,x=>x,10)||'';const types=inferTypes(reason);const confidence={id:voteConfidence(ids,normalizeId,id),reason:voteConfidence(reasons,cleanText,reason),sc:voteConfidence(scs,normalizeHex,sc),server:voteConfidence(servers,normalizeId,server),date:voteConfidence(dates,x=>x,date)};const complete=!!(id&&reason&&sc&&server&&date&&confidence.id>=.6&&confidence.reason>=.6&&confidence.sc>=.6&&confidence.server>=.6&&confidence.date>=.5);return{id,reason,sc,server,date,types,confidence,complete,found:complete}}
+async function analyzeVideo(video,duration,onProgress){
+  const frames=Math.max(20,Math.min(120,Number(localStorage.getItem('frame_count')||60)));
+  const start=Math.max(0,duration-40),span=Math.max(.1,duration-start);
+  const worker=await Tesseract.createWorker('eng',1);
+  const ids=[],reasons=[],scs=[],servers=[],dates=[];
+  try{
+    for(let i=0;i<frames;i++){
+      await seek(video,start+span*((i+.27)/frames));
+      // Bann text: use two scales and two thresholds. The UI may wrap IP/SC onto the next line.
+      const left=preprocess(crop(video,0,.07,.70,.29,2.8),'normal');
+      const left2=preprocess(left,'high');
+      const left3=preprocess(left,'dark');
+      const [a,b,c]=await Promise.all([
+        ocr(worker,left,{psm:6}),ocr(worker,left2,{psm:6}),ocr(worker,left3,{psm:11})
+      ]);
+      const texts=[a.text||'',b.text||'',c.text||''];
+      for(const text of texts){
+        const parsed=parseSingleFrame([text]);
+        if(parsed.id)ids.push(parsed.id);
+        if(parsed.reason)reasons.push(parsed.reason);
+        if(parsed.sc)scs.push(parsed.sc);
+      }
+      // Server: detect the actual yellow badge first, then require agreement between several OCR modes.
+      const serverCrops=serverDigitCrops(video);
+      for(const canvas of serverCrops.slice(0,3)){
+        const [s1,s2,s3]=await Promise.all([
+          ocr(worker,canvas,{psm:10,whitelist:'1234'}),
+          ocr(worker,preprocess(canvas,'high'),{psm:10,whitelist:'1234'}),
+          ocr(worker,preprocess(canvas,'dark'),{psm:13,whitelist:'1234'})
+        ]);
+        const sv=serverVotesFromTexts([s1.text||'',s2.text||'',s3.text||'']);
+        servers.push(...sv);
+      }
+      const dateCanvas=preprocess(crop(video,.84,.86,.16,.14,3.5),'normal');
+      const [d1,d2]=await Promise.all([ocr(worker,dateCanvas,{psm:7,whitelist:'0123456789./-'}),ocr(worker,preprocess(dateCanvas,'dark'),{psm:7,whitelist:'0123456789./-'})]);
+      const dt=extractDate((d1.text||'')+'\n'+(d2.text||''));if(dt)dates.push(dt);
+      onProgress(10+(i+1)/frames*85,`Präzisions-OCR · Frame ${i+1}/${frames}`)
+    }
+  }finally{await worker.terminate()}
+  const id=bestVote(ids,normalizeId,3),reason=bestVote(reasons,cleanText,3),sc=bestVote(scs,normalizeHex,40),date=bestVote(dates,x=>x,10)||'';
+  // Never silently choose a server from weak/contradictory OCR. Require a clear vote.
+  const serverCounts=new Map();for(const v of servers)serverCounts.set(v,(serverCounts.get(v)||0)+1);
+  const serverSorted=[...serverCounts.entries()].sort((a,b)=>b[1]-a[1]);
+  const server=serverSorted.length&&serverSorted[0][1]>=Math.max(3,Math.ceil(servers.length*.55))?serverSorted[0][0]:'';
+  const types=inferTypes(reason);
+  const confidence={id:voteConfidence(ids,normalizeId,id),reason:voteConfidence(reasons,cleanText,reason),sc:voteConfidence(scs,normalizeHex,sc),server:server?serverSorted[0][1]/Math.max(1,servers.length):0,date:voteConfidence(dates,x=>x,date)};
+  const complete=!!(id&&reason&&sc&&server&&date&&confidence.id>=.6&&confidence.reason>=.6&&confidence.sc>=.6&&confidence.server>=.55&&confidence.date>=.5);
+  return{id,reason,sc,server,date,types,confidence,complete,found:complete}
+}
 function voteConfidence(values,normalizer,winner){const vals=values.map(v=>normalizer(v)).filter(Boolean);if(!vals.length||!winner)return 0;return vals.filter(v=>v===winner).length/vals.length}
-function parseSingleFrame(texts){const src=normalizeOcr(texts.join('\n'));let id='';let reason='';let sc='';let m=src.match(/Administrator\s+[^\n\[]*\[(\d{1,8})\]\s+hat\s+[^\n\[]*\[(\d{1,8})\]/i);if(m)id=m[2];if(!id){m=src.match(/hat\s+[^\n\[]*\[(\d{1,8})\]/i);if(m)id=m?.[1]||''}let r=src.match(/Grund\s*:\s*([^\n\r]*?)(?=\s+(?:\[?A\]?\s*)?IP\s*:|\s+SC\s*:|$)/i);if(r)reason=cleanText(r[1]);if(!reason){r=src.match(/Grund\s*:\s*([^\n\r]{2,100})/i);if(r)reason=cleanText(r[1])}const scPos=src.search(/\bSC\s*[:\-]?/i);if(scPos>=0){const lines=src.slice(scPos).split(/\n/);const candidates=lines.map(line=>normalizeHex(line)).filter(v=>v.length>=24&&v.length<=64).sort((a,b)=>b.length-a.length);if(candidates.length)sc=candidates[0]}return{id,reason,sc}}
+function parseSingleFrame(texts){
+  const src=normalizeOcr(texts.join('\n'));let id='',reason='',sc='';
+  let m=src.match(/Administrator\s+[^\[]*\[(\d{1,8})\]\s+hat\s+[^\[]*\[(\d{1,8})\]/i);
+  if(m)id=normalizeId(m[2]);
+  if(!id){m=src.match(/\bhat\s+[^\[]*\[(\d{1,8})\]/i);if(m)id=normalizeId(m[1]);}
+  // Grund may wrap before IP/SC. Capture everything until one of those explicit markers.
+  let r=src.match(/Grund\s*:\s*([\s\S]*?)(?=\s*(?:\[?A\]?\s*)?IP\s*:|\s*SC\s*:|\s*Social\s+Club\s+ID\b|$)/i);
+  if(r)reason=cleanText(r[1]);
+  if(!reason){r=src.match(/Grund\s*:\s*([^\n]{2,100})/i);if(r)reason=cleanText(r[1]);}
+  sc=extractScFromText(src);
+  return{id,reason,sc}
+}
 function extractDate(s){let m=s.match(/\b(20\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})\b/);if(m)return`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;m=s.match(/\b(\d{1,2})[.\-/](\d{1,2})[.\-/](20\d{2})\b/);return m?`${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`:''}
 function openEditor(item){state.editing=item;state.selectedTypes=[...new Set([...(item.types||[]), ...inferTypes((item.result||{}).reason||item.reason||'')])];const p=item.result||{};$('#modalFile').textContent=item.file.name;$('#targetId').value=p.id||item.id||'';$('#reason').value=p.reason||item.reason||'';$('#sc').value=p.sc||item.sc||'';$('#server').value=p.server||item.server||'';$('#date').value=p.date||item.date||today();$('#perma').checked=!!item.perma;$('#notBanned').checked=!!item.notBanned;$$('#banTypes .chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.includes(c.dataset.value)));$('#ocrWarning').classList.toggle('hidden',!!p.complete);updateTitle();$('#editorModal').classList.remove('hidden')}
 function closeEditor(){state.editing=null;$('#editorModal').classList.add('hidden');renderQueue();renderCases()}
@@ -103,7 +194,7 @@ $('#archiveGrid').innerHTML=entries.map(x=>`<article class="entry"><div class="t
 $$('.del-entry').forEach(b=>b.onclick=async()=>{const x=state.entries.find(e=>e.createdAt===b.dataset.id);if(x){state.entries=state.entries.filter(e=>e.createdAt!==b.dataset.id);saveMeta();if(x.videoKey)await delVideo(x.videoKey);if(x.videoUrl)URL.revokeObjectURL(x.videoUrl);renderArchive()}});$$('.edit-entry').forEach(b=>b.onclick=async()=>{const x=state.entries.find(e=>e.createdAt===b.dataset.id);if(x){const f=await getVideo(x.videoKey);if(!f){toast('POV-Datei wurde lokal nicht gefunden.');return}openEditor({...x,id:x.videoKey,file:f,result:{...x,complete:true},types:x.types})}})}
 function renderCases(){const bad=state.queue.filter(x=>x.result&&!x.result.complete);$('#casesList').innerHTML=bad.length?bad.map(x=>`<div class="case-row"><div><strong>${esc(x.file.name)}</strong><small>OCR: ID ${x.result.id?'✓':'×'} · Grund ${x.result.reason?'✓':'×'} · SC ${x.result.sc?'✓':'×'} · Server ${x.result.server?'✓':'×'} · Datum ${x.result.date?'✓':'×'}</small></div><button class="mini-btn edit-q" data-id="${x.id}">Daten ergänzen</button></div>`).join(''):'<div class="empty"><h2>Keine offenen Verdachtsfälle</h2><p>Alle bisher erkannten Fälle sind geprüft.</p></div>';$$('.edit-q').forEach(b=>b.onclick=()=>{const x=state.queue.find(x=>x.id===b.dataset.id);if(x)openEditor(x)})}
 function toast(t){const el=$('#toast');el.textContent=t;el.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove('show'),4000)}
-$('#clientId').value=state.clientId;$('#clientId').oninput=e=>{state.clientId=e.target.value.trim();localStorage.setItem('yt_client_id',state.clientId);initGoogle()};$('#frameCount').value=localStorage.getItem('frame_count')||30;$('#frameCount').onchange=e=>localStorage.setItem('frame_count',e.target.value);
+$('#clientId').value=state.clientId;$('#clientId').oninput=e=>{state.clientId=e.target.value.trim();localStorage.setItem('yt_client_id',state.clientId);initGoogle()};$('#frameCount').value=localStorage.getItem('frame_count')||60;$('#frameCount').onchange=e=>localStorage.setItem('frame_count',e.target.value);
 function initGoogle(){if(!window.google?.accounts?.oauth2||!state.clientId)return;state.tokenClient=google.accounts.oauth2.initTokenClient({client_id:state.clientId,scope:'https://www.googleapis.com/auth/youtube.upload',callback:r=>{if(r.error)return toast('Google-Anmeldung abgebrochen.');state.accessToken=r.access_token;sessionStorage.setItem('yt_access_token',r.access_token);updateYtStatus()}})}
 $('#connectYoutube').onclick=()=>{initGoogle();if(!state.tokenClient)return toast('Bitte zuerst die Google OAuth Client-ID eintragen.');state.tokenClient.requestAccessToken({prompt:'consent'})};$('#disconnectYoutube').onclick=()=>{state.accessToken='';sessionStorage.removeItem('yt_access_token');updateYtStatus()};function updateYtStatus(){$('#ytStatus').innerHTML=state.accessToken?'<span class="status-dot"></span>YouTube verbunden':'<span class="status-dot muted-dot"></span>Nicht verbunden'}setTimeout(initGoogle,1200);
 $('#clearLocal').onclick=async()=>{if(!confirm('Wirklich alle lokalen Archivdaten und POV-Dateien löschen?'))return;state.entries=[];state.queue=[];localStorage.removeItem(META_KEY);await clearDB();renderArchive();renderQueue();renderCases();toast('Lokales Archiv gelöscht.')};
