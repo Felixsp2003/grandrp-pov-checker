@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V49';
+  const BUILD='V50';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -308,7 +308,7 @@
   if(isNode){module.exports={ALLOWED_REASONS,compact,similarity,normalizeHexLoose,normalizeIdToken,canonicalReason,parseTargetId,parseReason,extractScOrdered,extractScCandidatesFromString,extractHexCandidateAnyText,consensusHex,extractServerFromOcr,extractDate,serverVote,dateVote,clampId,validDate};return;}
 
   const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-  const state={entries:[],queue:[],filter:'all',editing:null,worker:null,specialWorker:null,accessToken:localStorage.getItem('yt_access_token')||sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:24,window:4.5,step:0.5},selectedTypes:new Set()};
+  const state={entries:[],queue:[],filter:'all',editing:null,worker:null,specialWorker:null,accessToken:localStorage.getItem('yt_access_token')||sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:24,window:4.5,step:0.5},selectedTypes:new Set(),tokenExpiresAt:Number(localStorage.getItem('yt_access_expires_at_v50')||0),tokenRefreshPromise:null};
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
 
   function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2600);}
@@ -697,6 +697,7 @@
       if(!state.accessToken||!state.clientId){item.status='YouTube zuerst verbinden';renderQueue();continue;}
       item.processing=true;
       try{
+        await ensureYoutubeTokenFresh();
         // Store the original file in IndexedDB immediately so the same-origin manual picker can open it later.
         const sourceSize=await verifyLocalFile(item.file,0,'Ausgewählte POV');
         await putVideo(item.id,item.file);
@@ -737,6 +738,82 @@
     if(help){help.textContent=text;help.style.color=kind==='error'?'#ff8ebd':kind==='good'?'#69e1af':'';}
   }
 
+  function persistYoutubeToken(token,expiresIn=0){
+    state.accessToken=String(token||'');
+    if(state.accessToken){
+      localStorage.setItem('yt_access_token',state.accessToken);
+      sessionStorage.setItem('yt_access_token',state.accessToken);
+      if(Number(expiresIn)>0){
+        state.tokenExpiresAt=Date.now()+Math.max(60,Number(expiresIn)-30)*1000;
+        localStorage.setItem('yt_access_expires_at_v50',String(state.tokenExpiresAt));
+      }
+      updateYtStatus(true);
+    }
+    return state.accessToken;
+  }
+  function clearYoutubeToken(){
+    state.accessToken=''; state.tokenExpiresAt=0;
+    localStorage.removeItem('yt_access_token');sessionStorage.removeItem('yt_access_token');
+    localStorage.removeItem('yt_access_expires_at_v50');
+    updateYtStatus(false);
+  }
+  async function waitForGoogleGIS(){
+    if(window.google?.accounts?.oauth2)return true;
+    const started=Date.now();
+    while(Date.now()-started<8000){
+      await new Promise(r=>setTimeout(r,100));
+      if(window.google?.accounts?.oauth2)return true;
+    }
+    return false;
+  }
+  async function refreshYoutubeToken(silent=true){
+    if(state.tokenRefreshPromise)return state.tokenRefreshPromise;
+    state.tokenRefreshPromise=(async()=>{
+      const ready=await waitForGoogleGIS();
+      if(!ready)throw new Error('Google Identity Services konnte nicht geladen werden. Bitte Seite neu laden und YouTube erneut verbinden.');
+      const clientId=String(state.clientId||localStorage.getItem('yt_client_id')||'').trim();
+      if(!validClientId(clientId))throw new Error('Google OAuth Client-ID fehlt oder ist ungültig.');
+      return await new Promise((resolve,reject)=>{
+        let finished=false;
+        const done=(fn,val)=>{if(finished)return;finished=true;fn(val);};
+        const callback=(resp)=>{
+          if(resp?.error){
+            const detail=resp.error_description||resp.error||'Unbekannter OAuth-Fehler';
+            done(reject,new Error(`YouTube-Zugriff konnte nicht erneuert werden: ${detail}`));
+            return;
+          }
+          if(!resp?.access_token){done(reject,new Error('Google hat beim Erneuern kein Zugriffstoken geliefert.'));return;}
+          persistYoutubeToken(resp.access_token,Number(resp.expires_in||3600));
+          showYoutubeHelp('YouTube-Zugriff automatisch erneuert.','good');
+          done(resolve,state.accessToken);
+        };
+        try{
+          // Recreate the token client for every renewal so the current callback is
+          // guaranteed to be used by GIS. This also avoids stale callback state
+          // after a long-running multi-POV queue.
+          state.tokenClient=window.google.accounts.oauth2.initTokenClient({
+            client_id:clientId,
+            scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
+            include_granted_scopes:true,
+            callback
+          });
+          state.tokenClient.requestAccessToken({prompt:silent?'none':'consent'});
+        }catch(err){done(reject,err instanceof Error?err:new Error(String(err)));}
+        setTimeout(()=>done(reject,new Error('Zeitüberschreitung beim Erneuern des YouTube-Zugriffs.')),15000);
+      });
+    })();
+    try{return await state.tokenRefreshPromise;}finally{state.tokenRefreshPromise=null;}
+  }
+  async function ensureYoutubeTokenFresh(){
+    if(!state.accessToken)throw new Error('YouTube nicht verbunden.');
+    if(state.tokenExpiresAt>0 && Date.now()>state.tokenExpiresAt-2*60*1000){
+      try{await refreshYoutubeToken(true);}catch(err){
+        // Do not kill the whole queue before the API actually rejects the token.
+        console.warn('Stille Token-Erneuerung fehlgeschlagen:',err);
+      }
+    }
+    return state.accessToken;
+  }
   function configureYoutubeClient(clientId){
     const id=String(clientId||'').trim();
     state.clientId=id;
@@ -765,8 +842,7 @@
           setYoutubeButton('Mit YouTube verbinden',false);
           return;
         }
-        state.accessToken=resp.access_token;
-        localStorage.setItem('yt_access_token',resp.access_token);sessionStorage.setItem('yt_access_token',resp.access_token);
+        persistYoutubeToken(resp.access_token,Number(resp.expires_in||3600));
         updateYtStatus(true);
         showYoutubeHelp('YouTube ist verbunden.','good');
         toast('YouTube verbunden.');
@@ -803,6 +879,7 @@
     const stateValue=p.get('state')||'';
     const expected=sessionStorage.getItem('grandrp_oauth_state')||'';
     const token=p.get('access_token');
+    const expiresIn=Number(p.get('expires_in')||0);
     const error=p.get('error');
     const desc=p.get('error_description')||'';
     if(!token && !error)return false;
@@ -819,8 +896,7 @@
       setYoutubeButton('Mit YouTube verbinden',false);
       return true;
     }
-    state.accessToken=token;
-    localStorage.setItem('yt_access_token',token);sessionStorage.setItem('yt_access_token',token);
+    persistYoutubeToken(token,expiresIn||3600);
     updateYtStatus(true);
     showYoutubeHelp('YouTube ist verbunden.','good');
     toast('YouTube verbunden.');
@@ -887,17 +963,21 @@
   }
   window.connectYouTubeNow=initYoutube;
   window.reauthorizeYouTube=reauthorizeYoutube;
-  function updateYtStatus(){const connected=!!state.accessToken;$('#ytStatus').textContent=connected?'● Verbunden':'● Nicht verbunden';$('#ytStatus').style.color=connected?'#69e1af':'#7f7488';}
+  function updateYtStatus(){const connected=!!state.accessToken;const el=$('#ytStatus');if(!el)return;el.textContent=connected?'● Verbunden':'● Nicht verbunden';el.style.color=connected?'#69e1af':'#7f7488';}
   async function waitForYoutubeProcessing(videoId,token,onProgress,expectedSize=0){
     if(!videoId||!token) throw new Error('YouTube-Video-ID oder Zugriffstoken fehlt.');
     const started=Date.now();
     const maxWaitMs=60*60*1000;
     const pollMs=3000;
     while(Date.now()-started<maxWaitMs){
+      const currentToken=state.accessToken||token;
       const url=`https://www.googleapis.com/youtube/v3/videos?part=processingDetails,status,fileDetails&id=${encodeURIComponent(videoId)}`;
-      const r=await fetch(url,{headers:{Authorization:`Bearer ${token}`}});
+      const r=await fetch(url,{headers:{Authorization:`Bearer ${currentToken}`}});
       if(!r.ok){
         const body=(await r.text()).slice(0,900);
+        if(r.status===401){
+          try{await refreshYoutubeToken(true);continue;}catch(err){throw new Error(`${err.message} Die YouTube-Sitzung ist abgelaufen.`);}
+        }
         if(r.status===403 && /insufficient|scope/i.test(body)){
           throw new Error('YouTube-Berechtigung für die Verarbeitungsprüfung fehlt. Bitte „Berechtigung erneut“ drücken und den neuen YouTube-Zugriff bestätigen. OCR bleibt bis dahin gesperrt.');
         }
@@ -908,12 +988,8 @@
       if(!item) throw new Error('YouTube-Video wurde nach dem Upload nicht gefunden.');
       const pd=item.processingDetails||{};
       const status=pd.processingStatus||'';
-      // HARD GATE: OCR may start only after YouTube reports processingStatus=succeeded.
-      // uploadStatus='processed' is deliberately NOT treated as enough because the
-      // Studio/UI can still be processing higher-quality renditions.
-
       const prog=pd.processingProgress;
-      if(status==='succeeded') {
+      if(status==='succeeded'){
         const remoteSize=Number(item.fileDetails?.fileSize||0);
         if(expectedSize>0 && remoteSize>0 && remoteSize!==Number(expectedSize)){
           throw new Error(`YouTube-Dateigröße stimmt nicht überein: Quelle ${expectedSize} Byte · YouTube ${remoteSize} Byte.`);
@@ -921,11 +997,9 @@
         onProgress?.(100);
         return item;
       }
-      if(status==='failed') {
-        throw new Error(`YouTube-Verarbeitung fehlgeschlagen${pd.processingFailureReason?`: ${pd.processingFailureReason}`:''}.`);
-      }
+      if(status==='failed') throw new Error(`YouTube-Verarbeitung fehlgeschlagen${pd.processingFailureReason?`: ${pd.processingFailureReason}`:''}.`);
       let percent=0;
-      if(prog?.partsTotal>0){percent=Math.max(0,Math.min(100,Math.round((Number(prog.partsProcessed||0)/Number(prog.partsTotal))*100)));}
+      if(prog?.partsTotal>0)percent=Math.max(0,Math.min(100,Math.round((Number(prog.partsProcessed||0)/Number(prog.partsTotal))*100)));
       onProgress?.(percent);
       await new Promise(r=>setTimeout(r,pollMs));
     }
@@ -933,24 +1007,35 @@
   }
 
   async function uploadYoutube(file,title,token,onProgress){
-    if(!file||!token)throw new Error('YouTube nicht verbunden.');
+    if(!file)throw new Error('YouTube-Upload: Datei fehlt.');
     const expectedSize=await verifyLocalFile(file,0,'Upload-Quelle');
     const safeTitle=String(title||file.name||'Grand RP POV').replace(/\.[^.]+$/,'').slice(0,100);
     const meta={snippet:{title:safeTitle,description:'Grand RP POV Checker',categoryId:'20'},status:{privacyStatus:'unlisted',selfDeclaredMadeForKids:false}};
     const contentType=file.type||'video/mp4';
-    const init=await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json; charset=UTF-8','X-Upload-Content-Length':String(expectedSize),'X-Upload-Content-Type':contentType},body:JSON.stringify(meta)});
-    if(!init.ok)throw new Error((await init.text()).slice(0,700));
-    const loc=init.headers.get('Location');if(!loc)throw new Error('YouTube Upload-URL fehlt.');
+    let accessToken=state.accessToken||token;
+    if(!accessToken)throw new Error('YouTube nicht verbunden.');
 
+    async function createSession(){
+      const doInit=async(t)=>await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',{method:'POST',headers:{Authorization:`Bearer ${t}`,'Content-Type':'application/json; charset=UTF-8','X-Upload-Content-Length':String(expectedSize),'X-Upload-Content-Type':contentType},body:JSON.stringify(meta)});
+      let init=await doInit(accessToken);
+      if(init.status===401){accessToken=await refreshYoutubeToken(true);init=await doInit(accessToken);}
+      if(!init.ok)throw new Error((await init.text()).slice(0,700));
+      const loc=init.headers.get('Location');if(!loc)throw new Error('YouTube Upload-URL fehlt.');
+      return loc;
+    }
+
+    let loc=await createSession();
     const queryOffset=async()=>{
-      const q=await fetch(loc,{method:'PUT',headers:{Authorization:`Bearer ${token}`,'Content-Range':`bytes */${expectedSize}`}});
+      const doQuery=async(t)=>await fetch(loc,{method:'PUT',headers:{Authorization:`Bearer ${t}`,'Content-Range':`bytes */${expectedSize}`}});
+      let q=await doQuery(accessToken);
+      if(q.status===401){accessToken=await refreshYoutubeToken(true);q=await doQuery(accessToken);}
       if(q.status===308){const range=q.headers.get('Range')||'';const m=range.match(/\d+-(\d+)$/);return m?Number(m[1])+1:0;}
       if(q.status>=200&&q.status<300)return expectedSize;
       throw new Error((await q.text()).slice(0,700)||`YouTube Upload-Status HTTP ${q.status}`);
     };
 
     const chunkSize=8*1024*1024;
-    let offset=0,lastResponse=null,attempts=0;
+    let offset=0,lastResponse=null,attempts=0,authRefreshes=0;
     while(offset<expectedSize){
       const liveSize=Number(file.size)||0;
       if(liveSize!==expectedSize)throw new Error(`Upload abgebrochen: Quelldatei hat ihre Größe verändert (${formatBytesExact(expectedSize)} → ${formatBytesExact(liveSize)}).`);
@@ -960,7 +1045,11 @@
       let resp;
       try{
         resp=await new Promise((resolve,reject)=>{
-          const xhr=new XMLHttpRequest();xhr.open('PUT',loc,true);xhr.setRequestHeader('Authorization',`Bearer ${token}`);xhr.setRequestHeader('Content-Type',contentType);xhr.setRequestHeader('Content-Range',`bytes ${offset}-${end-1}/${expectedSize}`);
+          const xhr=new XMLHttpRequest();
+          xhr.open('PUT',loc,true);
+          xhr.setRequestHeader('Authorization',`Bearer ${accessToken}`);
+          xhr.setRequestHeader('Content-Type',contentType);
+          xhr.setRequestHeader('Content-Range',`bytes ${offset}-${end-1}/${expectedSize}`);
           xhr.upload.onprogress=e=>{if(e.lengthComputable)onProgress?.(Math.round((offset+e.loaded)/expectedSize*100));else onProgress?.(Math.round(offset/expectedSize*100));};
           xhr.onload=()=>resolve(xhr);xhr.onerror=()=>reject(new Error('Netzwerkfehler beim YouTube-Upload.'));xhr.ontimeout=()=>reject(new Error('Zeitüberschreitung beim YouTube-Upload.'));
           xhr.timeout=10*60*1000;xhr.send(chunk);
@@ -973,6 +1062,12 @@
       }
       attempts=0;
       if(resp.status>=200&&resp.status<300){lastResponse=resp;offset=expectedSize;onProgress?.(100);break;}
+      if(resp.status===401){
+        if(++authRefreshes>3)throw new Error('YouTube-Anmeldung ist abgelaufen und konnte nicht automatisch erneuert werden.');
+        accessToken=await refreshYoutubeToken(true);
+        offset=await queryOffset();
+        continue;
+      }
       if(resp.status===308){
         const range=resp.getResponseHeader('Range')||'';
         const m=range.match(/\d+-(\d+)$/);
@@ -996,10 +1091,12 @@
     return {id:data.id,url:`https://youtu.be/${data.id}`,sourceSize:expectedSize,sourceType:contentType};
   }
   async function updateYoutubeTitle(videoId,title,token){
-    if(!videoId||!token)return;
+    if(!videoId)return;
     const safeTitle=String(title||'POV').slice(0,100);
     const meta={id:videoId,snippet:{title:safeTitle,description:'Grand RP POV Checker',categoryId:'20'}};
-    const r=await fetch('https://www.googleapis.com/youtube/v3/videos?part=snippet',{method:'PUT',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(meta)});
+    const send=async(t)=>fetch('https://www.googleapis.com/youtube/v3/videos?part=snippet',{method:'PUT',headers:{Authorization:`Bearer ${t}`,'Content-Type':'application/json'},body:JSON.stringify(meta)});
+    let r=await send(state.accessToken||token||'');
+    if(r.status===401){const fresh=await refreshYoutubeToken(true);r=await send(fresh);}
     if(!r.ok)throw new Error((await r.text()).slice(0,500));
   }
   function setupSettings(){
@@ -1015,7 +1112,7 @@
     $('#clientId').addEventListener('input',e=>{state.clientId=String(e.target.value||'').trim();localStorage.setItem('yt_client_id',state.clientId);});
     $('#clientId').addEventListener('change',e=>{state.clientId=String(e.target.value||'').trim();localStorage.setItem('yt_client_id',state.clientId);});
     // YouTube buttons use the inline full-page redirect in index.html, so OAuth never depends on app.js loading.
-    if($('#disconnectYoutube')) $('#disconnectYoutube').addEventListener('click',()=>{if(window.grandrpDisconnectYouTube)window.grandrpDisconnectYouTube();else{state.accessToken='';localStorage.removeItem('yt_access_token');sessionStorage.removeItem('yt_access_token');updateYtStatus(false);}});
+    if($('#disconnectYoutube')) $('#disconnectYoutube').addEventListener('click',()=>{if(window.grandrpDisconnectYouTube)window.grandrpDisconnectYouTube();else{clearYoutubeToken();}});
     $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen?'))return;state.entries=[];state.queue=[];saveMeta();await clearDB();renderArchive();renderCases();renderCsv();renderQueue();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }

@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css?v=44">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
@@ -150,6 +151,7 @@
   const SCOPE_KEY='grandrp_yt_scope_v43';
   const YT_SCOPES='https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly';
   const RESULT_KEY='grandrp_oauth_result_v43';
+  const EXPIRES_KEY='yt_access_expires_at_v50';
   function callbackUrl(){ return new URL('oauth-callback.html', location.href).href; }
   function validClientId(id){ return /^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(String(id||'').trim()); }
   function state(){
@@ -211,6 +213,6 @@
   });
 })();
 </script>
-<script src="app.js?v=48"></script>
+<script src="app.js?v=50"></script>
 </body>
 </html>
