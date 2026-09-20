@@ -81,7 +81,7 @@
     <hr>
     <div class="card-title">OCR-Einstellungen</div>
     <label>Frames in den letzten 40 Sekunden<input id="frameCount" type="number" min="4" max="20" value="10"></label>
-    <p class="hint">Mehr Frames = bessere Chance bei wechselnder UI, aber längere Verarbeitung.</p>
+    <p class="hint">Die Erkennung nutzt mehrere Frames, getrennte Bildbereiche und eine Mehrheitsentscheidung. Unsichere Werte werden nicht automatisch akzeptiert und landen zur Prüfung.</p>
     <hr>
     <div class="card-title">Lokale Daten</div>
     <p class="hint">Archivdaten und POV-Dateien werden lokal in diesem Browser gespeichert. Browserdaten löschen entfernt auch die lokalen POVs.</p>
@@ -100,7 +100,6 @@
 <label>SC<input id="sc" placeholder="lange Buchstabenfolge"></label>
 <label>Server<input id="server" placeholder="z. B. 3 oder 4"></label>
 <label>Datum<input id="date" type="date"></label>
-<label>Bann-Dauer<input id="duration" placeholder="z. B. 60 Tage / Permanent"></label>
 <label class="full">Dateiname<input id="titlePreview" readonly></label>
 </div>
 <div class="section-label">Bann-Typen <span>Mehrere gleichzeitig möglich</span></div>
@@ -108,7 +107,7 @@
 <button type="button" class="chip" data-value="hardban">Hardban</button><button type="button" class="chip" data-value="socban">Soc-Ban</button><button type="button" class="chip" data-value="cheater">Cheater</button><button type="button" class="chip" data-value="negativ">Negativ</button><button type="button" class="chip" data-value="pccheck">PC-Check</button>
 </div>
 <div class="switches"><label class="switch-row">Perma-Bann<input id="perma" type="checkbox"><span class="switch"></span></label><label class="switch-row">Nicht gebannt<input id="notBanned" type="checkbox"><span class="switch"></span></label></div>
-<div id="ocrWarning" class="ocr-warning hidden">⚠ Nicht alle Angaben konnten sicher erkannt werden. Bitte ergänzen oder korrigieren.</div>
+<div id="ocrWarning" class="ocr-warning hidden">⚠ Nicht alle Angaben konnten mit ausreichender Übereinstimmung erkannt werden. Bitte prüfen. Es wird bewusst nichts geraten.</div>
 <div class="modal-actions"><button type="button" class="ghost-btn" id="cancelBtn">Abbrechen</button><button type="submit" class="pink-btn" id="saveBtn">Speichern & YouTube hochladen</button></div>
 </form></div></div>
 <div id="toast" class="toast"></div><video id="videoProbe" class="hidden-video" muted playsinline preload="metadata"></video><canvas id="ocrCanvas" class="hidden-video"></canvas>
