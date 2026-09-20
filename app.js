@@ -141,6 +141,91 @@ function classifyAllowedReason(src){
   return best.score>=.82?best:{reason:'',score:best.score};
 }
 function normalizeId(s){
+  const v=String(s||'').toUpperCase()
+    .replace(/[OQ]/g,'0').replace(/[I|L]/g,'1').replace(/[Z]/g,'2')
+    .replace(/[S]/g,'5').replace(/[G]/g,'6').replace(/[T]/g,'7').replace(/[B]/g,'8')
+    .replace(/[^0-9]/g,'');
+  return v.length<=6 ? v : '';
+}
+function validTargetId(v){return /^\d{1,6}$/.test(String(v||''));}
+function extractTargetIdFromLine(line){
+  const raw=String(line||'');
+  const s=raw.replace(/\u00a0/g,' ');
+  // Highest-confidence pattern: the ID after "hat NAME[ID]" and before "für/for ... gebannt".
+  const direct=[...s.matchAll(/\bhat\s+[^\n]{0,120}?\[\s*([0-9OQILZSGBT|]{1,6})\s*\]\s*(?=(?:f[üu]r|for)\b)/gi)]
+    .map(m=>normalizeId(m[1])).filter(validTargetId);
+  if(direct.length) return direct[direct.length-1];
+
+  // Robust OCR fallback: collect bracketed IDs and choose the second ID in a
+  // "[adminID] hat ... [targetID] für/for" sequence. This prevents the admin
+  // ID (e.g. 15340) from being mistaken for the target ID.
+  const br=[]; let m;
+  const re=/\[\s*([0-9OQILZSGBT|]{1,6})\s*\]/gi;
+  while((m=re.exec(s))){const id=normalizeId(m[1]);if(validTargetId(id))br.push({id,start:m.index,end:re.lastIndex});}
+  for(let i=0;i<br.length-1;i++){
+    const between=s.slice(br[i].end,br[i+1].start);
+    const tail=s.slice(br[i+1].end,br[i+1].end+100);
+    if(/\bhat\b/i.test(between) && /(?:f[üu]r|for)\b/i.test(tail)) return br[i+1].id;
+  }
+
+  // Line may contain only the target half after OCR splitting.
+  const afterHat=s.match(/\bhat\b[^\n]{0,120}?\[\s*([0-9OQILZSGBT|]{1,6})\s*\]/i);
+  if(afterHat){const id=normalizeId(afterHat[1]);if(validTargetId(id))return id;}
+  return '';
+}
+function findTargetId(src){
+  const text=String(src||'').replace(/\r/g,'');
+  const lines=normalizeOcr(text).split('\n').map(x=>x.trim()).filter(Boolean);
+  for(const line of lines){const id=extractTargetIdFromLine(line);if(validTargetId(id))return id;}
+  // OCR can split the banner over multiple lines; use a small local window.
+  for(let i=0;i<lines.length-1;i++){
+    const joined=`${lines[i]} ${lines[i+1]}`;
+    const id=extractTargetIdFromLine(joined);if(validTargetId(id))return id;
+  }
+  const id=extractTargetIdFromLine(lines.slice(0,8).join(' '));
+  return validTargetId(id)?id:'';
+}
+function normalizeReasonOcrText(s){return String(s||'').toLowerCase().replace(/[‐‑‒–—]/g,'-').replace(/[|]/g,'i').replace(/0/g,'o').replace(/[^a-z0-9. -]/g,' ').replace(/\s+/g,' ').trim()}
+function classifyAllowedReason(src){
+  const n=normalizeOcr(src), lines=n.split('\n').map(x=>x.trim()).filter(Boolean);
+  const candidates=[];
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i];
+    const m=line.match(/\bgr[uú]nd\s*[:\-]?\s*(.*)$/i);
+    if(m){
+      let after=m[1];
+      after=after.split(/\b(?:IP|SC|5C|S\s*C|Social\s+Club)\s*:/i)[0];
+      candidates.push(after);
+    }
+  }
+  // Also inspect short windows, but never allow a raw IP/SC tail to define the reason.
+  candidates.push(...lines.slice(0,8));
+  for(let i=0;i<lines.length;i++)candidates.push(lines.slice(i,Math.min(lines.length,i+3)).join(' '));
+  let best={reason:'',score:0};
+  for(const raw of candidates){
+    const t=normalizeReasonOcrText(raw), k=reasonKey(t);
+    if(!k)continue;
+    let r='',score=0;
+    const pc=/p.?c.?\s*check|p.?c.?check/.test(t);
+    const pos=/posit|posi/.test(t), ver=/verweig|verweiger|verweigu|rweig|we1g/.test(t);
+    if(pc&&ver){r='PC Check Verweigert';score=.99}
+    else if(/pc[- ]?check.*4\.?1.*discord/.test(t) || /4\.?1.*discord.*pc[- ]?check/.test(t)){r='PC-Check Positiv 4.1 (Discord)';score=.99}
+    else if(/pc[- ]?check.*4\.?1.*redux/.test(t) || /4\.?1.*redux.*pc[- ]?check/.test(t)){r='PC-Check Positiv 4.1 (Redux)';score=.99}
+    else if(/pc[- ]?check.*banevading/.test(k) || /banevading.*pc[- ]?check/.test(t)){r='PC-Check Positiv (Banevading)';score=.99}
+    else if(/pc[- ]?check.*cleaning/.test(k) || /cleaning.*pc[- ]?check/.test(t)){r='PC Check Positiv (Cleaning)';score=.99}
+    else if(pc&&pos){r='PC Check Positiv';score=.99}
+    else if(/cheat(?:ing|er)?/.test(k)){r='Cheating';score=.99}
+    else if(/acc\s*1\s*1|acc11/.test(t)){r='Acc 1.1';score=.99}
+    else if(/acc\s*1\s*4|acc14/.test(t)){r='Acc 1.4';score=.99}
+    else if(/event\s*1\s*7|event17/.test(t)){r='Event 1.7';score=.99}
+    else{
+      for(const allowed of ALLOWED_REASONS){const sc=similarity(t,allowed);if(sc>score){score=sc;r=allowed}}
+    }
+    if(score>best.score)best={reason:r,score};
+  }
+  return best.score>=.82?best:{reason:'',score:best.score};
+}
+function normalizeId(s){
   return String(s||'').toUpperCase()
     .replace(/[OQ]/g,'0').replace(/[I|L]/g,'1').replace(/[Z]/g,'2')
     .replace(/[S]/g,'5').replace(/[G]/g,'6').replace(/[T]/g,'7').replace(/[B]/g,'8')
@@ -404,13 +489,13 @@ function openPovAtTime(file,seconds,label='POV'){
   const safeLabel=esc(label).replace(/`/g,'');
   win.document.open();win.document.write(`<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${safeLabel}</title><style>body{margin:0;background:#08070b;color:#eee;font-family:Inter,Arial,sans-serif;display:flex;flex-direction:column;height:100vh}header{padding:12px 16px;border-bottom:1px solid #27202f;background:#100d15;font-size:14px}video{flex:1;width:100%;background:#000}small{color:#9d93a6}</style></head><body><header><strong>${safeLabel}</strong><br><small>Start bei ${formatTimecode(seconds)}</small></header><video id="v" controls autoplay muted playsinline></video><script>const v=document.getElementById('v');v.src=${JSON.stringify(url)};v.addEventListener('loadedmetadata',()=>{v.currentTime=${Math.max(0,Number(seconds)||0)};v.play().catch(()=>{})},{once:true});window.addEventListener('beforeunload',()=>{try{URL.revokeObjectURL(v.src)}catch(e){}});</script></body></html>`);win.document.close();
 }
-function openEditor(item){state.editing=item;state.selectedTypes=[...new Set([...(item.types||[]), ...inferTypes((item.result||{}).reason||item.reason||'')])];const p=item.result||{};$('#modalFile').textContent=item.file.name;$('#targetId').value=p.id||item.id||'';$('#reason').value=p.reason||item.reason||'';$('#sc').value=p.sc||item.sc||'';$('#discordId').value=p.discordId||item.discordId||'';$('#server').value=p.server||item.server||'';$('#date').value=p.date||item.date||today();$('#perma').checked=!!item.perma;$('#notBanned').checked=!!item.notBanned;$$('#banTypes .chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.includes(c.dataset.value)));$('#ocrWarning').classList.toggle('hidden',!!p.complete);renderReviewTools(item,p);updateTitle();$('#editorModal').classList.remove('hidden')}
+function openEditor(item){state.editing=item;state.selectedTypes=[...new Set([...(item.types||[]), ...inferTypes((item.result||{}).reason||item.reason||'')])];const p=item.result||{};$('#modalFile').textContent=item.file.name;$('#targetId').value=validTargetId(p.id)?p.id:(validTargetId(item.id)?item.id:'');$('#reason').value=p.reason||item.reason||'';$('#sc').value=p.sc||item.sc||'';$('#discordId').value=p.discordId||item.discordId||'';$('#server').value=p.server||item.server||'';$('#date').value=p.date||item.date||today();$('#perma').checked=!!item.perma;$('#notBanned').checked=!!item.notBanned;$$('#banTypes .chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.includes(c.dataset.value)));$('#ocrWarning').classList.toggle('hidden',!!p.complete);renderReviewTools(item,p);updateTitle();$('#editorModal').classList.remove('hidden')}
 function closeEditor(){$('#reviewTools')?.classList.add('hidden');state.editing=null;$('#editorModal').classList.add('hidden');renderQueue();renderCases()}
 $('#closeModal').onclick=closeEditor;$('#cancelBtn').onclick=closeEditor;
 $$('#banTypes .chip').forEach(c=>c.onclick=()=>{c.classList.toggle('active');state.selectedTypes=$$('#banTypes .chip.active').map(x=>x.dataset.value);updateTitle()});
 ['#targetId','#reason','#date'].forEach(s=>$(s).oninput=updateTitle);function updateTitle(){const id=$('#targetId').value.trim()||'UNBEKANNT',r=$('#reason').value.trim()||'Unbekannt',d=$('#date').value||today();$('#titlePreview').value=`${id}, ${r}, ${fmtDate(d)}`}
 $('#perma').onchange=e=>{if(e.target.checked)$('#notBanned').checked=false};$('#notBanned').onchange=e=>{if(e.target.checked)$('#perma').checked=false};
-$('#entryForm').onsubmit=async e=>{e.preventDefault();const item=state.editing;if(!item)return;const finalName=`${$('#targetId').value.trim()||'UNBEKANNT'}, ${$('#reason').value.trim()||'Unbekannt'}, ${fmtDate($('#date').value||today())}${ext(item.file.name)}`;const entry={id:$('#targetId').value.trim(),reason:$('#reason').value.trim(),sc:$('#sc').value.trim(),discordId:$('#discordId').value.trim(),server:$('#server').value.trim(),date:$('#date').value||today(),types:[...state.selectedTypes],perma:$('#perma').checked,notBanned:$('#notBanned').checked,reviewTimes:(item.result&&item.result.reviewTimes)||item.reviewTimes||{},fileName:finalName,createdAt:new Date().toISOString(),youtubeId:'',status:'Gespeichert · YouTube nicht verbunden',videoUrl:'',processedAt:new Date().toISOString()};if(!entry.id&&!entry.notBanned){toast('ID fehlt. Bitte ergänzen.');return}if(!entry.notBanned&&!entry.reason){toast('Grund fehlt. Bitte ergänzen.');return}$('#saveBtn').disabled=true;$('#saveBtn').textContent='Wird gespeichert …';try{await putVideo(entry.id+'_'+entry.createdAt,item.file);entry.videoKey=entry.id+'_'+entry.createdAt;entry.videoUrl=URL.createObjectURL(item.file);if(state.accessToken&&!entry.notBanned){$('#saveBtn').textContent='YouTube Upload läuft …';entry.youtubeId=await uploadToYouTube(item.file,entry);entry.status='YouTube · Nicht gelistet'}state.entries.unshift(entry);saveMeta();state.queue=state.queue.filter(x=>x.id!==item.id);closeEditor();renderArchive();renderCsvPreview();toast(entry.youtubeId?'POV hochgeladen, nicht gelistet und archiviert.':'Eintrag gespeichert.');showView('archive')}catch(err){console.error(err);toast('Fehler: '+(err.message||err))}finally{$('#saveBtn').disabled=false;$('#saveBtn').textContent='Speichern & YouTube hochladen'}};
+$('#entryForm').onsubmit=async e=>{e.preventDefault();const item=state.editing;if(!item)return;const cleanedTargetId=normalizeId($('#targetId').value.trim()); if(!cleanedTargetId && !$('#notBanned').checked){toast('Ziel-ID fehlt oder ist ungültig (max. 6 Stellen).'); return;} const finalName=`${cleanedTargetId||'UNBEKANNT'}, ${$('#reason').value.trim()||'Unbekannt'}, ${fmtDate($('#date').value||today())}${ext(item.file.name)}`;const entry={id:cleanedTargetId,reason:$('#reason').value.trim(),sc:$('#sc').value.trim(),discordId:$('#discordId').value.trim(),server:$('#server').value.trim(),date:$('#date').value||today(),types:[...state.selectedTypes],perma:$('#perma').checked,notBanned:$('#notBanned').checked,reviewTimes:(item.result&&item.result.reviewTimes)||item.reviewTimes||{},fileName:finalName,createdAt:new Date().toISOString(),youtubeId:'',status:'Gespeichert · YouTube nicht verbunden',videoUrl:'',processedAt:new Date().toISOString()};if(!entry.id&&!entry.notBanned){toast('Ziel-ID fehlt. Bitte ergänzen.');return} if(entry.id && !validTargetId(entry.id)){toast('Ziel-ID muss 1–6 Ziffern haben.');return}if(!entry.notBanned&&!entry.reason){toast('Grund fehlt. Bitte ergänzen.');return}$('#saveBtn').disabled=true;$('#saveBtn').textContent='Wird gespeichert …';try{await putVideo(entry.id+'_'+entry.createdAt,item.file);entry.videoKey=entry.id+'_'+entry.createdAt;entry.videoUrl=URL.createObjectURL(item.file);if(state.accessToken&&!entry.notBanned){$('#saveBtn').textContent='YouTube Upload läuft …';entry.youtubeId=await uploadToYouTube(item.file,entry);entry.status='YouTube · Nicht gelistet'}state.entries.unshift(entry);saveMeta();state.queue=state.queue.filter(x=>x.id!==item.id);closeEditor();renderArchive();renderCsvPreview();toast(entry.youtubeId?'POV hochgeladen, nicht gelistet und archiviert.':'Eintrag gespeichert.');showView('archive')}catch(err){console.error(err);toast('Fehler: '+(err.message||err))}finally{$('#saveBtn').disabled=false;$('#saveBtn').textContent='Speichern & YouTube hochladen'}};
 function ext(n){const m=n.match(/\.[^.]+$/);return m?m[0]:'.mp4'}
 async function uploadToYouTube(file,entry){const metadata={snippet:{title:entry.fileName.replace(/\.[^.]+$/,''),description:`Server: ${entry.server||'unbekannt'}\nSC: ${entry.sc||'unbekannt'}\nPerma-Bann: ${entry.perma?'Ja':'Nein'}\nBann-Typen: ${entry.types.join(', ')||'keiner'}`},status:{privacyStatus:'unlisted',selfDeclaredMadeForKids:false}};const init=await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',{method:'POST',headers:{Authorization:'Bearer '+state.accessToken,'Content-Type':'application/json; charset=UTF-8','X-Upload-Content-Length':String(file.size),'X-Upload-Content-Type':file.type||'application/octet-stream'},body:JSON.stringify(metadata)});if(!init.ok)throw new Error('YouTube: '+await init.text());const url=init.headers.get('Location');if(!url)throw new Error('Keine YouTube Upload-URL erhalten.');let start=0,chunk=8*1024*1024;while(start<file.size){const end=Math.min(start+chunk,file.size)-1;const res=await fetch(url,{method:'PUT',headers:{'Content-Length':String(end-start+1),'Content-Range':`bytes ${start}-${end}/${file.size}`},body:file.slice(start,end+1)});if(res.status===308){const range=res.headers.get('Range');start=range?parseInt(range.split('-')[1])+1:end+1}else if(res.ok){return(await res.json()).id}else throw new Error('YouTube Upload: '+await res.text())}}
 function getVisibleEntries(){
