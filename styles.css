@@ -6,3 +6,5 @@
 
 /* V48: SC/RID is a 40-character identifier; give it a full-width, readable cell. */
 .meta{min-width:0}.meta>div{min-width:0}.meta .rid-cell{grid-column:1/-1}.meta .rid-cell:not(:empty){overflow-wrap:anywhere;word-break:break-all;line-height:1.35}.meta .rid-cell span{word-break:normal}
+
+.size-bytes{display:block;color:#5f5569;font-size:9px;margin-top:3px;word-break:break-all}

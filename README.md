@@ -1,4 +1,4 @@
-# Grand RP POV Checker V48
+# Grand RP POV Checker V49
 
 Fixes in V40:
 - Defines the missing `setEditorValues()`, `setFieldStatus()` and `renderTitlePreview()` functions.
@@ -31,7 +31,7 @@ V46: YouTube OAuth now requests both youtube.upload and youtube.readonly. The pr
 - Banntypen: Hardban, Soc-Ban, Cheater, Negativ, Verweigert, PC-Check.
 
 
-V48 LAST FIX / Systemtest:
+V49 LAST FIX / Systemtest:
 - OCR scan uses both normal grayscale and orange-chat OCR, with a wider chat ROI and additional precision frames.
 - Target-ID parser tolerates OCR variants such as `fur`, `fiir`, `fuer` and also works when the target ID brackets are missed. Admin IDs before `hat` are excluded.
 - Reason detection also works when OCR misses `Grund:`.
@@ -44,14 +44,17 @@ V48 LAST FIX / Systemtest:
 Automated tests performed: JS syntax check, OCR parser regression tests for Ziel-ID/Grund/SC/offline cases, a generated 1280x720 MP4 frame OCR test, and a byte-for-byte File rename size check.
 
 
-V48 additional fixes:
+V49 additional fixes:
 - General OCR and restricted SC/date OCR now use separate Tesseract workers, so a whitelist cannot leak into the next target-ID/reason scan.
 - YouTube resumable upload now resumes from the server-confirmed byte offset instead of ever skipping a partially received chunk; transient network/5xx/429 failures are retried.
 - Source byte size is displayed in the archive and remains checked before/after final local naming.
 - Added reasons: PC Check Trolling and ACC 1.4 (Twink).
 
-V48 tests:
+V49 tests:
 - `node --check` für app.js und alle Inline-Skripte in index.html, manual.html und oauth-callback.html: OK.
 - Parser-Regressionsfälle: Ziel-ID 172718, PC Check Verweigert, PC Check Trolling, ACC 1.4 (Twink), Offline ohne SC: OK.
 - Test-POV 1280×720 / 2 s per System-OCR ausgewertet; Ziel-ID und Grund wurden aus der breiteren Ban-ROI korrekt erkannt, SC/Online-Erkennung vorhanden: OK.
 - Resumable-Upload-Simulation mit 8 MiB Chunks und absichtlichem 308-Teilempfang: Bytefolge nach Resume 1:1 identisch zur Quelldatei: OK.
+
+
+V49: Dateigrößen werden als echte Byte-Größe aus der Quelldatei/IndexedDB geprüft. Vor dem YouTube-Upload wird die lokale Kopie gegen Größe sowie Anfang/Ende der Datei verifiziert; während des resumable Uploads wird die Quellgröße nicht verändert und nach der YouTube-Verarbeitung mit fileDetails.fileSize verglichen. Die Archivanzeige repariert alte, veraltete sourceSize-Werte aus der tatsächlich gespeicherten POV-Datei.

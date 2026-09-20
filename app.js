@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V48';
+  const BUILD='V49';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -312,15 +312,55 @@
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
 
   function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2600);}
-  function formatSize(n){return n>1024**3?(n/1024**3).toFixed(1)+' GB':n>1024**2?(n/1024**2).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB';}
+  // File sizes are displayed in decimal units, matching Windows/browser file
+  // properties more closely (1 MB = 1,000,000 bytes). The actual upload always
+  // uses the exact File.size byte count, never this formatted value.
+  function formatSize(n){const x=Number(n)||0;return x>=1e9?(x/1e9).toFixed(1)+' GB':x>=1e6?(x/1e6).toFixed(1)+' MB':x>=1e3?(x/1e3).toFixed(1)+' KB':Math.max(0,Math.round(x))+' B';}
+  function formatBytesExact(n){return `${Number(n)||0} Bytes`; }
+  async function compareFileEdges(a,b){
+    if(!a||!b||Number(a.size)!==Number(b.size)) return false;
+    const edge=1024*1024;
+    const aHead=new Uint8Array(await a.slice(0,Math.min(edge,a.size)).arrayBuffer());
+    const bHead=new Uint8Array(await b.slice(0,Math.min(edge,b.size)).arrayBuffer());
+    if(aHead.length!==bHead.length)return false;
+    for(let i=0;i<aHead.length;i++)if(aHead[i]!==bHead[i])return false;
+    const start=Math.max(0,a.size-edge);
+    const aTail=new Uint8Array(await a.slice(start,a.size).arrayBuffer());
+    const bTail=new Uint8Array(await b.slice(start,b.size).arrayBuffer());
+    if(aTail.length!==bTail.length)return false;
+    for(let i=0;i<aTail.length;i++)if(aTail[i]!==bTail[i])return false;
+    return true;
+  }
+  async function verifyLocalFile(file,expectedSize=0,stage='Datei'){
+    if(!file)throw new Error(`${stage}: Datei fehlt.`);
+    const actual=Number(file.size)||0;
+    if(actual<=0)throw new Error(`${stage}: Datei hat 0 Byte.`);
+    if(expectedSize && actual!==Number(expectedSize))throw new Error(`${stage}: Dateigröße geändert (${formatBytesExact(expectedSize)} → ${formatBytesExact(actual)}).`);
+    const head=await file.slice(0,Math.min(32,actual)).arrayBuffer();
+    if(!head.byteLength)throw new Error(`${stage}: Datei konnte nicht gelesen werden.`);
+    return actual;
+  }
   function formatDateDE(v){if(!v)return '';const m=String(v).match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}.${m[2]}.${m[1]}`:v;}
-  function loadMeta(){
+  async function loadMeta(){
     try{
       let raw=localStorage.getItem(META_KEY);
       if(!raw) raw=localStorage.getItem('grandrp_pov_meta_v27')||localStorage.getItem('grandrp_pov_meta_v26')||localStorage.getItem('grandrp_pov_meta_v25')||'[]';
       state.entries=JSON.parse(raw)||[];
     }catch{state.entries=[];}
     state.clientId=localStorage.getItem('yt_client_id')||'';$('#clientId').value=state.clientId;
+    // Repair legacy archive size metadata from the actual IndexedDB blob.
+    // This fixes old cards that displayed a stale/wrong sourceSize even though
+    // the stored POV file itself had the correct byte size.
+    try{
+      let changed=false;
+      for(const e of state.entries){
+        if(!e.id||!e.videoStored)continue;
+        const stored=await getVideo(e.id);
+        if(!stored)continue;
+        if(Number(e.sourceSize)!==Number(stored.size)){e.sourceSize=stored.size; changed=true;}
+      }
+      if(changed)saveMeta();
+    }catch(err){console.warn('Archivgrößen konnten nicht synchronisiert werden',err);}
   }
   function saveMeta(){localStorage.setItem(META_KEY,JSON.stringify(state.entries.map(e=>({...e,file:undefined,videoUrl:undefined}))));}
   async function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
@@ -330,7 +370,7 @@
   async function clearDB(){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
   function showView(v){$$('.view').forEach(x=>x.classList.remove('active'));$('#view-'+v).classList.add('active');$$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));$('#pageTitle').textContent=views[v][0];$('#pageSubtitle').textContent=views[v][1];if(v==='archive')renderArchive();if(v==='cases')renderCases();if(v==='csv')renderCsv();}
   function updateCounts(){const all=state.entries;const count=k=>all.filter(e=>e.types?.includes(k)).length;$('#countAll').textContent=all.length;$('#countBan').textContent=all.filter(e=>!e.notBanned).length;$('#countPc').textContent=count('pccheck');$('#countSoc').textContent=count('socban');$('#countHard').textContent=count('hardban');$('#countCheat').textContent=count('cheater');$('#countNeg').textContent=count('negativ');$('#countNoVideo').textContent=all.filter(e=>!e.videoStored).length;}
-  function renderArchive(){updateCounts();const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;const list=state.entries.filter(e=>{if(filter==='ban'&&e.notBanned)return false;if(filter!=='all'&&filter!=='ban'&&!e.types?.includes(filter))return false;if(filter==='novideo'&&e.videoStored)return false;if(!q)return true;return [e.targetId,e.sc,e.reason,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));});$('#archiveGrid').innerHTML=list.map(e=>`<article class="card"><div class="thumb">${e.videoStored?'POV':'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(e.id.slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span></div><div class="card-body"><div class="card-title">${esc(e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div class="rid-cell"><span>SC / RID</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(formatDateDE(e.date)||'')}</div>${e.sourceSize?`<div><span>Dateigröße</span>${esc(formatSize(e.sourceSize))}</div>`:''}</div></div><div class="card-actions"><button class="mini" data-open="${e.id}">Prüfen</button>${e.youtube?.url||e.proof?`<button class="mini primary" data-youtube="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}<button class="mini danger" data-delete="${e.id}">Löschen</button></div></article>`).join('');$('#emptyState').classList.toggle('hidden',list.length>0);$$('[data-open]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.open);if(e)openEditorFromEntry(e);});$$('[data-youtube]').forEach(b=>b.onclick=()=>{const url=b.dataset.youtube;if(url)window.open(url,'_blank','noopener,noreferrer');});$$('[data-delete]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.delete);if(!e)return;if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?\n\nDas YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.entries=state.entries.filter(x=>x.id!==e.id);saveMeta();renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}});}
+  function renderArchive(){updateCounts();const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;const list=state.entries.filter(e=>{if(filter==='ban'&&e.notBanned)return false;if(filter!=='all'&&filter!=='ban'&&!e.types?.includes(filter))return false;if(filter==='novideo'&&e.videoStored)return false;if(!q)return true;return [e.targetId,e.sc,e.reason,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));});$('#archiveGrid').innerHTML=list.map(e=>`<article class="card"><div class="thumb">${e.videoStored?'POV':'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(e.id.slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span></div><div class="card-body"><div class="card-title">${esc(e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div class="rid-cell"><span>SC / RID</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(formatDateDE(e.date)||'')}</div>${e.sourceSize?`<div><span>Dateigröße</span>${esc(formatSize(e.sourceSize))}<small class="size-bytes">${esc(formatBytesExact(e.sourceSize))}</small></div>`:''}</div></div><div class="card-actions"><button class="mini" data-open="${e.id}">Prüfen</button>${e.youtube?.url||e.proof?`<button class="mini primary" data-youtube="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}<button class="mini danger" data-delete="${e.id}">Löschen</button></div></article>`).join('');$('#emptyState').classList.toggle('hidden',list.length>0);$$('[data-open]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.open);if(e)openEditorFromEntry(e);});$$('[data-youtube]').forEach(b=>b.onclick=()=>{const url=b.dataset.youtube;if(url)window.open(url,'_blank','noopener,noreferrer');});$$('[data-delete]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.delete);if(!e)return;if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?\n\nDas YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.entries=state.entries.filter(x=>x.id!==e.id);saveMeta();renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}});}
   function renderCases(){const cases=state.entries.filter(e=>!e.complete);$('#casesList').innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button class="mini" data-case="${e.id}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';$$('[data-case]').forEach(b=>b.onclick=()=>{const e=state.entries.find(x=>x.id===b.dataset.case);if(e)openEditorFromEntry(e);});}
   function csvRowsBase(){return state.entries.filter(e=>e.saved).map(e=>({Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:'',RID:e.sc||'',DiscordID:e.discordId||'',Familie:'',Grund:e.reason||''}));}
   function csvRows(){
@@ -658,19 +698,25 @@
       item.processing=true;
       try{
         // Store the original file in IndexedDB immediately so the same-origin manual picker can open it later.
+        const sourceSize=await verifyLocalFile(item.file,0,'Ausgewählte POV');
         await putVideo(item.id,item.file);
-        item.status='YouTube: vollständiger Upload';item.progress=2;renderQueue();
-        item.youtube=await uploadYoutube(item.file,item.file.name,state.accessToken,p=>{item.progress=2+Math.round(p*.33);item.status=`YouTube-Upload ${p}% · ${formatSize(item.file.size)}`;renderQueue();});
+        const storedCopy=await getVideo(item.id);
+        if(!storedCopy)throw new Error('Lokale Kopie der POV konnte nicht gelesen werden.');
+        if(Number(storedCopy.size)!==sourceSize)throw new Error(`Lokale Speicherung beschädigt: Quelle ${formatBytesExact(sourceSize)} · Archiv ${formatBytesExact(storedCopy.size)}.`);
+        if(!(await compareFileEdges(item.file,storedCopy)))throw new Error('Lokale Speicherung stimmt am Anfang/Ende nicht mit der Originaldatei überein.');
+        item.status=`YouTube: vollständiger Upload · Quelle ${formatSize(sourceSize)}`;item.progress=2;renderQueue();
+        item.youtube=await uploadYoutube(item.file,item.file.name,state.accessToken,p=>{item.progress=2+Math.round(p*.33);item.status=`YouTube-Upload ${p}% · ${formatSize(sourceSize)} (${formatBytesExact(sourceSize)})`;renderQueue();});
         item.status='YouTube-Upload abgeschlossen · Verarbeitung läuft';item.progress=35;renderQueue();
-        await waitForYoutubeProcessing(item.youtube.id,state.accessToken,p=>{
+        const ytFinal=await waitForYoutubeProcessing(item.youtube.id,state.accessToken,p=>{
           item.progress=35+Math.round(p*.25);
           item.status=`YouTube-Verarbeitung ${p}% · OCR wartet`;
           renderQueue();
-        },item.file.size);
-        item.status='YouTube vollständig verarbeitet · OCR startet';item.progress=60;renderQueue();
+        },sourceSize);
+        const remoteSize=Number(ytFinal.fileDetails?.fileSize||0);
+        item.status=remoteSize?`YouTube vollständig verarbeitet · ${formatSize(remoteSize)} · OCR startet`:'YouTube vollständig verarbeitet · OCR startet';item.progress=60;renderQueue();
         const video=$('#videoProbe');const url=URL.createObjectURL(item.file);video.src=url;await loaded(video);item.progress=62;renderQueue();
         item.result=await analyzeVideo(video,p=>{item.progress=62+Math.round(p*.38);renderQueue();});
-        item.result.originalName=item.file.name;item.result.sourceSize=item.file.size;item.result.sourceType=item.file.type||'video/mp4';item.result.types=[];item.result.proof=item.youtube.url;item.result.youtube=item.youtube;item.status=item.result.complete?'OCR fertig · Prüfung offen':'OCR unvollständig · Prüfung nötig';renderQueue();openEditor(item);
+        item.result.originalName=item.file.name;item.result.sourceSize=sourceSize;item.result.remoteSize=remoteSize||0;item.result.sourceType=item.file.type||'video/mp4';item.result.types=[];item.result.proof=item.youtube.url;item.result.youtube=item.youtube;item.status=item.result.complete?`OCR fertig · Quelle ${formatSize(sourceSize)} · Prüfung offen`:'OCR unvollständig · Prüfung nötig';renderQueue();openEditor(item);
         await new Promise(resolve=>{const timer=setInterval(()=>{if(!state.editing){clearInterval(timer);resolve();}},150);});
         URL.revokeObjectURL(url);
       }catch(err){console.error(err);item.status='Fehler: '+(err?.message||err);item.progress=0;renderQueue();}
@@ -888,8 +934,7 @@
 
   async function uploadYoutube(file,title,token,onProgress){
     if(!file||!token)throw new Error('YouTube nicht verbunden.');
-    const expectedSize=Number(file.size)||0;
-    if(expectedSize<=0)throw new Error('Die ausgewählte Datei hat 0 Byte.');
+    const expectedSize=await verifyLocalFile(file,0,'Upload-Quelle');
     const safeTitle=String(title||file.name||'Grand RP POV').replace(/\.[^.]+$/,'').slice(0,100);
     const meta={snippet:{title:safeTitle,description:'Grand RP POV Checker',categoryId:'20'},status:{privacyStatus:'unlisted',selfDeclaredMadeForKids:false}};
     const contentType=file.type||'video/mp4';
@@ -907,8 +952,11 @@
     const chunkSize=8*1024*1024;
     let offset=0,lastResponse=null,attempts=0;
     while(offset<expectedSize){
+      const liveSize=Number(file.size)||0;
+      if(liveSize!==expectedSize)throw new Error(`Upload abgebrochen: Quelldatei hat ihre Größe verändert (${formatBytesExact(expectedSize)} → ${formatBytesExact(liveSize)}).`);
       const end=Math.min(expectedSize,offset+chunkSize);
       const chunk=file.slice(offset,end);
+      if(Number(chunk.size)!==(end-offset))throw new Error(`Upload abgebrochen: Chunk-Größe stimmt nicht (${formatBytesExact(end-offset)} erwartet, ${formatBytesExact(chunk.size)} gelesen).`);
       let resp;
       try{
         resp=await new Promise((resolve,reject)=>{
@@ -941,7 +989,8 @@
       }
       throw new Error(resp.responseText?.slice(0,700)||`YouTube Upload HTTP ${resp.status}`);
     }
-    if(offset!==expectedSize||!lastResponse?.responseText)throw new Error(`YouTube-Upload unvollständig: ${offset} von ${expectedSize} Bytes übertragen.`);
+    if(offset!==expectedSize||!lastResponse?.responseText)throw new Error(`YouTube-Upload unvollständig: ${formatBytesExact(offset)} von ${formatBytesExact(expectedSize)} übertragen.`);
+    if(Number(file.size)!==expectedSize)throw new Error(`Quelldatei wurde während des Uploads verändert (${formatBytesExact(file.size)} statt ${formatBytesExact(expectedSize)}).`);
     let data;try{data=JSON.parse(lastResponse.responseText);}catch{throw new Error('YouTube hat keine gültige Upload-Antwort geliefert.');}
     if(!data.id)throw new Error('YouTube hat keine Video-ID zurückgegeben.');
     return {id:data.id,url:`https://youtu.be/${data.id}`,sourceSize:expectedSize,sourceType:contentType};
@@ -972,5 +1021,5 @@
   }
 
   window.addEventListener('beforeunload' ,()=>{try{state.worker?.terminate();}catch{};try{state.specialWorker?.terminate();}catch{}});
-  setupNav();setupUpload();setupEditor();setupSettings();loadMeta();renderArchive();renderQueue();updateYtStatus();
+  setupNav();setupUpload();setupEditor();setupSettings();renderQueue();updateYtStatus();loadMeta().then(()=>{renderArchive();renderCases();renderCsv();}).catch(err=>{console.error('Archiv konnte nicht geladen werden',err);renderArchive();renderCases();renderCsv();});
 })();
