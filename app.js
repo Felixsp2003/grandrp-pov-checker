@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V26
+/* Grand RP DC Checker V28
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,9 +10,9 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V27';
-  const META_KEY='grandrp_pov_meta_v27';
-  const DB_NAME='grandrp_pov_db_v27';
+  const BUILD='V28';
+  const META_KEY='grandrp_pov_meta_v28';
+  const DB_NAME='grandrp_pov_db_v28';
   const STORE='videos';
 
   const ALLOWED_REASONS=[
@@ -257,13 +257,20 @@
   if(isNode){module.exports={ALLOWED_REASONS,compact,similarity,normalizeHexLoose,normalizeIdToken,canonicalReason,parseTargetId,parseReason,extractScOrdered,extractScCandidatesFromString,extractHexCandidateAnyText,consensusHex,extractServerFromOcr,extractDate,serverVote,dateVote,clampId,validDate};return;}
 
   const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-  const state={entries:[],queue:[],filter:'all',editing:null,worker:null,accessToken:sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:18,window:6,step:0.6},selectedTypes:new Set()};
+  const state={entries:[],queue:[],filter:'all',editing:null,worker:null,accessToken:sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:24,window:4.5,step:0.5},selectedTypes:new Set()};
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
 
   function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2600);}
   function formatSize(n){return n>1024**3?(n/1024**3).toFixed(1)+' GB':n>1024**2?(n/1024**2).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB';}
   function formatDateDE(v){if(!v)return '';const m=String(v).match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}.${m[2]}.${m[1]}`:v;}
-  function loadMeta(){try{state.entries=JSON.parse(localStorage.getItem(META_KEY)||'[]');}catch{state.entries=[];}state.clientId=localStorage.getItem('yt_client_id')||'';$('#clientId').value=state.clientId;}
+  function loadMeta(){
+    try{
+      let raw=localStorage.getItem(META_KEY);
+      if(!raw) raw=localStorage.getItem('grandrp_pov_meta_v27')||localStorage.getItem('grandrp_pov_meta_v26')||localStorage.getItem('grandrp_pov_meta_v25')||'[]';
+      state.entries=JSON.parse(raw)||[];
+    }catch{state.entries=[];}
+    state.clientId=localStorage.getItem('yt_client_id')||'';$('#clientId').value=state.clientId;
+  }
   function saveMeta(){localStorage.setItem(META_KEY,JSON.stringify(state.entries.map(e=>({...e,file:undefined,videoUrl:undefined}))));}
   async function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
   async function putVideo(id,file){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(file,id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
@@ -292,7 +299,7 @@
     ['dragleave','drop'].forEach(ev=>dropzone.addEventListener(ev,e=>{e.preventDefault();dropzone.classList.remove('drag');}));
     dropzone.addEventListener('drop',e=>addFiles([...e.dataTransfer.files].filter(f=>f.type.startsWith('video/')||/\.(mp4|mov|webm|mkv)$/i.test(f.name))));
   }
-  function addFiles(files){for(const file of files){state.queue.push({id:crypto.randomUUID(),file,status:'Wartet',progress:0,result:null,processing:false,editingDone:false});}renderQueue();processQueue();}
+  function addFiles(files){for(const file of files){state.queue.push({id:crypto.randomUUID(),file,status:'Wartet',progress:0,result:null,processing:false,editingDone:false,youtube:null});}renderQueue();processQueue();}
   function renderQueue(){const q=$('#uploadQueue');$('#queueCount').textContent=`${state.queue.length} ${state.queue.length===1?'Datei':'Dateien'}`;q.innerHTML=state.queue.map(item=>`<div class="queue-item"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(item.finalName||item.file.name)}</strong><small>${formatSize(item.file.size)} · ${esc(item.status)}</small><div class="progress"><i style="width:${item.progress}%"></i></div></div><div class="queue-actions"><button class="mini" data-check="${item.id}">Prüfen</button><button class="mini" data-remove="${item.id}">×</button></div></div>`).join('');$$('[data-check]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.check);if(x?.result)openEditor(x);});$$('[data-remove]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.remove);if(x?.processing){toast('POV wird gerade verarbeitet.');return;}state.queue=state.queue.filter(i=>i.id!==b.dataset.remove);renderQueue();});}
   async function loaded(v){return new Promise((res,rej)=>{let done=false;const cleanup=()=>{v.removeEventListener('loadedmetadata',ok);v.removeEventListener('error',bad);};const ok=()=>{if(done)return;done=true;cleanup();res();};const bad=()=>{if(done)return;done=true;cleanup();rej(new Error('Video konnte nicht gelesen werden.'));};v.addEventListener('loadedmetadata',ok,{once:true});v.addEventListener('error',bad,{once:true});setTimeout(()=>bad(),20000);});}
   async function seek(v,t){return new Promise((res,rej)=>{let done=false;const cleanup=()=>v.removeEventListener('seeked',ok);const ok=()=>{if(done)return;done=true;cleanup();res();};v.addEventListener('seeked',ok,{once:true});v.currentTime=Math.max(0,Math.min(Number(t)||0,Math.max(0,v.duration-.05)));setTimeout(()=>{if(done)return;done=true;cleanup();rej(new Error('Video-Suche Timeout'));},10000);});}
@@ -396,12 +403,10 @@
     }
     let sc=onlineSeen?consensusHex(scCandidates):''; if(sc)timestamps.sc=frames.find(f=>f.sc)?.time??bannerTime;
 
-    // Server: detect only the yellow badge in the top-right, never arbitrary numbers from the HUD.
-    const serverTimes=new Set(); for(let dt=-1.2;dt<=1.21;dt+=.6)serverTimes.add(Math.max(0,Math.min(duration-.05,bannerTime+dt)));
-    const serverVotes=[];
-    for(const t of serverTimes){await seek(video,t);const badge=makeServerBadgeCrop(video);for(const c of badge.variants){const d=await ocr(worker,c,{psm:10,whitelist:'1234'});const s=extractServerFromOcr(d.text||'');if(s)serverVotes.push(s);}}
-    const server=serverVote(serverVotes); if(server)timestamps.server=bannerTime;
+    // Server is fixed by the Grand RP workflow: always Server 3. We keep a manual video picker in the editor for confirmation/correction.
+    const server='3'; timestamps.server=bannerTime;
 
+    const serverTimes=new Set(); for(let dt=-1.2;dt<=1.21;dt+=.6)serverTimes.add(Math.max(0,Math.min(duration-.05,bannerTime+dt)));
     // Date: right-bottom ROI around the banner time.
     const dateVotes=[]; let dc=0; for(const t of serverTimes){if(dc++>=6)break;await seek(video,t);const crop=makeCrop(video,.80,.82,.20,.18,4.0);const d1=await ocr(worker,crop,{psm:6,whitelist:'0123456789./-'});const d2=await ocr(worker,threshold(crop,150),{psm:7,whitelist:'0123456789./-'});for(const tx of [d1.text||'',d2.text||'']){const dv=extractDate(tx);if(dv)dateVotes.push(dv);}}
     const date=dateVote(dateVotes); if(date)timestamps.date=bannerTime;
@@ -410,64 +415,64 @@
     onProgress?.(100,'Analyse abgeschlossen');
     return {targetId:/^\d{1,6}$/.test(idV?.value||'')?(idV.value||''):'',reason:reasonV?.value||'',sc:onlineSeen?(sc||''):'',server,date,offline:!onlineSeen,missing,complete:missing.length===0,timestamps,confidence:{id:idV?idV.votes/Math.max(1,frames.length):0,reason:reasonV?reasonV.votes/Math.max(1,frames.length):0,sc:sc?1:0,server:server?1:0,date:date?1:0}};
   }
-  function openVideoNewTab(entry,seconds=0){if(!entry)return;const file=entry.file||null;if(!file){toast('POV-Datei ist nicht verfügbar.');return;}const url=URL.createObjectURL(file);const w=window.open('about:blank','_blank');if(!w){toast('Pop-up blockiert. Bitte Pop-ups erlauben.');URL.revokeObjectURL(url);return;}w.document.write(`<!doctype html><meta charset="utf-8"><title>${esc(entry.finalName||entry.originalName)}</title><style>html,body{margin:0;background:#05040a;color:#eee;font-family:Inter,Arial,sans-serif;height:100%}.wrap{height:100%;display:flex;flex-direction:column}.bar{padding:10px 14px;background:#120d19;border-bottom:1px solid #2a2033;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.bar button,.bar input{background:#1b1424;border:1px solid #3a2948;color:#eee;border-radius:7px;padding:7px 9px}.stage{flex:1;display:grid;place-items:center;position:relative;overflow:hidden}video{max-width:100%;max-height:100%;object-fit:contain}</style><div class="wrap"><div class="bar"><strong>${esc(entry.finalName||entry.originalName)}</strong><label>Zeit <input id="t" type="number" min="0" step="0.1" value="${Math.max(0,Number(seconds)||0)}"></label><button id="go">Springen</button><button id="minus">−1s</button><button id="plus">+1s</button></div><div class="stage"><video id="v" controls autoplay src="${url}"></video></div></div><script>const v=document.getElementById('v');const t=document.getElementById('t');const set=()=>{v.currentTime=Math.max(0,Number(t.value)||0)};document.getElementById('go').onclick=set;document.getElementById('minus').onclick=()=>{v.currentTime=Math.max(0,v.currentTime-1);t.value=v.currentTime.toFixed(1)};document.getElementById('plus').onclick=()=>{v.currentTime=Math.min(v.duration||1e9,v.currentTime+1);t.value=v.currentTime.toFixed(1)};v.addEventListener('timeupdate',()=>t.value=v.currentTime.toFixed(1));v.addEventListener('loadedmetadata',set);window.addEventListener('beforeunload',()=>URL.revokeObjectURL(${JSON.stringify(url)}));<\/script>`);w.document.close();}
-
-  function openManualPicker(entry, field){
+  async function openManualPicker(entry, field){
     if(!entry)return;
-    const file=entry.file||null;
-    if(!file){toast('POV-Datei ist nicht verfügbar.');return;}
-    const start=Number(entry.result?.timestamps?.[field]||entry.result?.timestamps?.banner||0)||0;
-    const url=URL.createObjectURL(file);
-    const w=window.open('about:blank','_blank','noopener,noreferrer');
-    if(!w){toast('Pop-up blockiert. Bitte Pop-ups erlauben.');URL.revokeObjectURL(url);return;}
-    const title=field==='targetId'?'Ziel-ID':field==='reason'?'Grund':field==='sc'?'SC':field==='server'?'Server':field==='date'?'Datum':'Discord ID';
-    w.document.write(`<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${title} manuell auswählen</title><script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script><style>html,body{margin:0;background:#07060c;color:#eee;font-family:Inter,Arial,sans-serif}.wrap{min-height:100vh;display:flex;flex-direction:column}.bar{padding:12px 14px;background:#120d19;border-bottom:1px solid #2b2134;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.bar strong{margin-right:auto}.bar button,.bar input,.bar select,.bar textarea{background:#1a1322;color:#fff;border:1px solid #3b2a49;border-radius:8px;padding:8px}.bar button.primary{background:#ff2380;border-color:#ff2380}.help{padding:10px 14px;color:#b8aebf;font-size:13px}.stage{padding:14px;display:grid;place-items:center;min-height:60vh}.frame{position:relative;display:inline-block;max-width:100%;max-height:70vh}.frame video{display:block;max-width:100%;max-height:70vh;background:#000}.frame canvas{position:absolute;left:0;top:0;cursor:crosshair}.result{padding:14px;border-top:1px solid #2b2134;display:grid;gap:8px}.result textarea{width:100%;min-height:70px;box-sizing:border-box}.small{font-size:12px;color:#988ca0}.status{color:#69e1af}.warn{color:#ffbf66}</style></head><body><div class="wrap"><div class="bar"><strong>${title} manuell auswählen</strong><label>Zeit <input id="time" type="number" step="0.1" min="0" value="${start}"></label><button id="seek">Springen</button><button id="prev">−0.5s</button><button id="next">+0.5s</button><select id="preset"><option value="">Bereich wählen</option><option value="chat">Links oben Chat</option><option value="server">Rechts oben Server</option><option value="date">Rechts unten Datum</option></select></div><div class="help">Ziehe mit der Maus einen Rahmen um den Text im Video. Danach wird <b>nur diese Auswahl</b> per OCR gelesen. Bei Unsicherheit kannst du den Text unten auch direkt eingeben.</div><div class="stage"><div class="frame"><video id="v" controls autoplay src="${url}"></video><canvas id="overlay"></canvas></div></div><div class="result"><div id="status" class="small">Bereit.</div><textarea id="manual" placeholder="Erkannten Text hier korrigieren oder direkt eingeben…"></textarea><div><button id="ocr" class="primary">Auswahl per OCR lesen</button><button id="use" class="primary">Text übernehmen</button><button id="clear">Auswahl löschen</button></div></div></div><script>(()=>{const FIELD=${JSON.stringify(field)},START=${JSON.stringify(start)},URL=${JSON.stringify(url)};const v=document.getElementById('v'),c=document.getElementById('overlay'),ctx=c.getContext('2d'),time=document.getElementById('time'),manual=document.getElementById('manual'),status=document.getElementById('status');let sel=null,drawing=false,sx=0,sy=0;function sync(){const r=v.getBoundingClientRect();c.width=Math.max(1,Math.round(r.width));c.height=Math.max(1,Math.round(r.height));c.style.width=r.width+'px';c.style.height=r.height+'px';draw()}function draw(){ctx.clearRect(0,0,c.width,c.height);if(sel){ctx.fillStyle='rgba(255,35,128,.15)';ctx.fillRect(sel.x,sel.y,sel.w,sel.h);ctx.strokeStyle='#ff2380';ctx.lineWidth=2;ctx.strokeRect(sel.x+.5,sel.y+.5,sel.w,sel.h)}}function pos(e){const r=c.getBoundingClientRect();return{x:Math.max(0,Math.min(c.width,e.clientX-r.left)),y:Math.max(0,Math.min(c.height,e.clientY-r.top))}}c.addEventListener('pointerdown',e=>{const p=pos(e);drawing=true;sx=p.x;sy=p.y;sel={x:sx,y:sy,w:0,h:0};c.setPointerCapture(e.pointerId);draw()});c.addEventListener('pointermove',e=>{if(!drawing)return;const p=pos(e);sel={x:Math.min(sx,p.x),y:Math.min(sy,p.y),w:Math.abs(p.x-sx),h:Math.abs(p.y-sy)};draw()});c.addEventListener('pointerup',()=>drawing=false);function seek(){v.currentTime=Math.max(0,Number(time.value)||0)}document.getElementById('seek').onclick=seek;document.getElementById('prev').onclick=()=>{v.currentTime=Math.max(0,v.currentTime-.5);time.value=v.currentTime.toFixed(1)};document.getElementById('next').onclick=()=>{v.currentTime=Math.min(v.duration||1e9,v.currentTime+.5);time.value=v.currentTime.toFixed(1)};v.addEventListener('timeupdate',()=>time.value=v.currentTime.toFixed(1));v.addEventListener('loadedmetadata',()=>{sync();v.currentTime=Math.min(v.duration||START,Math.max(0,START))});window.addEventListener('resize',sync);document.getElementById('clear').onclick=()=>{sel=null;draw();manual.value='';status.textContent='Auswahl gelöscht.'};document.getElementById('preset').onchange=e=>{const r=v.getBoundingClientRect();const presets={chat:[0,.02,.62,.34],server:[.88,.01,.12,.16],date:[.78,.80,.22,.20]};const p=presets[e.target.value];if(!p)return;sel={x:r.width*p[0],y:r.height*p[1],w:r.width*p[2],h:r.height*p[3]};draw()};document.getElementById('ocr').onclick=async()=>{if(!sel||sel.w<5||sel.h<5){status.textContent='Bitte zuerst einen Bereich markieren.';return}status.textContent='OCR läuft…';try{const sX=sel.x/c.clientWidth*v.videoWidth,sY=sel.y/c.clientHeight*v.videoHeight,sW=sel.w/c.clientWidth*v.videoWidth,sH=sel.h/c.clientHeight*v.videoHeight;const out=document.createElement('canvas');out.width=Math.max(1,Math.round(sW*2.5));out.height=Math.max(1,Math.round(sH*2.5));out.getContext('2d').drawImage(v,sX,sY,sW,sH,0,0,out.width,out.height);const res=await Tesseract.recognize(out,'eng',{logger:m=>{if(m.status&&m.progress)status.textContent=Math.round(m.progress*100)+'% '+m.status}});manual.value=(res.data.text||'').trim();status.textContent='OCR fertig. Bitte prüfen und „Text übernehmen“ klicken.'}catch(err){status.textContent='OCR-Fehler: '+err.message}};document.getElementById('use').onclick=()=>{const value=manual.value.trim();if(!value){status.textContent='Kein Text vorhanden.';return}if(window.opener){window.opener.postMessage({type:'grandrp-manual-field',field:FIELD,value,time:Number(v.currentTime)||0},'*');status.textContent='Übernommen. Dieses Fenster kann jetzt geschlossen werden.'}else{status.textContent='Kein Ursprungsfenster vorhanden.'}};})();</script></body></html>`);
-    w.document.close();
-    setTimeout(()=>{URL.revokeObjectURL(url);},0);
+    try{
+      const id=entry.id;
+      const file=entry.file||await getVideo(id);
+      if(!file){toast('POV-Datei ist nicht verfügbar.');return;}
+      await putVideo(id,file);
+      const t=Number(entry.result?.timestamps?.[field]||entry.result?.timestamps?.banner||0)||0;
+      const target=new URL('manual.html',location.href);
+      target.searchParams.set('job',id);
+      target.searchParams.set('field',field);
+      target.searchParams.set('t',String(t));
+      const w=window.open(target.href,'_blank');
+      if(!w){toast('Pop-up blockiert. Bitte Pop-ups für die Website erlauben.');return;}
+    }catch(err){console.error(err);toast('Manuelle Auswahl konnte nicht geöffnet werden: '+err.message);}
   }
-
   function applyManualField(field,value,time){
     const ctx=state.editing;if(!ctx)return;
+    const target=ctx.item?.result||ctx.entry||{};
     let v=String(value||'').trim();
-    if(field==='targetId') v=parseTargetId(v)||normalizeIdToken(v);
-    if(field==='reason'){const r=canonicalReason(v);v=r?.value||'';}
-    if(field==='sc') v=normalizeHexLoose(v); if(v.length!==40)v='';
-    if(field==='server'){const m=String(v).match(/[1-4]/);v=m?m[0]:'';}
-    if(field==='date'){v=extractDate(v)||'';}
-    if(field==='discordId'){v=v.replace(/[^0-9]/g,'');}
-    if(field==='targetId')$('#targetId').value=clampId(v);
-    else if(field==='reason')$('#reason').value=v;
-    else if(field==='sc')$('#sc').value=v;
-    else if(field==='server')$('#server').value=v;
-    else if(field==='date')$('#date').value=v;
-    else if(field==='discordId')$('#discordId').value=v;
-    renderTitlePreview();
-    const target=ctx.item?.result||ctx.entry||{}; if(target){target.timestamps=target.timestamps||{};target.timestamps[field]=Number(time)||target.timestamps[field]||0;}
-    setFieldStatus(ctx.item||{result:target});
-    toast(`${field==='targetId'?'Ziel-ID':field==='reason'?'Grund':field==='sc'?'SC':field==='server'?'Server':field==='date'?'Datum':'Discord ID'} übernommen.`);
+    if(field==='targetId')v=clampId(v);
+    else if(field==='reason'){const r=classifyReasonStrong(v)||canonicalReason(v);v=r?.value||r||'';if(v&&typeof v!=='string')v=r.value||'';}
+    else if(field==='sc'){v=normalizeHexLoose(v);if(v.length!==40)v='';}
+    else if(field==='server'){const m=v.match(/[1-4]/);v=m?m[0]:'3';}
+    else if(field==='date'){v=extractDate(v)||v;}
+    else if(field==='discordId'){v=v.replace(/[^0-9]/g,'');}
+    if(ctx.item){ctx.item.result={...ctx.item.result,[field]:v};ctx.item.result.timestamps={...(ctx.item.result.timestamps||{}),[field]:Number(time)||ctx.item.result.timestamps?.banner||0};if(field==='sc'&&v)ctx.item.result.offline=false;renderQueue();setEditorValues({...ctx.item.result,proof:ctx.item.youtube?.url||ctx.item.result.proof||''});setFieldStatus(ctx.item);}
+    if(ctx.entry){ctx.entry[field]=v;ctx.entry.timestamps={...(ctx.entry.timestamps||{}),[field]:Number(time)||ctx.entry.timestamps?.banner||0};if(field==='sc'&&v)ctx.entry.offline=false;setEditorValues(ctx.entry);setFieldStatus({result:ctx.entry});}
+    if(field==='reason'||field==='targetId'||field==='date')renderTitlePreview();
+    toast(`${field==='sc'?'SC':field==='server'?'Server':field==='reason'?'Grund':field==='targetId'?'Ziel-ID':field==='date'?'Datum':'Discord ID'} übernommen.`);
   }
-
-  function setFieldStatus(item){const r=item.result||{};const status=[['ID',!!r.targetId],['Grund',!!r.reason],['SC',r.offline?'offline':!!r.sc],['Server',!!r.server],['Datum',!!r.date]];$('#fieldStatus').innerHTML=status.map(([k,ok])=>`<div class="status-chip ${ok?'ok':'warn'}">${ok==='offline'?'—':(ok?'✓':'⚠')} ${k}</div>`).join('');$$('.jump').forEach(btn=>{const key=btn.dataset.field;const missing=!r[key]&&(['targetId','reason','sc','server','date'].includes(key))&&!(key==='sc'&&r.offline);btn.classList.toggle('hidden',!missing);btn.textContent=missing?'Manuell auswählen':'';btn.onclick=()=>openManualPicker(item,key);});const warn=item.result?.missing?.length?`⚠ Fehlend: ${item.result.missing.join(' · ')}. Klicke bei einem Feld auf „Manuell auswählen“. Offline-Spieler können ohne IP/SC auftreten.`:'';$('#ocrWarning').textContent=warn;$('#ocrWarning').classList.toggle('hidden',!warn);}
-  function setEditorValues(r){$('#targetId').value=clampId(r.targetId);$('#reason').value=ALLOWED_REASONS.includes(r.reason)?r.reason:'';$('#sc').value=r.sc||'';$('#server').value=/^[1-4]$/.test(r.server||'')?r.server:'';$('#date').value=r.date||'';$('#discordId').value=r.discordId||'';$('#proof').value=r.proof||'';$('#perma').checked=!!r.perma;$('#notBanned').checked=!!r.notBanned;renderTitlePreview();}
-  function renderTitlePreview(){const id=clampId($('#targetId').value),reason=$('#reason').value,date=formatDateDE($('#date').value);$('#titlePreview').value=id&&reason&&date?`${id}, ${reason}, ${date}.mp4`:'';}
-  function setFieldStatus(item){const r=item.result||{};const status=[['ID',!!r.targetId],['Grund',!!r.reason],['SC',r.offline?'offline':!!r.sc],['Server',!!r.server],['Datum',!!r.date]];$('#fieldStatus').innerHTML=status.map(([k,ok])=>`<div class="status-chip ${ok?'ok':'warn'}">${ok==='offline'?'—':(ok?'✓':'⚠')} ${k}</div>`).join('');$$('.jump').forEach(btn=>{const key=btn.dataset.field;const missing=!r[key]&&(['targetId','reason','sc','server','date'].includes(key))&&!(key==='sc'&&r.offline);btn.classList.toggle('hidden',!missing);btn.onclick=()=>openVideoNewTab(item,item.result?.timestamps?.[key]||item.result?.timestamps?.banner||0);});const warn=item.result?.missing?.length?`⚠ Fehlend: ${item.result.missing.join(' · ')}. Öffne bei Bedarf die POV direkt an der Fundstelle. Offline-Spieler können ohne IP/SC auftreten.`:'';$('#ocrWarning').textContent=warn;$('#ocrWarning').classList.toggle('hidden',!warn);}
+  async function openVideoNewTab(entry,seconds=0){
+    if(!entry)return;
+    try{
+      const file=entry.file||await getVideo(entry.id); if(!file){toast('POV-Datei ist nicht verfügbar.');return;}
+      await putVideo(entry.id,file);
+      const target=new URL('manual.html',location.href);target.searchParams.set('job',entry.id);target.searchParams.set('field','view');target.searchParams.set('t',String(Number(seconds)||0));
+      const w=window.open(target.href,'_blank','noopener'); if(!w)toast('Pop-up blockiert. Bitte Pop-ups für die Website erlauben.');
+    }catch(err){console.error(err);toast('POV konnte nicht geöffnet werden: '+err.message);}
+  }
   function openEditor(item){state.editing={item};$('#modalFile').textContent=item.finalName||item.file.name;setEditorValues({...item.result,discordId:item.result?.discordId||'',proof:item.result?.proof||'',perma:false,notBanned:false});state.selectedTypes=new Set(item.result?.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus(item);$('#editorModal').classList.remove('hidden');}
   async function openEditorFromEntry(entry){const file=entry.file||await getVideo(entry.id);if(file)entry.file=file;state.editing={entry};$('#modalFile').textContent=entry.finalName||entry.originalName;setEditorValues(entry);state.selectedTypes=new Set(entry.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus({result:entry});$('#editorModal').classList.remove('hidden');}
   function closeEditor(){state.editing=null;$('#editorModal').classList.add('hidden');}
   async function saveEditor(e){
     e.preventDefault(); const ctx=state.editing; if(!ctx)return;
-    const targetId=clampId($('#targetId').value), reason=$('#reason').value, sc=normalizeHexLoose($('#sc').value), server=$('#server').value, date=$('#date').value;
+    const targetId=clampId($('#targetId').value), reason=$('#reason').value, sc=normalizeHexLoose($('#sc').value), server=$('#server').value||'3', date=$('#date').value;
     const offline=!!(ctx.item?.result?.offline||ctx.entry?.offline);
     const missing=[]; if(!/^\d{1,6}$/.test(targetId))missing.push('Ziel-ID'); if(!ALLOWED_REASONS.includes(reason))missing.push('Grund'); if(!/^[1-4]$/.test(server))missing.push('Server'); if(!validDate(date))missing.push('Datum'); if(!offline && sc.length!==40)missing.push('SC');
     if(missing.length){toast('Bitte fehlende Angaben prüfen: '+missing.join(', '));return;}
     const base=ctx.item||ctx.entry; const types=[...state.selectedTypes]; if(reason.startsWith('PC'))types.push('pccheck'); if(reason==='Cheating')types.push('cheater'); const finalTypes=[...new Set(types)];
     const finalName=`${targetId}, ${reason}, ${formatDateDE(date)}.mp4`;
     const namedFile=new File([base.file],finalName,{type:base.file.type||'video/mp4',lastModified:base.file.lastModified||Date.now()});
-    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,sc:offline?'':sc,server,date,types:finalTypes,perma:$('#perma').checked,notBanned:$('#notBanned').checked,discordId:$('#discordId').value.trim(),proof:$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,timestamps:base.result?.timestamps||base.timestamps||{},missing:[],file:namedFile};
+    const yt=base.youtube||ctx.item?.youtube||ctx.entry?.youtube||null;
+    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,sc:offline?'':sc,server,date,types:finalTypes,perma:$('#perma').checked,notBanned:$('#notBanned').checked,discordId:$('#discordId').value.trim(),proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,timestamps:base.result?.timestamps||base.timestamps||{},missing:[],file:namedFile,youtube:yt};
     await putVideo(record.id,namedFile); state.entries=[record,...state.entries.filter(x=>x.id!==record.id)]; saveMeta();
     if(ctx.item){ctx.item.file=namedFile;ctx.item.finalName=finalName;ctx.item.result={...ctx.item.result,...record};ctx.item.status='Gespeichert';ctx.item.progress=100;renderQueue();}
-    closeEditor(); renderArchive(); renderCases(); renderCsv(); toast('Gespeichert. Die POV wurde erst jetzt final benannt.');
-    if(state.accessToken&&state.clientId){try{const url=await uploadYoutube(namedFile,finalName,state.accessToken);const saved=state.entries.find(x=>x.id===record.id);if(saved){saved.proof=url;saveMeta();renderArchive();renderCsv();}toast('YouTube-Upload abgeschlossen.');}catch(err){console.error(err);toast('YouTube-Upload fehlgeschlagen: '+err.message);}}
+    closeEditor(); renderArchive(); renderCases(); renderCsv(); toast('Gespeichert. Die POV wurde erst nach vollständiger Verarbeitung final benannt.');
+    if(yt?.id&&state.accessToken){try{await updateYoutubeTitle(yt.id,finalName.replace(/\.mp4$/i,''),state.accessToken);toast('YouTube-Titel aktualisiert.');}catch(err){console.error(err);toast('YouTube-Titel konnte nicht aktualisiert werden. Das Video bleibt online.');}}
   }
   window.addEventListener('message',e=>{if(e.data?.type==='grandrp-manual-field'){applyManualField(e.data.field,e.data.value,e.data.time);}});
 
@@ -476,13 +481,56 @@
     $$('.chip').forEach(c=>c.onclick=()=>{const v=c.dataset.value;c.classList.toggle('active');if(c.classList.contains('active'))state.selectedTypes.add(v);else state.selectedTypes.delete(v);});
   }
 
-  async function processQueue(){for(const item of state.queue){if(item.processing||item.editingDone||item.status==='Gespeichert')continue;item.processing=true;try{item.status='Datei wird vollständig eingelesen';item.progress=4;renderQueue();const video=$('#videoProbe');const url=URL.createObjectURL(item.file);video.src=url;await loaded(video);item.progress=8;item.status='OCR Schnellscan startet';renderQueue();item.result=await analyzeVideo(video,p=>{item.progress=p;renderQueue();});item.result.originalName=item.file.name;item.result.types=[];item.status=item.result.complete?'OCR fertig · Prüfung offen':'OCR unvollständig · Prüfung nötig';renderQueue();openEditor(item);await new Promise(resolve=>{const timer=setInterval(()=>{if(!state.editing){clearInterval(timer);resolve();}},150);});URL.revokeObjectURL(url);}catch(err){console.error(err);item.status='Fehler: '+(err?.message||err);item.progress=0;renderQueue();}finally{item.processing=false;}}
+  async function processQueue(){
+    for(const item of state.queue){
+      if(item.processing||item.editingDone||item.status==='Gespeichert')continue;
+      if(!state.accessToken||!state.clientId){item.status='YouTube zuerst verbinden';renderQueue();continue;}
+      item.processing=true;
+      try{
+        // Store the original file in IndexedDB immediately so the same-origin manual picker can open it later.
+        await putVideo(item.id,item.file);
+        item.status='YouTube: vollständiger Upload';item.progress=2;renderQueue();
+        item.youtube=await uploadYoutube(item.file,item.file.name,state.accessToken,p=>{item.progress=2+Math.round(p*.38);item.status=`YouTube-Upload ${p}%`;renderQueue();});
+        item.status='YouTube-Upload abgeschlossen · OCR startet';item.progress=40;renderQueue();
+        const video=$('#videoProbe');const url=URL.createObjectURL(item.file);video.src=url;await loaded(video);item.progress=42;renderQueue();
+        item.result=await analyzeVideo(video,p=>{item.progress=42+Math.round(p*.58);renderQueue();});
+        item.result.originalName=item.file.name;item.result.types=[];item.result.proof=item.youtube.url;item.result.youtube=item.youtube;item.status=item.result.complete?'OCR fertig · Prüfung offen':'OCR unvollständig · Prüfung nötig';renderQueue();openEditor(item);
+        await new Promise(resolve=>{const timer=setInterval(()=>{if(!state.editing){clearInterval(timer);resolve();}},150);});
+        URL.revokeObjectURL(url);
+      }catch(err){console.error(err);item.status='Fehler: '+(err?.message||err);item.progress=0;renderQueue();}
+      finally{item.processing=false;}
+    }
   }
-
   async function initYoutube(){if(!state.clientId)throw new Error('Bitte zuerst die Google OAuth Client-ID in Einstellungen eintragen.');if(!window.google?.accounts?.oauth2)throw new Error('Google OAuth ist noch nicht geladen.');state.tokenClient=google.accounts.oauth2.initTokenClient({client_id:state.clientId,scope:'https://www.googleapis.com/auth/youtube.upload',callback:(resp)=>{if(resp.error){toast('YouTube OAuth: '+resp.error);return;}state.accessToken=resp.access_token;sessionStorage.setItem('yt_access_token',resp.access_token);updateYtStatus(true);toast('YouTube verbunden.');}});state.tokenClient.requestAccessToken({prompt:'consent'});}
   function updateYtStatus(){const connected=!!state.accessToken;$('#ytStatus').textContent=connected?'● Verbunden':'● Nicht verbunden';$('#ytStatus').style.color=connected?'#69e1af':'#7f7488';}
-  async function uploadYoutube(file,title,token){if(!file||!token)throw new Error('YouTube nicht verbunden.');const meta={snippet:{title,description:'Grand RP POV Checker',categoryId:'20'},status:{privacyStatus:'unlisted',selfDeclaredMadeForKids:false}};const init=await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json; charset=UTF-8','X-Upload-Content-Length':String(file.size),'X-Upload-Content-Type':file.type||'video/mp4'},body:JSON.stringify(meta)});if(!init.ok)throw new Error((await init.text()).slice(0,300));const loc=init.headers.get('Location');if(!loc)throw new Error('YouTube Upload-URL fehlt.');const up=await fetch(loc,{method:'PUT',headers:{Authorization:`Bearer ${token}`,'Content-Type':file.type||'video/mp4'},body:file});if(!up.ok)throw new Error((await up.text()).slice(0,300));const data=await up.json();return `https://youtu.be/${data.id}`;}
-  function setupSettings(){state.settings.frames=Number(localStorage.getItem('v26_frames')||24);state.settings.window=Number(localStorage.getItem('v26_window')||4.5);state.settings.step=Number(localStorage.getItem('v26_step')||.5);$('#frameCount').value=state.settings.frames;$('#refineWindow').value=state.settings.window;$('#refineStep').value=state.settings.step;$('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v26_frames',state.settings.frames)};$('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v26_window',state.settings.window)};$('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v26_step',state.settings.step)};$('#connectYoutube').onclick=()=>initYoutube().catch(e=>toast(e.message));$('#disconnectYoutube').onclick=()=>{state.accessToken='';sessionStorage.removeItem('yt_access_token');updateYtStatus();};$('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen?'))return;state.entries=[];state.queue=[];saveMeta();await clearDB();renderArchive();renderCases();renderCsv();renderQueue();toast('Lokale Daten gelöscht.');};updateYtStatus();}
+  async function uploadYoutube(file,title,token,onProgress){
+    if(!file||!token)throw new Error('YouTube nicht verbunden.');
+    const safeTitle=String(title||file.name||'Grand RP POV').replace(/\.[^.]+$/,'').slice(0,100);
+    const meta={snippet:{title:safeTitle,description:'Grand RP POV Checker',categoryId:'20'},status:{privacyStatus:'unlisted',selfDeclaredMadeForKids:false}};
+    const init=await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json; charset=UTF-8','X-Upload-Content-Length':String(file.size),'X-Upload-Content-Type':file.type||'video/mp4'},body:JSON.stringify(meta)});
+    if(!init.ok)throw new Error((await init.text()).slice(0,500));
+    const loc=init.headers.get('Location');if(!loc)throw new Error('YouTube Upload-URL fehlt.');
+    const data=await new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('PUT',loc,true);xhr.setRequestHeader('Authorization',`Bearer ${token}`);xhr.setRequestHeader('Content-Type',file.type||'video/mp4');xhr.upload.onprogress=e=>{if(e.lengthComputable)onProgress?.(Math.round(e.loaded/e.total*100));};xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300){try{resolve(JSON.parse(xhr.responseText));}catch(err){reject(err);}}else{reject(new Error(xhr.responseText?.slice(0,500)||`YouTube Upload HTTP ${xhr.status}`));}};xhr.onerror=()=>reject(new Error('Netzwerkfehler beim YouTube-Upload.'));xhr.send(file);});
+    return {id:data.id,url:`https://youtu.be/${data.id}`};
+  }
+  async function updateYoutubeTitle(videoId,title,token){
+    if(!videoId||!token)return;
+    const safeTitle=String(title||'POV').slice(0,100);
+    const meta={id:videoId,snippet:{title:safeTitle,description:'Grand RP POV Checker',categoryId:'20'}};
+    const r=await fetch('https://www.googleapis.com/youtube/v3/videos?part=snippet',{method:'PUT',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(meta)});
+    if(!r.ok)throw new Error((await r.text()).slice(0,500));
+  }
+  function setupSettings(){
+    state.settings.frames=Number(localStorage.getItem('v28_frames')||24);state.settings.window=Number(localStorage.getItem('v28_window')||4.5);state.settings.step=Number(localStorage.getItem('v28_step')||.5);
+    $('#frameCount').value=state.settings.frames;$('#refineWindow').value=state.settings.window;$('#refineStep').value=state.settings.step;
+    $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v28_frames',state.settings.frames)};
+    $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v28_window',state.settings.window)};
+    $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v28_step',state.settings.step)};
+    $('#connectYoutube').onclick=()=>initYoutube().then(()=>processQueue()).catch(e=>toast(e.message));
+    $('#disconnectYoutube').onclick=()=>{state.accessToken='';sessionStorage.removeItem('yt_access_token');updateYtStatus();};
+    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen?'))return;state.entries=[];state.queue=[];saveMeta();await clearDB();renderArchive();renderCases();renderCsv();renderQueue();toast('Lokale Daten gelöscht.');};
+    updateYtStatus();
+  }
 
   window.addEventListener('beforeunload',()=>{try{state.worker?.terminate();}catch{}});
   setupNav();setupUpload();setupEditor();setupSettings();loadMeta();renderArchive();renderQueue();updateYtStatus();
