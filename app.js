@@ -94,123 +94,288 @@ function cleanText(s){
     .trim();
 }
 
-function normalizeId(s){return String(s||'').toUpperCase().replace(/[OIQL]/g,'1').replace(/[Z]/g,'2').replace(/[S]/g,'5').replace(/[G]/g,'6').replace(/[T]/g,'7').replace(/[B]/g,'8').replace(/[^0-9]/g,'')}
-function normalizeHex(s){return String(s||'').replace(/[OoQq]/g,'0').replace(/[IiLl|]/g,'1').replace(/[Ss]/g,'5').replace(/[Zz]/g,'2').replace(/[Gg]/g,'6').replace(/[^0-9A-Fa-f]/g,'')}
-function extractScFromText(src){
-  const m=src.match(/(?:\bSC\s*[:\-]?|Social\s+Club\s+ID)\s*([\s\S]*)/i);
-  if(!m)return '';
-  let tail=m[1];
-  // Only inspect a short window after the marker. This prevents IPs and later chat lines from contaminating the SC.
-  tail=tail.split(/\n\s*(?:\[AC\]|\[A\]|Administrator\b|Grund\s*:)/i)[0];
-  const compact=normalizeHex(tail);
-  const exact=compact.match(/[0-9A-F]{40}/i);
-  if(exact)return exact[0].toLowerCase();
-  if(compact.length>=36 && compact.length<=44)return compact.slice(0,40).toLowerCase();
-  // OCR can split the 40-character SC over two lines.
-  const lines=tail.split(/\n/).map(x=>normalizeHex(x)).filter(Boolean);
-  let joined='';
-  for(const line of lines){joined+=line;if(joined.length>=40)break}
-  const j=joined.match(/[0-9A-F]{40}/i);
-  return j?j[0].toLowerCase():'';
+const ALLOWED_REASONS=[
+  'PC Check Positiv',
+  'PC Check Verweigert',
+  'Cheating',
+  'Acc 1.1',
+  'Acc 1.4',
+  'Event 1.7'
+];
+
+function normalizeId(s){
+  return String(s||'').toUpperCase()
+    .replace(/[OQIDL|]/g,'1').replace(/[Z]/g,'2').replace(/[S]/g,'5')
+    .replace(/[G]/g,'6').replace(/[T]/g,'7').replace(/[B]/g,'8')
+    .replace(/[^0-9]/g,'');
 }
-function bestVote(values,normalizer,minLen=1){const vals=values.map(v=>normalizer(v)).filter(v=>v&&v.length>=minLen);if(!vals.length)return'';const counts=new Map();for(const v of vals)counts.set(v,(counts.get(v)||0)+1);return [...counts.entries()].sort((a,b)=>b[1]-a[1]||b[0].length-a[0].length)[0][0]}
-function inferTypes(reason){const r=String(reason||'').toLowerCase(),out=[];if(/pc\s*[- ]?check/.test(r))out.push('pccheck');if(/cheat|cheater|cheating/.test(r))out.push('cheater');if(/soc(?:ial)?\s*[- ]?ban|soc[- ]?ban/.test(r))out.push('socban');if(/hard\s*ban|hardban/.test(r))out.push('hardban');if(/negativ/.test(r))out.push('negativ');return out}
-async function ocr(worker,canvas,params={}){await worker.setParameters({tessedit_pageseg_mode:params.psm??6,tessedit_char_whitelist:params.whitelist||'',preserve_interword_spaces:'1',user_defined_dpi:'300'});const r=await worker.recognize(canvas);return r.data||{text:''}}
-async function analyzeVideo(video,duration,onProgress){
-  const frames=Math.max(20,Math.min(120,Number(localStorage.getItem('frame_count')||60)));
-  const start=Math.max(0,duration-40),span=Math.max(.1,duration-start);
-  const worker=await Tesseract.createWorker('eng',1);
-  const ids=[],reasons=[],servers=[],dates=[];
-  const frameRecords=[];
-  try{
-    for(let i=0;i<frames;i++){
-      const t=start+span*((i+.27)/frames);
-      await seek(video,t);
-      const left=preprocess(crop(video,0,.07,.70,.29,2.8),'normal');
-      const left2=preprocess(left,'high');
-      const left3=preprocess(left,'dark');
-      const [a,b,c]=await Promise.all([
-        ocr(worker,left,{psm:6}),ocr(worker,left2,{psm:6}),ocr(worker,left3,{psm:11})
-      ]);
-      const parsed=parseSingleFrame([a.text||'',b.text||'',c.text||'']);
-      if(parsed.id)ids.push(parsed.id);
-      if(parsed.reason)reasons.push(parsed.reason);
-
-      // Keep SC attached to the same target-ID + reason block. This prevents a later
-      // Social Club line for another player from being combined with this ban.
-      const frameSc=(parsed.id&&parsed.reason)?parsed.sc:'';
-
-      const frameServers=[];
-      const serverCrops=serverDigitCrops(video);
-      for(const canvas of serverCrops.slice(0,3)){
-        const [s1,s2,s3]=await Promise.all([
-          ocr(worker,canvas,{psm:10,whitelist:'1234'}),
-          ocr(worker,preprocess(canvas,'high'),{psm:10,whitelist:'1234'}),
-          ocr(worker,preprocess(canvas,'dark'),{psm:13,whitelist:'1234'})
-        ]);
-        frameServers.push(...serverVotesFromTexts([s1.text||'',s2.text||'',s3.text||'']));
+function normalizeHex(s){
+  // Never rewrite valid A-F characters. Only map characters that cannot be a hex digit.
+  return String(s||'')
+    .replace(/[OoQq]/g,'0').replace(/[IiLl|]/g,'1')
+    .replace(/[Zz]/g,'2').replace(/[Ss]/g,'5').replace(/[Gg]/g,'6')
+    .replace(/[^0-9A-Fa-f]/g,'');
+}
+function reasonKey(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'')}
+function levenshtein(a,b){
+  a=String(a);b=String(b);if(a===b)return 0;if(!a)return b.length;if(!b)return a.length;
+  let prev=Array.from({length:b.length+1},(_,i)=>i);
+  for(let i=1;i<=a.length;i++){
+    const cur=[i];
+    for(let j=1;j<=b.length;j++) cur[j]=Math.min(cur[j-1]+1,prev[j]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));
+    prev=cur;
+  }
+  return prev[b.length];
+}
+function similarity(a,b){a=reasonKey(a);b=reasonKey(b);if(!a||!b)return 0;return 1-levenshtein(a,b)/Math.max(a.length,b.length)}
+function normalizeReasonOcrText(s){
+  return String(s||'').toLowerCase()
+    .replace(/[‐‑‒–—]/g,'-')
+    .replace(/[|]/g,'i')
+    .replace(/0/g,'o')
+    .replace(/[^a-z0-9. -]/g,' ')
+    .replace(/\s+/g,' ').trim();
+}
+function reasonScoreForWindow(text, allowed){
+  const nk=reasonKey(text), ak=reasonKey(allowed);
+  let score=similarity(nk,ak);
+  const compact=nk;
+  if(allowed==='Cheating'){
+    if(/cheat(?:ing|er)?/.test(compact)) score=Math.max(score,.96);
+  }else if(/^Acc 1\.1$/.test(allowed)){
+    if(/\bacc?\s*1\s*1\b/.test(text)||/acc11/.test(compact)) score=Math.max(score,.95);
+  }else if(/^Acc 1\.4$/.test(allowed)){
+    if(/\bacc?\s*1\s*4\b/.test(text)||/acc14/.test(compact)) score=Math.max(score,.95);
+  }else if(/^Event 1\.7$/.test(allowed)){
+    if(/event\s*1\s*7/.test(text)||/event17/.test(compact)) score=Math.max(score,.95);
+  }else if(allowed==='PC Check Positiv'){
+    const pc=/p.?c.?\s*check/.test(compact), pos=/posit/.test(compact)||/posi/.test(compact);
+    if(pc&&pos)score=Math.max(score,.96);
+  }else if(allowed==='PC Check Verweigert'){
+    const pc=/p.?c.?\s*check/.test(compact), ver=/verweig|verweiger|verweigert/.test(compact);
+    // OCR often turns "Check Verweigerung" into fragmented tokens; PC + an approximate "verweig" is enough.
+    if(pc&&ver)score=Math.max(score,.96);
+    if(pc&&/rwe|we1g|we!g/.test(compact))score=Math.max(score,.90);
+  }
+  return score;
+}
+function classifyAllowedReason(src){
+  const normalized=normalizeOcr(src);
+  const lines=normalized.split('\n').map(x=>x.trim()).filter(Boolean);
+  const lower=normalized.toLowerCase();
+  const marker=/gr[uú]nd\s*[:\-]?/i.exec(lower);
+  const candidateChunks=[];
+  if(marker){
+    const after=normalized.slice(marker.index+marker[0].length);
+    const stop=after.search(/\b(?:IP|SC|5C|Social\s+Club)\s*:/i);
+    candidateChunks.push((stop>=0?after.slice(0,stop):after).slice(0,120));
+  }
+  // Also score each OCR line and short 2-4 line windows. This handles arbitrary line breaks.
+  candidateChunks.push(...lines.slice(0,12));
+  for(let i=0;i<lines.length;i++){
+    candidateChunks.push(lines.slice(i,Math.min(lines.length,i+4)).join(' '));
+  }
+  let best={reason:'',score:0};
+  for(const chunk of candidateChunks){
+    const clean=normalizeReasonOcrText(chunk);
+    for(const allowed of ALLOWED_REASONS){
+      let score=reasonScoreForWindow(clean,allowed);
+      // Compare the clean text to short windows of tokens to avoid IP/SC noise dominating.
+      const words=clean.split(/\s+/).filter(Boolean);
+      for(let i=0;i<words.length;i++){
+        let acc='';
+        for(let j=i;j<Math.min(words.length,i+7);j++){
+          acc+=(acc?' ':'')+words[j];
+          score=Math.max(score,reasonScoreForWindow(acc,allowed));
+        }
       }
-
-      const dateCanvas=preprocess(crop(video,.84,.86,.16,.14,3.5),'normal');
-      const [d1,d2]=await Promise.all([ocr(worker,dateCanvas,{psm:7,whitelist:'0123456789./-'}),ocr(worker,preprocess(dateCanvas,'dark'),{psm:7,whitelist:'0123456789./-'})]);
-      const dt=extractDate((d1.text||'')+'\n'+(d2.text||''));if(dt)dates.push(dt);
-
-      frameRecords.push({i,t,id:parsed.id,reason:parsed.reason,sc:frameSc,servers:frameServers,date:dt});
-      onProgress(10+(i+1)/frames*85,`Präzisions-OCR · Frame ${i+1}/${frames}`)
-    }
-  }finally{await worker.terminate()}
-
-  const id=bestVote(ids,normalizeId,3);
-  const reason=bestVote(reasons,cleanText,3);
-
-  // First use SC values from frames that identify the same player + reason.
-  // Then allow ±2 frames so a wrapped SC line is still associated with the same block.
-  const targetFrames=frameRecords.map((r,idx)=>({r,idx})).filter(x=>x.r.id===id&&x.r.reason===reason);
-  const scCandidates=[];
-  for(const {r,idx} of targetFrames){
-    if(r.sc)scCandidates.push(r.sc);
-    for(let j=Math.max(0,idx-2);j<=Math.min(frameRecords.length-1,idx+2);j++){
-      const n=frameRecords[j];
-      if(n.id===id&&n.sc)scCandidates.push(n.sc);
+      if(score>best.score)best={reason:allowed,score};
     }
   }
-  const sc=bestVote(scCandidates,normalizeHex,40);
-
-  // Prefer server votes from the target block. Fall back to all server frames only if
-  // no target block was found. Require stronger agreement before auto-filling.
-  const targetServerVotes=targetFrames.flatMap(x=>x.r.servers||[]);
-  const serverPool=targetServerVotes.length?targetServerVotes:frameRecords.flatMap(r=>r.servers||[]);
-  const serverCounts=new Map();for(const v of serverPool)serverCounts.set(v,(serverCounts.get(v)||0)+1);
-  const serverSorted=[...serverCounts.entries()].sort((a,b)=>b[1]-a[1]);
-  const topServer=serverSorted[0];
-  const server=topServer&&topServer[1]>=Math.max(3,Math.ceil(serverPool.length*.60))?topServer[0]:'';
-
-  const date=bestVote(dates,x=>x,10)||'';
-  const types=inferTypes(reason);
-  const confidence={
-    id:voteConfidence(ids,normalizeId,id),
-    reason:voteConfidence(reasons,cleanText,reason),
-    sc:voteConfidence(scCandidates,normalizeHex,sc),
-    server:server&&topServer?topServer[1]/Math.max(1,serverPool.length):0,
-    date:voteConfidence(dates,x=>x,date)
-  };
-  const complete=!!(id&&reason&&sc&&server&&date&&confidence.id>=.6&&confidence.reason>=.6&&confidence.sc>=.8&&confidence.server>=.60&&confidence.date>=.5);
-  return{id,reason,sc,server,date,types,confidence,complete,found:complete};
+  return best.score>=.76?best:{reason:'',score:best.score};
 }
+function findTargetId(src){
+  const text=normalizeOcr(src);
+  let m=text.match(/\bhat\s+[^\n\[]{1,90}\[(\d{1,8})\]/i);
+  if(m)return normalizeId(m[1]);
+  // Prefer the second bracketed ID in the administrator ban sentence.
+  const line=text.split('\n').find(x=>/hat/i.test(x));
+  if(line){
+    const ids=[...line.matchAll(/\[(?:\s*)([0-9OIQLZSGB]{1,8})(?:\s*)\]/gi)].map(x=>normalizeId(x[1])).filter(Boolean);
+    if(ids.length>=2)return ids[1];
+    if(ids.length===1)return ids[0];
+  }
+  const ids=[...text.matchAll(/\[(?:\s*)([0-9OIQLZSGB]{3,8})(?:\s*)\]/gi)].map(x=>normalizeId(x[1])).filter(Boolean);
+  return ids.length>=2?ids[1]:(ids[0]||'');
+}
+function extractSc40(text){
+  const raw=String(text||'');
+  const compact=normalizeHex(raw);
+  const hits=compact.match(/[0-9a-f]{40}/gi)||[];
+  return hits.filter(x=>x.length===40).map(x=>x.toLowerCase());
+}
+function extractScCandidatesFromText(src){
+  const n=normalizeOcr(src);
+  const lines=n.split('\n');
+  const out=[];
+  const markerRe=/\b(?:SC|5C|S\s*C|SOCIAL\s+CLUB(?:\s+ID)?)\b\s*[:\-]?/i;
+  let idx=-1,match=null;
+  for(let i=0;i<lines.length;i++){
+    const m=markerRe.exec(lines[i]);
+    if(m){idx=i;match=m;break;}
+  }
+  if(idx>=0){
+    const same=match?lines[idx].slice(match.index+match[0].length):'';
+    const block=[same,lines[idx+1]||'',lines[idx+2]||''].join('\n');
+    out.push(...extractSc40(block));
+  }
+  return [...new Set(out)];
+}
+function extractScFromDetailed(data,canvas){
+  const candidates=[];
+  for(const d of data){
+    const words=(d?.words||[]).filter(w=>String(w.text||'').trim());
+    for(const w of words){
+      const wt=String(w.text||'').replace(/[^A-Za-z0-9]/g,'').toLowerCase();
+      if(!/^(sc|5c|social|club)$/.test(wt))continue;
+      const b=w.bbox||{},lineH=Math.max(18,(b.y1||0)-(b.y0||0));
+      const x0=Math.max(0,Math.floor((b.x0||0)-lineH*.1));
+      const y0=Math.max(0,Math.floor((b.y0||0)-lineH*.15));
+      const y1=Math.min(canvas.height,Math.floor((b.y1||0)+lineH*2.8));
+      const c=document.createElement('canvas');c.width=Math.max(40,canvas.width-x0);c.height=Math.max(20,y1-y0);
+      c.getContext('2d').drawImage(canvas,x0,y0,c.width,c.height,0,0,c.width,c.height);
+      candidates.push(c);
+    }
+  }
+  return candidates.slice(0,5);
+}
+function validDate(s){return /^20\d{2}-\d{2}-\d{2}$/.test(s||'')}
+function bestVote(values,normalizer,minLen=1){const vals=values.map(v=>normalizer(v)).filter(v=>v&&v.length>=minLen);if(!vals.length)return'';const map=new Map();for(const v of vals)map.set(v,(map.get(v)||0)+1);return [...map.entries()].sort((a,b)=>b[1]-a[1])[0][0]}
 function voteConfidence(values,normalizer,winner){const vals=values.map(v=>normalizer(v)).filter(Boolean);if(!vals.length||!winner)return 0;return vals.filter(v=>v===winner).length/vals.length}
-function parseSingleFrame(texts){
-  const src=normalizeOcr(texts.join('\n'));let id='',reason='',sc='';
-  let m=src.match(/Administrator\s+[^\[]*\[(\d{1,8})\]\s+hat\s+[^\[]*\[(\d{1,8})\]/i);
-  if(m)id=normalizeId(m[2]);
-  if(!id){m=src.match(/\bhat\s+[^\[]*\[(\d{1,8})\]/i);if(m)id=normalizeId(m[1]);}
-  // Grund may wrap before IP/SC. Capture everything until one of those explicit markers.
-  let r=src.match(/Grund\s*:\s*([\s\S]*?)(?=\s*(?:\[?A\]?\s*)?IP\s*:|\s*SC\s*:|\s*Social\s+Club\s+ID\b|$)/i);
-  if(r)reason=cleanText(r[1]);
-  if(!reason){r=src.match(/Grund\s*:\s*([^\n]{2,100})/i);if(r)reason=cleanText(r[1]);}
-  sc=extractScFromText(src);
-  return{id,reason,sc}
+function inferTypes(reason){
+  switch(reason){
+    case 'PC Check Positiv': return ['pccheck'];
+    case 'PC Check Verweigert': return ['pccheck'];
+    case 'Cheating': return ['cheater'];
+    default:return[];
+  }
 }
-function extractDate(s){let m=s.match(/\b(20\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})\b/);if(m)return`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;m=s.match(/\b(\d{1,2})[.\-/](\d{1,2})[.\-/](20\d{2})\b/);return m?`${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`:''}
+function serverDigitCrops(v){
+  const crops=[];
+  // Very tight top-right crops; only the yellow server badge is considered.
+  for(const [x,y,w,h,s] of [[.935,.005,.065,.10,7],[.91,.00,.09,.12,6]]) crops.push(crop(v,x,y,w,h,s));
+  return crops;
+}
+function serverVotesFromText(t){
+  const s=String(t||'').replace(/[^1-4]/g,'');
+  return s.length===1?[s]:[];
+}
+function preprocess(src,mode='normal'){
+  const c=document.createElement('canvas');c.width=src.width;c.height=src.height;const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(src,0,0);
+  if(mode==='normal')return c;
+  const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
+  for(let i=0;i<d.length;i+=4){const r=d[i],g=d[i+1],b=d[i+2];let v=.299*r+.587*g+.114*b;if(mode==='high')v=v<105?0:255;else if(mode==='dark')v=v<135?0:255;else if(mode==='light')v=v<175?0:255;d[i]=d[i+1]=d[i+2]=v;}
+  ctx.putImageData(im,0,0);return c;
+}
+function crop(v,x,y,w,h,scale=1.35){
+  const c=document.createElement('canvas'),vw=v.videoWidth,vh=v.videoHeight;c.width=Math.max(1,Math.round(vw*w*scale));c.height=Math.max(1,Math.round(vh*h*scale));
+  const ctx=c.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.drawImage(v,Math.round(vw*x),Math.round(vh*y),Math.round(vw*w),Math.round(vh*h),0,0,c.width,c.height);return c;
+}
+async function ocr(worker,canvas,params={}){
+  await worker.setParameters({tessedit_pageseg_mode:params.psm??6,tessedit_char_whitelist:params.whitelist||'',preserve_interword_spaces:'1',user_defined_dpi:'300'});
+  const r=await worker.recognize(canvas);return r.data||{text:'',words:[]};
+}
+function extractDate(s){
+  let m=String(s||'').match(/\b(20\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})\b/);if(m)return`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+  m=String(s||'').match(/\b(\d{1,2})[.\-/](\d{1,2})[.\-/](20\d{2})\b/);return m?`${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`:'';
+}
+function hamming(a,b){if(!a||!b||a.length!==b.length)return 99;let d=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i])d++;return d}
+function chooseSc(candidates){
+  const vals=candidates.filter(x=>/^[0-9a-f]{40}$/.test(x));if(!vals.length)return {value:'',confidence:0,count:0};
+  const clusters=[];
+  for(const v of vals){
+    let best=null,bd=99;
+    for(const c of clusters){const dist=hamming(v,c.seed);if(dist<bd){bd=dist;best=c;}}
+    if(best&&bd<=8){best.items.push(v);best.weight+=1}else clusters.push({seed:v,items:[v],weight:1});
+  }
+  clusters.sort((a,b)=>b.weight-a.weight);const top=clusters[0];if(!top)return {value:'',confidence:0,count:0};
+  const support=top.items.length;
+  if(support<3)return {value:'',confidence:support/Math.max(1,vals.length),count:support};
+  // Return the real observed candidate with the most cluster support, not a synthetic string.
+  const counts=new Map();for(const x of top.items)counts.set(x,(counts.get(x)||0)+1);
+  const observed=[...counts.entries()].sort((a,b)=>b[1]-a[1])[0];
+  return {value:observed[0],confidence:support/vals.length,count:support};
+}
+async function analyzeVideo(video,duration,onProgress){
+  const frames=Math.max(24,Math.min(72,Number(localStorage.getItem('frame_count_v10')||36)));
+  const start=Math.max(0,duration-40),span=Math.max(.1,duration-start);
+  const worker=await Tesseract.createWorker('eng',1);
+  const idRecords=[],reasonRecords=[],broadFrames=[];
+  try{
+    // Fast broad pass: one normal OCR per frame. We deliberately do not OCR SC/IP/date here.
+    for(let i=0;i<frames;i++){
+      const t=start+span*((i+.12)/frames);await seek(video,t);
+      const left=crop(video,0,.055,.72,.28,2.8);
+      const a=await ocr(worker,left,{psm:6});
+      const parsed=parseSingleFrame(a.text||'');
+      idRecords.push(parsed.id);reasonRecords.push({reason:parsed.reason,score:parsed.reasonScore||0});
+      broadFrames.push({i,t,parsed,text:a.text||''});
+      onProgress(10+((i+1)/frames)*48,`Schnellscan · ${i+1}/${frames}`);
+    }
+    const id=bestVote(idRecords,normalizeId,3);
+    const reasonVotes=reasonRecords.filter(x=>x.reason).map(x=>x.reason);
+    const reason=bestVote(reasonVotes,x=>x,1);
+    // Focus on the strongest frames plus nearby frames. This is much faster and more precise than brute-force OCR everywhere.
+    const ranked=broadFrames
+      .filter(x=>x.parsed.id===id || x.parsed.reason===reason)
+      .sort((a,b)=>(b.parsed.id===id?1:0)+(b.parsed.reason===reason?1:0)+b.parsed.reasonScore-( (a.parsed.id===id?1:0)+(a.parsed.reason===reason?1:0)+a.parsed.reasonScore));
+    const focusIdx=new Set();
+    for(const r of ranked.slice(0,8)){for(let d=-1;d<=1;d++){const idx=r.i+d;if(idx>=0&&idx<broadFrames.length)focusIdx.add(idx)}}
+    const focusFrames=[...focusIdx].sort((a,b)=>a-b).map(i=>broadFrames[i]);
+
+    const scCandidates=[];const serverVotes=[];const dateVotes=[];
+    for(let k=0;k<focusFrames.length;k++){
+      const fr=focusFrames[k];await seek(video,fr.t);
+      const left=crop(video,0,.055,.72,.30,3.4);
+      const normal=await ocr(worker,left,{psm:6});
+      const line11=await ocr(worker,preprocess(left,'dark'),{psm:11});
+      const combinedText=[normal.text||'',line11.text||''].join('\n');
+      const p=parseSingleFrame(combinedText);
+      if(p.id===id && p.reason===reason){
+        scCandidates.push(...extractScCandidatesFromText(combinedText));
+        const markerCrops=extractScFromDetailed([normal,line11],left);
+        for(const c of markerCrops.slice(0,3)){
+          const s=await ocr(worker,c,{psm:6,whitelist:'0123456789abcdefABCDEF'});
+          scCandidates.push(...extractSc40(s.text||''));
+        }
+      }
+      // Server badge: only the tight top-right yellow badge crops, never the whole HUD.
+      for(const scrop of serverDigitCrops(video)){
+        const s=await ocr(worker,scrop,{psm:10,whitelist:'1234'});serverVotes.push(...serverVotesFromText(s.text||''));
+        const sh=await ocr(worker,preprocess(scrop,'high'),{psm:10,whitelist:'1234'});serverVotes.push(...serverVotesFromText(sh.text||''));
+      }
+      // Date: right-bottom only.
+      const dc=crop(video,.82,.86,.18,.14,4.5);const d1=await ocr(worker,dc,{psm:7,whitelist:'0123456789./-'});const d2=await ocr(worker,preprocess(dc,'dark'),{psm:7,whitelist:'0123456789./-'});
+      const dt=extractDate((d1.text||'')+'\n'+(d2.text||''));if(validDate(dt))dateVotes.push(dt);
+      onProgress(58+((k+1)/Math.max(1,focusFrames.length))*37,`Präzisionsscan · ${k+1}/${focusFrames.length}`);
+    }
+    const scChoice=chooseSc(scCandidates);
+    const sc=scChoice.value;
+    const serverMap=new Map();for(const s of serverVotes)serverMap.set(s,(serverMap.get(s)||0)+1);const serverSorted=[...serverMap.entries()].sort((a,b)=>b[1]-a[1]);
+    const serverTop=serverSorted[0];const server=serverTop&&serverTop[1]>=6&&serverTop[1]/Math.max(1,serverVotes.length)>=.62?serverTop[0]:'';
+    const date=bestVote(dateVotes,x=>x,10);
+    const types=inferTypes(reason);
+    const idConf=voteConfidence(idRecords,normalizeId,id),reasonConf=voteConfidence(reasonVotes,x=>x,reason);
+    const serverConf=serverTop?serverTop[1]/Math.max(1,serverVotes.length):0,dateConf=voteConfidence(dateVotes,x=>x,date);
+    // Complete only when the OCR has a real SC cluster. No guessing from single frames.
+    const complete=!!(id&&ALLOWED_REASONS.includes(reason)&&sc&&server&&date&&idConf>=.45&&reasonConf>=.50&&scChoice.count>=3&&serverConf>=.62&&dateConf>=.50);
+    return {id,reason,sc,server,date,types,complete,found:complete,confidence:{id:idConf,reason:reasonConf,sc:scChoice.confidence,server:serverConf,date:dateConf},debug:{scCandidates:scCandidates.length,serverVotes:serverVotes.length,focusFrames:focusFrames.length}};
+  }finally{await worker.terminate()}
+}
+function parseSingleFrame(texts){
+  const src=normalizeOcr(texts||'');const id=findTargetId(src);const r=classifyAllowedReason(src);return{id,reason:r.reason,reasonScore:r.score};
+}
+
 function openEditor(item){state.editing=item;state.selectedTypes=[...new Set([...(item.types||[]), ...inferTypes((item.result||{}).reason||item.reason||'')])];const p=item.result||{};$('#modalFile').textContent=item.file.name;$('#targetId').value=p.id||item.id||'';$('#reason').value=p.reason||item.reason||'';$('#sc').value=p.sc||item.sc||'';$('#server').value=p.server||item.server||'';$('#date').value=p.date||item.date||today();$('#perma').checked=!!item.perma;$('#notBanned').checked=!!item.notBanned;$$('#banTypes .chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.includes(c.dataset.value)));$('#ocrWarning').classList.toggle('hidden',!!p.complete);updateTitle();$('#editorModal').classList.remove('hidden')}
 function closeEditor(){state.editing=null;$('#editorModal').classList.add('hidden');renderQueue();renderCases()}
 $('#closeModal').onclick=closeEditor;$('#cancelBtn').onclick=closeEditor;
@@ -226,7 +391,7 @@ $('#archiveGrid').innerHTML=entries.map(x=>`<article class="entry"><div class="t
 $$('.del-entry').forEach(b=>b.onclick=async()=>{const x=state.entries.find(e=>e.createdAt===b.dataset.id);if(x){state.entries=state.entries.filter(e=>e.createdAt!==b.dataset.id);saveMeta();if(x.videoKey)await delVideo(x.videoKey);if(x.videoUrl)URL.revokeObjectURL(x.videoUrl);renderArchive()}});$$('.edit-entry').forEach(b=>b.onclick=async()=>{const x=state.entries.find(e=>e.createdAt===b.dataset.id);if(x){const f=await getVideo(x.videoKey);if(!f){toast('POV-Datei wurde lokal nicht gefunden.');return}openEditor({...x,id:x.videoKey,file:f,result:{...x,complete:true},types:x.types})}})}
 function renderCases(){const bad=state.queue.filter(x=>x.result&&!x.result.complete);$('#casesList').innerHTML=bad.length?bad.map(x=>`<div class="case-row"><div><strong>${esc(x.file.name)}</strong><small>OCR: ID ${x.result.id?'✓':'×'} · Grund ${x.result.reason?'✓':'×'} · SC ${x.result.sc?'✓':'×'} · Server ${x.result.server?'✓':'×'} · Datum ${x.result.date?'✓':'×'}</small></div><button class="mini-btn edit-q" data-id="${x.id}">Daten ergänzen</button></div>`).join(''):'<div class="empty"><h2>Keine offenen Verdachtsfälle</h2><p>Alle bisher erkannten Fälle sind geprüft.</p></div>';$$('.edit-q').forEach(b=>b.onclick=()=>{const x=state.queue.find(x=>x.id===b.dataset.id);if(x)openEditor(x)})}
 function toast(t){const el=$('#toast');el.textContent=t;el.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove('show'),4000)}
-$('#clientId').value=state.clientId;$('#clientId').oninput=e=>{state.clientId=e.target.value.trim();localStorage.setItem('yt_client_id',state.clientId);initGoogle()};$('#frameCount').value=localStorage.getItem('frame_count')||60;$('#frameCount').onchange=e=>localStorage.setItem('frame_count',e.target.value);
+$('#clientId').value=state.clientId;$('#clientId').oninput=e=>{state.clientId=e.target.value.trim();localStorage.setItem('yt_client_id',state.clientId);initGoogle()};$('#frameCount').value=Math.max(24,Math.min(72,Number(localStorage.getItem('frame_count_v10')||36)));$('#frameCount').onchange=e=>localStorage.setItem('frame_count_v10',Math.max(24,Math.min(72,Number(e.target.value)||36)));
 function initGoogle(){if(!window.google?.accounts?.oauth2||!state.clientId)return;state.tokenClient=google.accounts.oauth2.initTokenClient({client_id:state.clientId,scope:'https://www.googleapis.com/auth/youtube.upload',callback:r=>{if(r.error)return toast('Google-Anmeldung abgebrochen.');state.accessToken=r.access_token;sessionStorage.setItem('yt_access_token',r.access_token);updateYtStatus()}})}
 $('#connectYoutube').onclick=()=>{initGoogle();if(!state.tokenClient)return toast('Bitte zuerst die Google OAuth Client-ID eintragen.');state.tokenClient.requestAccessToken({prompt:'consent'})};$('#disconnectYoutube').onclick=()=>{state.accessToken='';sessionStorage.removeItem('yt_access_token');updateYtStatus()};function updateYtStatus(){$('#ytStatus').innerHTML=state.accessToken?'<span class="status-dot"></span>YouTube verbunden':'<span class="status-dot muted-dot"></span>Nicht verbunden'}setTimeout(initGoogle,1200);
 $('#clearLocal').onclick=async()=>{if(!confirm('Wirklich alle lokalen Archivdaten und POV-Dateien löschen?'))return;state.entries=[];state.queue=[];localStorage.removeItem(META_KEY);await clearDB();renderArchive();renderQueue();renderCases();toast('Lokales Archiv gelöscht.')};

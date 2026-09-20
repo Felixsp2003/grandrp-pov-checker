@@ -80,8 +80,8 @@
     <div class="settings-actions"><button class="pink-btn" id="connectYoutube">Mit YouTube verbinden</button><button class="ghost-btn" id="disconnectYoutube">Verbindung entfernen</button></div>
     <hr>
     <div class="card-title">OCR-Einstellungen</div>
-    <label>Frames in den letzten 40 Sekunden<input id="frameCount" type="number" min="12" max="120" value="30"></label>
-    <p class="hint">Die Erkennung nutzt mehrere Frames, getrennte Bildbereiche und eine Mehrheitsentscheidung. Unsichere Werte werden nicht automatisch akzeptiert und landen zur Prüfung.</p>
+    <label>Basis-Frames in den letzten 40 Sekunden<input id="frameCount" type="number" min="24" max="72" value="36"></label>
+    <p class="hint">Standard: 36 Basis-Frames + gezielter Präzisionsscan der besten Frames. ID/Grund werden zuerst schnell gefunden; SC, Server und Datum werden danach nur im relevanten Bildbereich geprüft. Unsichere Werte werden nicht geraten, sondern zur Prüfung markiert.</p>
     <hr>
     <div class="card-title">Lokale Daten</div>
     <p class="hint">Archivdaten und POV-Dateien werden lokal in diesem Browser gespeichert. Browserdaten löschen entfernt auch die lokalen POVs.</p>
@@ -111,5 +111,5 @@
 <div class="modal-actions"><button type="button" class="ghost-btn" id="cancelBtn">Abbrechen</button><button type="submit" class="pink-btn" id="saveBtn">Speichern & YouTube hochladen</button></div>
 </form></div></div>
 <div id="toast" class="toast"></div><video id="videoProbe" class="hidden-video" muted playsinline preload="metadata"></video><canvas id="ocrCanvas" class="hidden-video"></canvas>
-<script src="app.js?v=9?v=7"></script>
+<script src="app.js?v=10"></script>
 </body></html>
