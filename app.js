@@ -281,14 +281,33 @@
   function updateCounts(){const all=state.entries;const count=k=>all.filter(e=>e.types?.includes(k)).length;$('#countAll').textContent=all.length;$('#countBan').textContent=all.filter(e=>!e.notBanned).length;$('#countPc').textContent=count('pccheck');$('#countSoc').textContent=count('socban');$('#countHard').textContent=count('hardban');$('#countCheat').textContent=count('cheater');$('#countNeg').textContent=count('negativ');$('#countNoVideo').textContent=all.filter(e=>!e.videoStored).length;}
   function renderArchive(){updateCounts();const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;const list=state.entries.filter(e=>{if(filter==='ban'&&e.notBanned)return false;if(filter!=='all'&&filter!=='ban'&&!e.types?.includes(filter))return false;if(filter==='novideo'&&e.videoStored)return false;if(!q)return true;return [e.targetId,e.sc,e.reason,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));});$('#archiveGrid').innerHTML=list.map(e=>`<article class="card"><div class="thumb">${e.videoStored?'POV':'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(e.id.slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span></div><div class="card-body"><div class="card-title">${esc(e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div><span>SC / RID</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(formatDateDE(e.date)||'')}</div></div></div><div class="card-actions"><button class="mini" data-open="${e.id}">Prüfen</button>${e.youtube?.url||e.proof?`<button class="mini primary" data-youtube="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}<button class="mini danger" data-delete="${e.id}">Löschen</button></div></article>`).join('');$('#emptyState').classList.toggle('hidden',list.length>0);$$('[data-open]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.open);if(e)openEditorFromEntry(e);});$$('[data-youtube]').forEach(b=>b.onclick=()=>{const url=b.dataset.youtube;if(url)window.open(url,'_blank','noopener,noreferrer');});$$('[data-delete]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.delete);if(!e)return;if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?\n\nDas YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.entries=state.entries.filter(x=>x.id!==e.id);saveMeta();renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}});}
   function renderCases(){const cases=state.entries.filter(e=>!e.complete);$('#casesList').innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button class="mini" data-case="${e.id}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';$$('[data-case]').forEach(b=>b.onclick=()=>{const e=state.entries.find(x=>x.id===b.dataset.case);if(e)openEditorFromEntry(e);});}
-  function csvRows(){return state.entries.filter(e=>e.saved).map(e=>({Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:'',RID:e.sc||'',DiscordID:e.discordId||'',Familie:'',Grund:e.reason||''}));}
-  function renderCsv(){const rows=csvRows();$('#csvSummary').textContent=`${rows.length} Einträge`;$('#csvPreviewBody').innerHTML=rows.map(r=>`<tr><td>${esc(r.Proof)}</td><td>${esc(r.Datum)}</td><td>${esc(r.ID)}</td><td></td><td>${esc(r.RID)}</td><td>${esc(r.DiscordID)}</td><td></td><td>${esc(r.Grund)}</td></tr>`).join('');}
+  function csvRowsBase(){return state.entries.filter(e=>e.saved).map(e=>({Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:'',RID:e.sc||'',DiscordID:e.discordId||'',Familie:'',Grund:e.reason||''}));}
+  function csvRows(){
+    const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();
+    const reason=($('#csvFilterReason')?.value)||'all';
+    const sc=($('#csvFilterSc')?.value)||'all';
+    const discord=($('#csvFilterDiscord')?.value)||'all';
+    return csvRowsBase().filter(r=>{
+      if(reason!=='all' && r.Grund!==reason)return false;
+      if(sc==='present' && !r.RID)return false;
+      if(sc==='empty' && r.RID)return false;
+      if(discord==='present' && !r.DiscordID)return false;
+      if(discord==='empty' && r.DiscordID)return false;
+      if(q && ![r.Proof,r.Datum,r.ID,r.RID,r.DiscordID,r.Grund].some(v=>String(v||'').toLowerCase().includes(q)))return false;
+      return true;
+    });
+  }
+  function renderCsv(){
+    const all=csvRowsBase(), rows=csvRows();
+    $('#csvSummary').textContent=`${rows.length} von ${all.length} Einträgen`;
+    $('#csvPreviewBody').innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.Proof)}</td><td>${esc(r.Datum)}</td><td>${esc(r.ID)}</td><td></td><td>${esc(r.RID)}</td><td>${esc(r.DiscordID)}</td><td></td><td>${esc(r.Grund)}</td></tr>`).join(''):'<tr><td colspan=8 class="csv-empty">Keine Einträge passen zum Filter.</td></tr>';
+  }
   function csvText(){const rows=csvRows();const header=['Proof','Datum','ID','SOC','RID','Discord ID','Familie','Grund'];const line=a=>a.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(';');return '\uFEFF'+[line(header),...rows.map(r=>line([r.Proof,r.Datum,r.ID,r.SOC,r.RID,r.DiscordID,r.Familie,r.Grund]))].join('\r\n');}
   function downloadCsv(){const blob=new Blob([csvText()],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='grandrp_bans.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
   async function copyCsv(){try{await navigator.clipboard.writeText(csvText());toast('CSV in die Zwischenablage kopiert.');}catch{toast('Kopieren nicht verfügbar. CSV herunterladen.');}}
 
   function setupNav(){
-    $$('.nav-item').forEach(b=>b.onclick=()=>showView(b.dataset.view));$('#headerUploadBtn').onclick=()=>showView('upload');$('#emptyUploadBtn').onclick=()=>showView('upload');$('#headerCsvBtn').onclick=()=>showView('csv');$('#reloadBtn').onclick=()=>renderArchive();$('#casesRefresh').onclick=renderCases;$('#search').oninput=renderArchive;$('#refreshCsvBtn').onclick=renderCsv;$('#downloadCsvBtn').onclick=downloadCsv;$('#copyCsvBtn').onclick=copyCsv;
+    $$('.nav-item').forEach(b=>b.onclick=()=>showView(b.dataset.view));$('#headerUploadBtn').onclick=()=>showView('upload');$('#emptyUploadBtn').onclick=()=>showView('upload');$('#headerCsvBtn').onclick=()=>showView('csv');$('#reloadBtn').onclick=()=>renderArchive();$('#casesRefresh').onclick=renderCases;$('#search').oninput=renderArchive;$('#refreshCsvBtn').onclick=renderCsv;$('#downloadCsvBtn').onclick=downloadCsv;$('#copyCsvBtn').onclick=copyCsv;['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterDiscord'].forEach(s=>$(s)?.addEventListener($(s)?.tagName==='SELECT'?'change':'input',renderCsv));$('#csvFilterClear')?.addEventListener('click',()=>{if($('#csvFilterSearch'))$('#csvFilterSearch').value='';if($('#csvFilterReason'))$('#csvFilterReason').value='all';if($('#csvFilterSc'))$('#csvFilterSc').value='all';if($('#csvFilterDiscord'))$('#csvFilterDiscord').value='all';renderCsv();});
     $$('.filter').forEach(b=>b.onclick=()=>{state.filter=b.dataset.filter;$$('.filter').forEach(x=>x.classList.toggle('active',x===b));renderArchive();});
   }
 
@@ -442,7 +461,7 @@
     else if(field==='date'){v=extractDate(v)||v;}
     else if(field==='discordId'){v=v.replace(/[^0-9]/g,'');}
     if(ctx.item){ctx.item.result={...ctx.item.result,[field]:v};ctx.item.result.timestamps={...(ctx.item.result.timestamps||{}),[field]:Number(time)||ctx.item.result.timestamps?.banner||0};if(field==='sc'&&v)ctx.item.result.offline=false;renderQueue();setEditorValues({...ctx.item.result,proof:ctx.item.youtube?.url||ctx.item.result.proof||''});setFieldStatus(ctx.item);}
-    if(ctx.entry){ctx.entry[field]=v;ctx.entry.timestamps={...(ctx.entry.timestamps||{}),[field]:Number(time)||ctx.entry.timestamps?.banner||0};if(field==='sc'&&v)ctx.entry.offline=false;setEditorValues(ctx.entry);setFieldStatus({result:ctx.entry});}
+    if(ctx.entry){ctx.entry[field]=v;ctx.entry.result={...(ctx.entry.result||{}),[field]:v};ctx.entry.timestamps={...(ctx.entry.timestamps||{}),[field]:Number(time)||ctx.entry.timestamps?.banner||0};if(field==='sc'&&v){ctx.entry.offline=false;ctx.entry.result.offline=false;}setEditorValues(ctx.entry);setFieldStatus({result:ctx.entry});}
     if(field==='reason'||field==='targetId'||field==='date')renderTitlePreview();
     toast(`${field==='sc'?'SC':field==='server'?'Server':field==='reason'?'Grund':field==='targetId'?'Ziel-ID':field==='date'?'Datum':'Discord ID'} übernommen.`);
   }
@@ -511,7 +530,9 @@
   async function saveEditor(e){
     e.preventDefault(); const ctx=state.editing; if(!ctx)return;
     const targetId=clampId($('#targetId').value), reason=$('#reason').value, sc=normalizeHexLoose($('#sc').value), server=$('#server').value||'3', date=$('#date').value;
-    const offline=!!(ctx.item?.result?.offline||ctx.entry?.offline);
+    // A manually entered SC is authoritative. Never let an old OCR "offline" flag overwrite it on save.
+    const offlineFlag=!!(ctx.item?.result?.offline||ctx.entry?.offline);
+    const offline=sc.length===40?false:offlineFlag;
     const missing=[]; if(!/^\d{1,6}$/.test(targetId))missing.push('Ziel-ID'); if(!ALLOWED_REASONS.includes(reason))missing.push('Grund'); if(!/^[1-4]$/.test(server))missing.push('Server'); if(!validDate(date))missing.push('Datum'); if(!offline && sc.length!==40)missing.push('SC');
     if(missing.length){toast('Bitte fehlende Angaben prüfen: '+missing.join(', '));return;}
     const base=ctx.item||ctx.entry; const types=[...state.selectedTypes]; if(reason.startsWith('PC'))types.push('pccheck'); if(reason==='Cheating')types.push('cheater'); const finalTypes=[...new Set(types)];

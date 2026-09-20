@@ -77,6 +77,15 @@
 
     <section id="view-csv" class="view">
       <div class="panel-head"><div><h2>CSV erstellen</h2><p>SOC und Familie bleiben absichtlich leer. RID wird automatisch aus SC gefüllt.</p></div><div class="top-actions"><button class="ghost" id="refreshCsvBtn">Aktualisieren</button><button class="ghost" id="copyCsvBtn">CSV kopieren</button><button class="pink" id="downloadCsvBtn">CSV herunterladen</button></div></div>
+      <div class="csv-filters">
+        <input id="csvFilterSearch" class="csv-filter-input" placeholder="CSV durchsuchen: ID, SC, Discord, Grund …" autocomplete="off">
+        <select id="csvFilterReason" class="csv-filter-select"><option value="all">Alle Gründe</option>
+          <option>PC Check Positiv</option><option>PC Check Verweigert</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv (Banevading)</option><option>PC Check Positiv (Cleaning)</option><option>Cheating</option><option>Acc 1.1</option><option>Acc 1.4</option><option>Event 1.7</option>
+        </select>
+        <select id="csvFilterSc" class="csv-filter-select"><option value="all">SC: Alle</option><option value="present">SC vorhanden</option><option value="empty">SC leer</option></select>
+        <select id="csvFilterDiscord" class="csv-filter-select"><option value="all">Discord: Alle</option><option value="present">Discord ID vorhanden</option><option value="empty">Discord ID leer</option></select>
+        <button class="ghost" id="csvFilterClear">Filter zurücksetzen</button>
+      </div>
       <div class="csv-summary" id="csvSummary"></div>
       <div class="csv-table-wrap"><table class="csv-table"><thead><tr><th>Proof</th><th>Datum</th><th>ID</th><th>SOC</th><th>RID</th><th>Discord ID</th><th>Familie</th><th>Grund</th></tr></thead><tbody id="csvPreviewBody"></tbody></table></div>
       <div class="empty hidden" id="csvEmpty"><div class="empty-icon">⇩</div><h2>Noch keine CSV-Daten</h2><p>Speichere zuerst vollständig verarbeitete POV-Fälle.</p></div>

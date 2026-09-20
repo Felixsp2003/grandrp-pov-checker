@@ -1,4 +1,4 @@
-# Grand RP POV Checker V44
+# Grand RP POV Checker V45
 
 Fixes in V40:
 - Defines the missing `setEditorValues()`, `setFieldStatus()` and `renderTitlePreview()` functions.
@@ -20,12 +20,12 @@ Files:
 V40: SC and Discord ID manual-selection buttons are always available; their click handlers are wired directly in the editor.
 
 
-V44: YouTube-Verarbeitung ist jetzt ein harter Verarbeitungsschritt. Nach dem vollständigen Upload wird `videos.list(part=processingDetails,status)` gepollt und OCR startet erst bei `processingStatus = succeeded` bzw. `uploadStatus = processed`. Die OCR verwendet weiterhin die lokale Originaldatei, damit keine zusätzliche YouTube-Transkodierung die Pixelqualität verschlechtert.
+V45: YouTube-Verarbeitung ist jetzt ein harter Verarbeitungsschritt. Nach dem vollständigen Upload wird `videos.list(part=processingDetails,status)` gepollt und OCR startet erst bei `processingStatus = succeeded` bzw. `uploadStatus = processed`. Die OCR verwendet weiterhin die lokale Originaldatei, damit keine zusätzliche YouTube-Transkodierung die Pixelqualität verschlechtert.
 
 
-V44 fixes: OCR is hard-gated on YouTube processingStatus=succeeded only (never uploadStatus=processed). Manual video picker keeps playback/seeking controls usable; drawing is an explicit mode.
+V45 fixes: OCR is hard-gated on YouTube processingStatus=succeeded only (never uploadStatus=processed). Manual video picker keeps playback/seeking controls usable; drawing is an explicit mode.
 
 
-V44: YouTube OAuth now requests both youtube.upload and youtube.readonly. The processing gate polls videos.list?part=processingDetails,status and will never start OCR when the read scope is missing. Existing V42 tokens must be reauthorized once via ‘Berechtigung erneut’.
+V45: YouTube OAuth now requests both youtube.upload and youtube.readonly. The processing gate polls videos.list?part=processingDetails,status and will never start OCR when the read scope is missing. Existing V42 tokens must be reauthorized once via ‘Berechtigung erneut’.
 
 - Banntypen: Hardban, Soc-Ban, Cheater, Negativ, Verweigert, PC-Check.
