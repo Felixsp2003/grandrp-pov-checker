@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=43">
+<link rel="stylesheet" href="styles.css?v=44">
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
@@ -123,7 +123,7 @@
       <div class="field full"><label>Finaler Dateiname</label><input id="titlePreview" readonly></div>
     </div>
     <div class="section-label">Bann-Typen <span>Mehrere gleichzeitig möglich</span></div>
-    <div class="chips" id="banTypes"><button type="button" data-value="hardban" class="chip">Hardban</button><button type="button" data-value="socban" class="chip">Soc-Ban</button><button type="button" data-value="cheater" class="chip">Cheater</button><button type="button" data-value="negativ" class="chip">Negativ</button><button type="button" data-value="pccheck" class="chip">PC-Check</button></div>
+    <div class="chips" id="banTypes"><button type="button" data-value="hardban" class="chip">Hardban</button><button type="button" data-value="socban" class="chip">Soc-Ban</button><button type="button" data-value="cheater" class="chip">Cheater</button><button type="button" data-value="negativ" class="chip">Negativ</button><button type="button" data-value="verweigert" class="chip">Verweigert</button><button type="button" data-value="pccheck" class="chip">PC-Check</button></div>
     <div class="switches"><label>Perma-Bann<input id="perma" type="checkbox"><span class="switch"></span></label><label>Nicht gebannt<input id="notBanned" type="checkbox"><span class="switch"></span></label></div>
     <div id="ocrWarning" class="ocr-warning hidden"></div><div class="modal-tools"><button type="button" class="ghost mini hidden" id="reanalyzeBtn">OCR erneut ausführen</button></div>
     <div class="modal-actions"><button type="button" class="ghost" id="cancelBtn">Abbrechen</button><button type="submit" class="pink" id="saveBtn">Speichern & YouTube hochladen</button></div>
@@ -202,6 +202,6 @@
   });
 })();
 </script>
-<script src="app.js?v=43"></script>
+<script src="app.js?v=44"></script>
 </body>
 </html>
