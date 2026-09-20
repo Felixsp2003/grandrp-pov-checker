@@ -55,6 +55,18 @@ function yellowDigitCrop(v){
   const sx=Math.max(0,box.minX-pad),sy=Math.max(0,box.minY-pad),ex=Math.min(w,box.maxX+pad+1),ey=Math.min(h,box.maxY+pad+1);
   c.width=ex-sx;c.height=ey-sy; c.getContext('2d').putImageData(ctx.getImageData(sx,sy,c.width,c.height),0,0); return c;
 }
+function normalizeOcr(s){
+  return String(s||'')
+    .replace(/\r/g,'')
+    .replace(/[“”]/g,'"')
+    .replace(/[‘’]/g,"'")
+    .replace(/[‐‑‒–—]/g,'-')
+    .replace(/\u00a0/g,' ')
+    .split('\n')
+    .map(line=>line.replace(/[ \t]+/g,' ').trim())
+    .filter(Boolean)
+    .join('\n');
+}
 function normalizeId(s){return String(s||'').toUpperCase().replace(/[OIQL]/g,'1').replace(/[Z]/g,'2').replace(/[S]/g,'5').replace(/[G]/g,'6').replace(/[T]/g,'7').replace(/[B]/g,'8').replace(/[^0-9]/g,'')}
 function normalizeHex(s){return String(s||'').replace(/[OoQq]/g,'0').replace(/[IiLl|]/g,'1').replace(/[Ss]/g,'5').replace(/[Zz]/g,'2').replace(/[Gg]/g,'6').replace(/[^0-9A-Fa-f]/g,'')}
 function bestVote(values,normalizer,minLen=1){const vals=values.map(v=>normalizer(v)).filter(v=>v&&v.length>=minLen);if(!vals.length)return'';const counts=new Map();for(const v of vals)counts.set(v,(counts.get(v)||0)+1);return [...counts.entries()].sort((a,b)=>b[1]-a[1]||b[0].length-a[0].length)[0][0]}
