@@ -299,7 +299,7 @@
     ['dragleave','drop'].forEach(ev=>dropzone.addEventListener(ev,e=>{e.preventDefault();dropzone.classList.remove('drag');}));
     dropzone.addEventListener('drop',e=>addFiles([...e.dataTransfer.files].filter(f=>f.type.startsWith('video/')||/\.(mp4|mov|webm|mkv)$/i.test(f.name))));
   }
-  function addFiles(files){for(const file of files){state.queue.push({id:crypto.randomUUID(),file,status:'Wartet',progress:0,result:null,processing:false,editingDone:false,youtube:null});}renderQueue();processQueue();}
+  function addFiles(files){for(const file of files){state.queue.push({id:crypto.randomUUID(),file,status:'Wartet',progress:0,result:null,processing:false,editingDone:false,youtube:null,uploaded:false});}renderQueue();processQueue();}
   function renderQueue(){const q=$('#uploadQueue');$('#queueCount').textContent=`${state.queue.length} ${state.queue.length===1?'Datei':'Dateien'}`;q.innerHTML=state.queue.map(item=>`<div class="queue-item"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(item.finalName||item.file.name)}</strong><small>${formatSize(item.file.size)} · ${esc(item.status)}</small><div class="progress"><i style="width:${item.progress}%"></i></div></div><div class="queue-actions"><button class="mini" data-check="${item.id}">Prüfen</button><button class="mini" data-remove="${item.id}">×</button></div></div>`).join('');$$('[data-check]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.check);if(x?.result)openEditor(x);});$$('[data-remove]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.remove);if(x?.processing){toast('POV wird gerade verarbeitet.');return;}state.queue=state.queue.filter(i=>i.id!==b.dataset.remove);renderQueue();});}
   async function loaded(v){return new Promise((res,rej)=>{let done=false;const cleanup=()=>{v.removeEventListener('loadedmetadata',ok);v.removeEventListener('error',bad);};const ok=()=>{if(done)return;done=true;cleanup();res();};const bad=()=>{if(done)return;done=true;cleanup();rej(new Error('Video konnte nicht gelesen werden.'));};v.addEventListener('loadedmetadata',ok,{once:true});v.addEventListener('error',bad,{once:true});setTimeout(()=>bad(),20000);});}
   async function seek(v,t){return new Promise((res,rej)=>{let done=false;const cleanup=()=>v.removeEventListener('seeked',ok);const ok=()=>{if(done)return;done=true;cleanup();res();};v.addEventListener('seeked',ok,{once:true});v.currentTime=Math.max(0,Math.min(Number(t)||0,Math.max(0,v.duration-.05)));setTimeout(()=>{if(done)return;done=true;cleanup();rej(new Error('Video-Suche Timeout'));},10000);});}
@@ -541,25 +541,95 @@
     }));
   }
 
+  let queueRunPromise=null;
   async function processQueue(){
-    for(const item of state.queue){
-      if(item.processing||item.editingDone||item.status==='Gespeichert')continue;
-      if(!state.accessToken||!state.clientId){item.status='YouTube zuerst verbinden';renderQueue();continue;}
-      item.processing=true;
+    if(queueRunPromise)return queueRunPromise;
+    queueRunPromise=(async()=>{
       try{
-        // Store the original file in IndexedDB immediately so the same-origin manual picker can open it later.
-        await putVideo(item.id,item.file);
-        item.status='YouTube: vollständiger Upload';item.progress=2;renderQueue();
-        item.youtube=await uploadYoutube(item.file,item.file.name,state.accessToken,p=>{item.progress=2+Math.round(p*.38);item.status=`YouTube-Upload ${p}%`;renderQueue();});
-        item.status='YouTube-Upload abgeschlossen · OCR startet';item.progress=40;renderQueue();
-        const video=$('#videoProbe');const url=URL.createObjectURL(item.file);video.src=url;await loaded(video);item.progress=42;renderQueue();
-        item.result=await analyzeVideo(video,p=>{item.progress=42+Math.round(p*.58);renderQueue();});
-        item.result.originalName=item.file.name;item.result.types=[];item.result.proof=item.youtube.url;item.result.youtube=item.youtube;item.status=item.result.complete?'OCR fertig · Prüfung offen':'OCR unvollständig · Prüfung nötig';renderQueue();openEditor(item);
-        await new Promise(resolve=>{const timer=setInterval(()=>{if(!state.editing){clearInterval(timer);resolve();}},150);});
-        URL.revokeObjectURL(url);
-      }catch(err){console.error(err);item.status='Fehler: '+(err?.message||err);item.progress=0;renderQueue();}
-      finally{item.processing=false;}
-    }
+        if(!state.accessToken||!state.clientId){
+          for(const item of state.queue){if(!item.processing&&item.status!=='Gespeichert')item.status='YouTube zuerst verbinden';}
+          renderQueue();
+          return;
+        }
+
+        // PHASE 1: upload EVERY queued POV completely to YouTube.
+        // No OCR/analyzeVideo call is allowed in this phase.
+        const pending=state.queue.filter(item=>!item.processing&&!item.editingDone&&item.status!=='Gespeichert'&&!item.uploaded);
+        for(const item of pending){
+          item.processing=true;
+          try{
+            await putVideo(item.id,item.file);
+            item.status='YouTube-Upload wird ausgeführt · OCR wartet';
+            item.progress=2;
+            renderQueue();
+            item.youtube=await uploadYoutube(item.file,item.file.name,state.accessToken,p=>{
+              item.progress=2+Math.round(p*.38);
+              item.status=`YouTube-Upload ${p}% · OCR wartet`;
+              renderQueue();
+            });
+            item.uploaded=true;
+            item.uploadedAt=Date.now();
+            item.progress=40;
+            item.status='YouTube-Upload 100% abgeschlossen · Warte auf alle POVs';
+            renderQueue();
+          }catch(err){
+            console.error(err);
+            item.status='YouTube-Upload Fehler: '+(err?.message||err);
+            item.progress=0;
+          }finally{
+            item.processing=false;
+            renderQueue();
+          }
+        }
+
+        // PHASE 2: ONLY after ALL selected POV uploads reached 100%, start OCR.
+        const failed=state.queue.some(item=>!item.uploaded && !item.editingDone && item.status!=='Gespeichert' && item.status.startsWith('YouTube-Upload Fehler'));
+        const waiting=state.queue.some(item=>!item.uploaded && !item.editingDone && item.status!=='Gespeichert');
+        if(waiting||failed){
+          if(waiting)renderQueue();
+          return;
+        }
+
+        for(const item of state.queue){
+          if(!item.uploaded||item.editingDone||item.status==='Gespeichert'||item.ocrStarted)continue;
+          item.ocrStarted=true;
+          item.processing=true;
+          try{
+            item.status='Alle YouTube-Uploads abgeschlossen · OCR startet';
+            item.progress=42;
+            renderQueue();
+            const video=$('#videoProbe');
+            const url=URL.createObjectURL(item.file);
+            video.src=url;
+            await loaded(video);
+            item.result=await analyzeVideo(video,p=>{
+              item.progress=42+Math.round(p*.58);
+              item.status=`OCR ${Math.max(0,Math.min(100,Math.round(p)))}%`;
+              renderQueue();
+            });
+            item.result.originalName=item.file.name;
+            item.result.types=[];
+            item.result.proof=item.youtube.url;
+            item.result.youtube=item.youtube;
+            item.status=item.result.complete?'OCR fertig · Prüfung offen':'OCR unvollständig · Prüfung nötig';
+            renderQueue();
+            openEditor(item);
+            await new Promise(resolve=>{const timer=setInterval(()=>{if(!state.editing){clearInterval(timer);resolve();}},150);});
+            URL.revokeObjectURL(url);
+          }catch(err){
+            console.error(err);
+            item.status='OCR-Fehler: '+(err?.message||err);
+            item.progress=40;
+          }finally{
+            item.processing=false;
+            renderQueue();
+          }
+        }
+      }finally{
+        queueRunPromise=null;
+      }
+    })();
+    return queueRunPromise;
   }
   function validClientId(clientId){
     return /^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(String(clientId||'').trim());
