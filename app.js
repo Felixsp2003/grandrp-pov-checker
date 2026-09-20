@@ -455,6 +455,54 @@
       const w=window.open(target.href,'_blank','noopener'); if(!w)toast('Pop-up blockiert. Bitte Pop-ups für die Website erlauben.');
     }catch(err){console.error(err);toast('POV konnte nicht geöffnet werden: '+err.message);}
   }
+  function setEditorValues(v={}){
+    const r=v?.result||v||{};
+    const val=(x)=>x==null?'':String(x);
+    $('#targetId').value=val(r.targetId);
+    $('#reason').value=ALLOWED_REASONS.includes(val(r.reason))?val(r.reason):'';
+    $('#sc').value=val(r.sc);
+    $('#server').value=/^[1-4]$/.test(val(r.server))?val(r.server):'3';
+    $('#date').value=validDate(r.date)?val(r.date):'';
+    $('#discordId').value=val(r.discordId);
+    $('#proof').value=val(r.proof);
+    $('#perma').checked=!!r.perma;
+    $('#notBanned').checked=!!r.notBanned;
+    renderTitlePreview();
+  }
+  function setFieldStatus(item){
+    const r=item?.result||item||{};
+    const missing=new Set(Array.isArray(r.missing)?r.missing:[]);
+    const statuses=[
+      ['ID','Ziel-ID',!!r.targetId&&!missing.has('Ziel-ID')],
+      ['Grund','Grund',!!r.reason&&!missing.has('Grund')],
+      ['SC','SC',!!r.offline||!!r.sc&&!missing.has('SC')],
+      ['Server','Server',/^[1-4]$/.test(String(r.server||''))&&!missing.has('Server')],
+      ['Datum','Datum',!!r.date&&!missing.has('Datum')]
+    ];
+    const box=$('#fieldStatus');
+    if(box) box.innerHTML=statuses.map(([short,label,ok])=>`<div class="status-chip ${ok?'ok':'warn'}">${ok?'✓':'⚠'} ${esc(label)}</div>`).join('');
+    const editorState=state.editing;
+    const result=editorState?.item?.result||editorState?.entry||r;
+    $$('.jump').forEach(btn=>{
+      const field=btn.dataset.field;
+      let show=!result?.[field];
+      if(field==='server') show=true;
+      if(field==='sc' && result?.offline) show=true;
+      btn.classList.toggle('hidden',!show);
+    });
+    const warning=$('#ocrWarning');
+    if(warning){
+      const miss=statuses.filter(x=>!x[2]).map(x=>x[1]);
+      warning.textContent=miss.length?`⚠ Bitte prüfen: ${miss.join(' · ')}`:'';
+      warning.classList.toggle('hidden',miss.length===0);
+    }
+  }
+  function renderTitlePreview(){
+    const id=clampId($('#targetId').value);
+    const reason=ALLOWED_REASONS.includes($('#reason').value)?$('#reason').value:'';
+    const date=formatDateDE($('#date').value);
+    $('#titlePreview').value=(id&&reason&&date)?`${id}, ${reason}, ${date}.mp4`:'';
+  }
   function openEditor(item){state.editing={item};$('#modalFile').textContent=item.finalName||item.file.name;setEditorValues({...item.result,discordId:item.result?.discordId||'',proof:item.result?.proof||'',perma:false,notBanned:false});state.selectedTypes=new Set(item.result?.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus(item);$('#editorModal').classList.remove('hidden');}
   async function openEditorFromEntry(entry){const file=entry.file||await getVideo(entry.id);if(file)entry.file=file;state.editing={entry};$('#modalFile').textContent=entry.finalName||entry.originalName;setEditorValues(entry);state.selectedTypes=new Set(entry.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus({result:entry});$('#editorModal').classList.remove('hidden');}
   function closeEditor(){state.editing=null;$('#editorModal').classList.add('hidden');}
@@ -684,15 +732,15 @@
     if(!r.ok)throw new Error((await r.text()).slice(0,500));
   }
   function setupSettings(){
-    state.settings.frames=Number(localStorage.getItem('v36_frames')||24);
-    state.settings.window=Number(localStorage.getItem('v36_window')||4.5);
-    state.settings.step=Number(localStorage.getItem('v36_step')||.5);
+    state.settings.frames=Number(localStorage.getItem('v38_frames')||24);
+    state.settings.window=Number(localStorage.getItem('v38_window')||4.5);
+    state.settings.step=Number(localStorage.getItem('v38_step')||.5);
     $('#frameCount').value=state.settings.frames;
     $('#refineWindow').value=state.settings.window;
     $('#refineStep').value=state.settings.step;
-    $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v36_frames',state.settings.frames)};
-    $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v36_window',state.settings.window)};
-    $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v36_step',state.settings.step)};
+    $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v38_frames',state.settings.frames)};
+    $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v38_window',state.settings.window)};
+    $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v38_step',state.settings.step)};
     $('#clientId').addEventListener('input',e=>{state.clientId=String(e.target.value||'').trim();localStorage.setItem('yt_client_id',state.clientId);});
     $('#clientId').addEventListener('change',e=>{state.clientId=String(e.target.value||'').trim();localStorage.setItem('yt_client_id',state.clientId);});
     // YouTube buttons use the inline full-page redirect in index.html, so OAuth never depends on app.js loading.
