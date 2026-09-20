@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V35
+/* Grand RP DC Checker V46
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V42';
+  const BUILD='V46';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -349,8 +349,13 @@
     return state.worker;
   }
   async function ocr(worker,canvas,opts={}){
-    const p={tessedit_pageseg_mode:String(opts.psm||6)};
-    if(opts.whitelist)p.tessedit_char_whitelist=opts.whitelist;
+    // Tesseract keeps parameters on the shared worker. Always reset the character
+    // whitelist, otherwise a previous SC/date OCR pass can leave the worker in a
+    // hex/numeric-only mode and the next POV can no longer read target ID/reason.
+    const p={
+      tessedit_pageseg_mode:String(opts.psm||6),
+      tessedit_char_whitelist:String(opts.whitelist||'')
+    };
     await worker.setParameters(p);
     const r=await worker.recognize(canvas);
     return r.data;
