@@ -1,4 +1,4 @@
-# Grand RP POV Checker V46
+# Grand RP POV Checker V48
 
 Fixes in V40:
 - Defines the missing `setEditorValues()`, `setFieldStatus()` and `renderTitlePreview()` functions.
@@ -29,3 +29,29 @@ V46 fixes: OCR is hard-gated on YouTube processingStatus=succeeded only (never u
 V46: YouTube OAuth now requests both youtube.upload and youtube.readonly. The processing gate polls videos.list?part=processingDetails,status and will never start OCR when the read scope is missing. Existing V42 tokens must be reauthorized once via ‘Berechtigung erneut’.
 
 - Banntypen: Hardban, Soc-Ban, Cheater, Negativ, Verweigert, PC-Check.
+
+
+V48 LAST FIX / Systemtest:
+- OCR scan uses both normal grayscale and orange-chat OCR, with a wider chat ROI and additional precision frames.
+- Target-ID parser tolerates OCR variants such as `fur`, `fiir`, `fuer` and also works when the target ID brackets are missed. Admin IDs before `hat` are excluded.
+- Reason detection also works when OCR misses `Grund:`.
+- SC extraction removes the IPv6 address before searching and avoids joining arbitrary reason text into a 40-character SC.
+- YouTube upload is resumable in 16 MiB chunks and explicitly tracks the exact source byte size. OCR still starts only after YouTube processing succeeds.
+- After YouTube processing, the API file size is compared with the original source size when YouTube exposes it.
+- Final local filename creation is byte-size checked so renaming cannot silently change the uploaded file.
+- Manual picker displays original file size and video resolution.
+
+Automated tests performed: JS syntax check, OCR parser regression tests for Ziel-ID/Grund/SC/offline cases, a generated 1280x720 MP4 frame OCR test, and a byte-for-byte File rename size check.
+
+
+V48 additional fixes:
+- General OCR and restricted SC/date OCR now use separate Tesseract workers, so a whitelist cannot leak into the next target-ID/reason scan.
+- YouTube resumable upload now resumes from the server-confirmed byte offset instead of ever skipping a partially received chunk; transient network/5xx/429 failures are retried.
+- Source byte size is displayed in the archive and remains checked before/after final local naming.
+- Added reasons: PC Check Trolling and ACC 1.4 (Twink).
+
+V48 tests:
+- `node --check` für app.js und alle Inline-Skripte in index.html, manual.html und oauth-callback.html: OK.
+- Parser-Regressionsfälle: Ziel-ID 172718, PC Check Verweigert, PC Check Trolling, ACC 1.4 (Twink), Offline ohne SC: OK.
+- Test-POV 1280×720 / 2 s per System-OCR ausgewertet; Ziel-ID und Grund wurden aus der breiteren Ban-ROI korrekt erkannt, SC/Online-Erkennung vorhanden: OK.
+- Resumable-Upload-Simulation mit 8 MiB Chunks und absichtlichem 308-Teilempfang: Bytefolge nach Resume 1:1 identisch zur Quelldatei: OK.

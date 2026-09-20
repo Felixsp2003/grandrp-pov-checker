@@ -80,7 +80,7 @@
       <div class="csv-filters">
         <input id="csvFilterSearch" class="csv-filter-input" placeholder="CSV durchsuchen: ID, SC, Discord, Grund …" autocomplete="off">
         <select id="csvFilterReason" class="csv-filter-select"><option value="all">Alle Gründe</option>
-          <option>PC Check Positiv</option><option>PC Check Verweigert</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv (Banevading)</option><option>PC Check Positiv (Cleaning)</option><option>Cheating</option><option>Acc 1.1</option><option>Acc 1.4</option><option>Event 1.7</option>
+          <option>PC Check Positiv</option><option>PC Check Verweigert</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv (Banevading)</option><option>PC Check Positiv (Cleaning)</option><option>PC Check Trolling</option><option>Cheating</option><option>Acc 1.1</option><option>Acc 1.4</option><option>ACC 1.4 (Twink)</option><option>Event 1.7</option>
         </select>
         <select id="csvFilterSc" class="csv-filter-select"><option value="all">SC: Alle</option><option value="present">SC vorhanden</option><option value="empty">SC leer</option></select>
         <select id="csvFilterDiscord" class="csv-filter-select"><option value="all">Discord: Alle</option><option value="present">Discord ID vorhanden</option><option value="empty">Discord ID leer</option></select>
@@ -123,7 +123,7 @@
   <form id="entryForm">
     <div class="form-grid">
       <div class="field"><label>Ziel-ID</label><input id="targetId" inputmode="numeric" maxlength="6" placeholder="max. 6 Ziffern"><button type="button" class="jump hidden" data-field="targetId">POV hier öffnen</button></div>
-      <div class="field"><label>Grund</label><select id="reason"><option value="">Bitte wählen</option><option>PC Check Positiv</option><option>PC Check Verweigert</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv (Banevading)</option><option>PC Check Positiv (Cleaning)</option><option>Cheating</option><option>Acc 1.1</option><option>Acc 1.4</option><option>Event 1.7</option></select><button type="button" class="jump hidden" data-field="reason">Manuell auswählen</button></div>
+      <div class="field"><label>Grund</label><select id="reason"><option value="">Bitte wählen</option><option>PC Check Positiv</option><option>PC Check Verweigert</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv (Banevading)</option><option>PC Check Positiv (Cleaning)</option><option>PC Check Trolling</option><option>Cheating</option><option>Acc 1.1</option><option>Acc 1.4</option><option>ACC 1.4 (Twink)</option><option>Event 1.7</option></select><button type="button" class="jump hidden" data-field="reason">Manuell auswählen</button></div>
       <div class="field"><label>SC</label><input id="sc" maxlength="64" placeholder="leer = offline / nicht im Bild"><button type="button" class="jump hidden" data-field="sc">Manuell auswählen</button></div>
       <div class="field"><label>Server</label><input id="server" maxlength="1" inputmode="numeric" placeholder="1–4"><button type="button" class="jump hidden" data-field="server">Manuell auswählen</button></div>
       <div class="field"><label>Datum</label><input id="date" type="date"><button type="button" class="jump hidden" data-field="date">Manuell auswählen</button></div>
@@ -211,6 +211,6 @@
   });
 })();
 </script>
-<script src="app.js?v=44"></script>
+<script src="app.js?v=48"></script>
 </body>
 </html>
