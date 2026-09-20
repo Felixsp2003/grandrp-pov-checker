@@ -89,9 +89,7 @@ const ALLOWED_REASONS=['PC Check Positiv','PC Check Verweigert','PC-Check Positi
 function reasonKey(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'')}
 function levenshtein(a,b){a=String(a);b=String(b);if(a===b)return 0;if(!a)return b.length;if(!b)return a.length;let p=Array.from({length:b.length+1},(_,i)=>i);for(let i=1;i<=a.length;i++){const c=[i];for(let j=1;j<=b.length;j++)c[j]=Math.min(c[j-1]+1,p[j]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c}return p[b.length]}
 function similarity(a,b){a=reasonKey(a);b=reasonKey(b);if(!a||!b)return 0;return 1-levenshtein(a,b)/Math.max(a.length,b.length)}
-function normalizeHexLoose(s){
-  // OCR often confuses a few glyphs in hexadecimal Social Club IDs.
-  // Only map characters that are common, visually similar OCR confusions.
+window.normalizeHexLoose = window.normalizeHexLoose || function normalizeHexLoose(s){
   return String(s||'')
     .replace(/[OoQq]/g,'0')
     .replace(/[IiLl]/g,'1')
@@ -100,7 +98,8 @@ function normalizeHexLoose(s){
     .replace(/[Zz]/g,'2')
     .replace(/[^0-9A-Fa-f]/g,'')
     .toLowerCase();
-}
+};
+const normalizeHexLoose = window.normalizeHexLoose;
 function normalizeReasonOcrText(s){return String(s||'').toLowerCase().replace(/[‐‑‒–—]/g,'-').replace(/[|]/g,'i').replace(/0/g,'o').replace(/[^a-z0-9. -]/g,' ').replace(/\s+/g,' ').trim()}
 function classifyAllowedReason(src){
   const n=normalizeOcr(src), lines=n.split('\n').map(x=>x.trim()).filter(Boolean);

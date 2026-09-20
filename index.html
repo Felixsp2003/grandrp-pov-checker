@@ -127,5 +127,17 @@
 <div class="modal-actions"><button type="button" class="ghost-btn" id="cancelBtn">Abbrechen</button><button type="submit" class="pink-btn" id="saveBtn">Speichern & YouTube hochladen</button></div>
 </form></div></div>
 <div id="toast" class="toast"></div><video id="videoProbe" class="hidden-video" muted playsinline preload="metadata"></video><canvas id="ocrCanvas" class="hidden-video"></canvas>
-<script src="app.js?v=16"></script>
+<script>
+window.normalizeHexLoose = window.normalizeHexLoose || function(s){
+  return String(s||'')
+    .replace(/[OoQq]/g,'0')
+    .replace(/[IiLl]/g,'1')
+    .replace(/[Ss]/g,'5')
+    .replace(/[Gg]/g,'6')
+    .replace(/[Zz]/g,'2')
+    .replace(/[^0-9A-Fa-f]/g,'')
+    .toLowerCase();
+};
+</script>
+<script src="app.js?v=18"></script>
 </body></html>
