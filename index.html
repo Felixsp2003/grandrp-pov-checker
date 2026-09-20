@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=20">
+<link rel="stylesheet" href="styles.css?v=27">
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -86,7 +86,7 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V25</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V27</span></div>
           <p class="hint">Die Software nutzt einen Schnellscan über die letzten 40 Sekunden und startet danach nur bei einem Treffer einen dichten Präzisionsscan. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
@@ -115,11 +115,11 @@
   <form id="entryForm">
     <div class="form-grid">
       <div class="field"><label>Ziel-ID</label><input id="targetId" inputmode="numeric" maxlength="6" placeholder="max. 6 Ziffern"><button type="button" class="jump hidden" data-field="targetId">POV hier öffnen</button></div>
-      <div class="field"><label>Grund</label><select id="reason"><option value="">Bitte wählen</option><option>PC Check Positiv</option><option>PC Check Verweigert</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv (Banevading)</option><option>PC Check Positiv (Cleaning)</option><option>Cheating</option><option>Acc 1.1</option><option>Acc 1.4</option><option>Event 1.7</option></select><button type="button" class="jump hidden" data-field="reason">POV hier öffnen</button></div>
-      <div class="field"><label>SC</label><input id="sc" maxlength="64" placeholder="leer = offline / nicht im Bild"><button type="button" class="jump hidden" data-field="sc">POV hier öffnen</button></div>
-      <div class="field"><label>Server</label><input id="server" maxlength="1" inputmode="numeric" placeholder="1–4"><button type="button" class="jump hidden" data-field="server">POV hier öffnen</button></div>
-      <div class="field"><label>Datum</label><input id="date" type="date"><button type="button" class="jump hidden" data-field="date">POV hier öffnen</button></div>
-      <div class="field"><label>Discord ID</label><input id="discordId" placeholder="optional"><button type="button" class="jump hidden" data-field="discordId">POV hier öffnen</button></div>
+      <div class="field"><label>Grund</label><select id="reason"><option value="">Bitte wählen</option><option>PC Check Positiv</option><option>PC Check Verweigert</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv (Banevading)</option><option>PC Check Positiv (Cleaning)</option><option>Cheating</option><option>Acc 1.1</option><option>Acc 1.4</option><option>Event 1.7</option></select><button type="button" class="jump hidden" data-field="reason">Manuell auswählen</button></div>
+      <div class="field"><label>SC</label><input id="sc" maxlength="64" placeholder="leer = offline / nicht im Bild"><button type="button" class="jump hidden" data-field="sc">Manuell auswählen</button></div>
+      <div class="field"><label>Server</label><input id="server" maxlength="1" inputmode="numeric" placeholder="1–4"><button type="button" class="jump hidden" data-field="server">Manuell auswählen</button></div>
+      <div class="field"><label>Datum</label><input id="date" type="date"><button type="button" class="jump hidden" data-field="date">Manuell auswählen</button></div>
+      <div class="field"><label>Discord ID</label><input id="discordId" placeholder="optional"><button type="button" class="jump hidden" data-field="discordId">Manuell auswählen</button></div>
       <div class="field"><label>Proof</label><input id="proof" placeholder="optional / YouTube-Link"></div>
       <div class="field full"><label>Finaler Dateiname</label><input id="titlePreview" readonly></div>
     </div>
@@ -133,6 +133,6 @@
 
 <div id="toast" class="toast"></div>
 <video id="videoProbe" class="hidden-video" muted playsinline preload="metadata"></video>
-<script src="app.js?v=26"></script>
+<script src="app.js?v=27"></script>
 </body>
 </html>
