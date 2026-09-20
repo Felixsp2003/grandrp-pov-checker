@@ -57,10 +57,13 @@ V50 tests:
 - Resumable-Upload-Simulation mit 8 MiB Chunks und absichtlichem 308-Teilempfang: Bytefolge nach Resume 1:1 identisch zur Quelldatei: OK.
 
 
-V51: Dateigrößen werden als echte Byte-Größe aus der Quelldatei/IndexedDB geprüft. Vor dem YouTube-Upload wird die lokale Kopie gegen Größe sowie Anfang/Ende der Datei verifiziert; während des resumable Uploads wird die Quellgröße nicht verändert und nach der YouTube-Verarbeitung mit fileDetails.fileSize verglichen. Die Archivanzeige repariert alte, veraltete sourceSize-Werte aus der tatsächlich gespeicherten POV-Datei.
+V52: Dateigrößen werden als echte Byte-Größe aus der Quelldatei/IndexedDB geprüft. Vor dem YouTube-Upload wird die lokale Kopie gegen Größe sowie Anfang/Ende der Datei verifiziert; während des resumable Uploads wird die Quellgröße nicht verändert und nach der YouTube-Verarbeitung mit fileDetails.fileSize verglichen. Die Archivanzeige repariert alte, veraltete sourceSize-Werte aus der tatsächlich gespeicherten POV-Datei.
 
 
 V50 OAuth-Fix: YouTube-Access-Tokens werden vor Ablauf überwacht und bei HTTP 401 automatisch per Google Identity Services erneuert. Upload, Upload-Status, Verarbeitungsprüfung und Titel-Update verwenden danach den neuen Token.
 
 
-V51 YouTube-Titel-Fix: Die finale POV-Bezeichnung wird jetzt exakt als YouTube-Titel gesetzt (inkl. `.mp4`), mit `youtube.force-ssl`-Berechtigung. Vor dem Speichern wird der aktuelle Snippet-Stand geladen, nur der Titel ersetzt und anschließend der neue Titel über die API verifiziert. Bestehende alte OAuth-Tokens müssen einmal über „Berechtigung erneut“ neu autorisiert werden.
+V52 YouTube-Titel-Fix: Die finale POV-Bezeichnung wird jetzt exakt als YouTube-Titel gesetzt (inkl. `.mp4`), mit `youtube.force-ssl`-Berechtigung. Vor dem Speichern wird der aktuelle Snippet-Stand geladen, nur der Titel ersetzt und anschließend der neue Titel über die API verifiziert. Bestehende alte OAuth-Tokens müssen einmal über „Berechtigung erneut“ neu autorisiert werden.
+
+
+V52 OAuth-Fix: Die automatische Token-Erneuerung verwendet jetzt den GIS-Modus `prompt: ''` statt `prompt: 'none'` und verarbeitet GIS `error_callback` sofort. Dadurch hängt die Warteschlange bei abgelaufenen Zugriffstokens nicht mehr unnötig 15 Sekunden.

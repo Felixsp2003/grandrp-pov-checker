@@ -811,11 +811,24 @@
             client_id:clientId,
             scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl',
             include_granted_scopes:true,
-            callback
+            callback,
+            error_callback:(err)=>{
+              const type=err?.type||'oauth_error';
+              const detail=err?.message||'';
+              let msg='Google konnte den YouTube-Zugriff nicht automatisch erneuern.';
+              if(type==='popup_failed_to_open') msg='Google-Popup konnte zur Token-Erneuerung nicht geöffnet werden.';
+              else if(type==='popup_closed') msg='Google-Anmeldung zur Token-Erneuerung wurde geschlossen.';
+              else if(detail) msg+=` ${detail}`;
+              done(reject,new Error(msg));
+            }
           });
-          state.tokenClient.requestAccessToken({prompt:silent?'none':'consent'});
+          // An empty prompt is the GIS-supported silent/returning-user mode:
+          // Google only asks for consent the first time a scope is requested.
+          // `prompt: 'none'` is stricter and can fail when an interactive step is
+          // needed, which previously caused the 15-second timeout during queues.
+          state.tokenClient.requestAccessToken({prompt:silent?'':'consent'});
         }catch(err){done(reject,err instanceof Error?err:new Error(String(err)));}
-        setTimeout(()=>done(reject,new Error('Zeitüberschreitung beim Erneuern des YouTube-Zugriffs.')),15000);
+        setTimeout(()=>done(reject,new Error('Zeitüberschreitung beim Erneuern des YouTube-Zugriffs. Bitte YouTube einmal erneut verbinden.')),12000);
       });
     })();
     try{return await state.tokenRefreshPromise;}finally{state.tokenRefreshPromise=null;}
