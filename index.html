@@ -85,7 +85,7 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V33</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V36</span></div>
           <p class="hint">Die Software nutzt einen Schnellscan über die letzten 40 Sekunden und startet danach nur bei einem Treffer einen dichten Präzisionsscan. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
@@ -96,7 +96,7 @@
           <div class="card-title">YouTube-Verbindung <span id="ytStatus" class="connection">● Nicht verbunden</span></div>
           <p class="hint">Die POV wird zuerst vollständig zu YouTube hochgeladen (nicht gelistet). Erst danach startet die OCR. Nach dem Prüfen wird der YouTube-Titel auf den finalen Dateinamen aktualisiert.</p>
           <label>Google OAuth Client ID<input id="clientId" placeholder="...apps.googleusercontent.com" autocomplete="off" oninput="localStorage.setItem('yt_client_id', this.value.trim())"></label>
-          <div class="settings-actions"><button type="button" class="pink" id="connectYoutube" onclick="grandrpStartYouTubeAuth(false)">Mit YouTube verbinden</button><button type="button" class="ghost" id="reauthorizeYoutube" onclick="grandrpStartYouTubeAuth(true)">Berechtigung erneut</button><button type="button" class="ghost" id="disconnectYoutube" onclick="grandrpDisconnectYouTube()">Verbindung entfernen</button></div><div id="ytConnectHelp" class="hint" style="margin-top:10px"></div><div class="setting-note" style="margin-top:10px"><b>OAuth-Weiterleitung:</b> <code id="ytRedirectUriText"></code><br><span>Diese URL einmal in Google Cloud unter „Autorisierte Weiterleitungs-URIs“ eintragen.</span></div>
+          <div class="settings-actions"><a class="pink yt-link" id="connectYoutube" href="#" onclick="return grandrpPrepareYouTubeAuth(false)">Mit YouTube verbinden</a><a class="ghost yt-link" id="reauthorizeYoutube" href="#" onclick="return grandrpPrepareYouTubeAuth(true)">Berechtigung erneut</a><button type="button" class="ghost" id="disconnectYoutube" onclick="grandrpDisconnectYouTube()">Verbindung entfernen</button></div><div id="ytConnectHelp" class="hint" style="margin-top:10px"></div><div class="setting-note" style="margin-top:10px"><b>OAuth-Weiterleitung:</b> <code id="ytRedirectUriText"></code><br><span>Diese URL einmal in Google Cloud unter „Autorisierte Weiterleitungs-URIs“ eintragen.</span></div>
         </div>
         <div class="settings-card">
           <div class="card-title">Lokale Daten</div>
@@ -137,63 +137,62 @@
   'use strict';
   const CLIENT_KEY='yt_client_id';
   const TOKEN_KEY='yt_access_token';
-  const STATE_KEY='grandrp_oauth_state_v35';
-  const RESULT_KEY='grandrp_oauth_result_v35';
+  const STATE_KEY='grandrp_oauth_state_v36';
+  const RESULT_KEY='grandrp_oauth_result_v36';
   function baseUrl(){ return new URL('oauth-callback.html', location.href).href; }
   function validClientId(id){ return /^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(String(id||'').trim()); }
-  function randState(){
-    const bytes=new Uint8Array(24); crypto.getRandomValues(bytes);
-    return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
-  }
-  function show(text,color){
-    const el=document.getElementById('ytConnectHelp'); if(!el)return;
-    el.textContent=text; el.style.color=color||'';
-  }
-  window.grandrpStartYouTubeAuth=function(forceConsent){
-    const input=document.getElementById('clientId');
-    const id=String(input?.value||localStorage.getItem(CLIENT_KEY)||'').trim();
-    if(input) input.value=id;
-    if(!id){ show('Bitte zuerst die Google OAuth Client-ID eintragen.','#ff8ebd'); return; }
-    if(!validClientId(id)){ show('Die Google OAuth Client-ID hat kein gültiges Format.','#ff8ebd'); return; }
+  function randState(){ const bytes=new Uint8Array(24); crypto.getRandomValues(bytes); return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join(''); }
+  function show(text,color){ const el=document.getElementById('ytConnectHelp'); if(el){el.textContent=text;el.style.color=color||'';} }
+  function buildUrl(forceConsent){
+    const id=String(document.getElementById('clientId')?.value||localStorage.getItem(CLIENT_KEY)||'').trim();
+    if(!id) throw new Error('Bitte zuerst die Google OAuth Client-ID eintragen.');
+    if(!validClientId(id)) throw new Error('Die Google OAuth Client-ID hat kein gültiges Format.');
     localStorage.setItem(CLIENT_KEY,id);
-    const state=randState(); sessionStorage.setItem(STATE_KEY,state);
+    const state=randState();
+    sessionStorage.setItem(STATE_KEY,state);
     sessionStorage.removeItem(TOKEN_KEY);
     sessionStorage.removeItem(RESULT_KEY);
-    const redirect=baseUrl();
-    const p=new URLSearchParams({
-      client_id:id,
-      redirect_uri:redirect,
-      response_type:'token',
-      scope:'https://www.googleapis.com/auth/youtube.upload',
-      include_granted_scopes:'true',
-      state
-    });
+    const p=new URLSearchParams({client_id:id,redirect_uri:baseUrl(),response_type:'token',scope:'https://www.googleapis.com/auth/youtube.upload',include_granted_scopes:'true',state});
     if(forceConsent) p.set('prompt','consent');
-    show('Google wird geöffnet…');
-    const b=document.getElementById(forceConsent?'reauthorizeYoutube':'connectYoutube');
-    if(b){b.disabled=true; b.dataset.oldText=b.textContent; b.textContent='Google wird geöffnet…';}
-    // Full-page redirect: no popup blockers and no dependency on GIS JavaScript.
-    location.assign('https://accounts.google.com/o/oauth2/v2/auth?'+p.toString());
+    return 'https://accounts.google.com/o/oauth2/v2/auth?'+p.toString();
+  }
+  window.grandrpPrepareYouTubeAuth=function(forceConsent){
+    try{
+      const url=buildUrl(!!forceConsent);
+      const a=document.getElementById(forceConsent?'reauthorizeYoutube':'connectYoutube');
+      if(a){a.href=url;a.textContent='Google wird geöffnet…';setTimeout(()=>{a.textContent=forceConsent?'Berechtigung erneut':'Mit YouTube verbinden';},1500);}
+      show('Google wird geöffnet…');
+      return true; // native anchor navigation continues after this handler
+    }catch(err){
+      show(err.message||String(err),'#ff8ebd');
+      return false;
+    }
   };
   window.grandrpDisconnectYouTube=function(){
     sessionStorage.removeItem(TOKEN_KEY);sessionStorage.removeItem(RESULT_KEY);sessionStorage.removeItem(STATE_KEY);
     const status=document.getElementById('ytStatus'); if(status){status.textContent='● Nicht verbunden';status.style.color='#7f7488';}
     show('YouTube-Verbindung entfernt.');
   };
-  window.addEventListener('DOMContentLoaded', function(){
+  window.addEventListener('DOMContentLoaded',function(){
     const input=document.getElementById('clientId');
-    if(input) input.value=localStorage.getItem(CLIENT_KEY)||'';
+    if(input){input.value=localStorage.getItem(CLIENT_KEY)||''; input.addEventListener('input',()=>{localStorage.setItem(CLIENT_KEY,input.value.trim());});}
     const uri=document.getElementById('ytRedirectUriText'); if(uri) uri.textContent=baseUrl();
+    const connect=document.getElementById('connectYoutube'); const reauth=document.getElementById('reauthorizeYoutube');
+    try{
+      const url=buildUrl(false); if(connect) connect.href=url;
+      const url2=buildUrl(true); if(reauth) reauth.href=url2;
+      // Rebuild the main URL immediately before navigation so the state is always fresh.
+      if(connect) connect.addEventListener('mouseenter',()=>{try{connect.href=buildUrl(false);}catch{}});
+      if(reauth) reauth.addEventListener('mouseenter',()=>{try{reauth.href=buildUrl(true);}catch{}});
+    }catch{}
     const r=sessionStorage.getItem(RESULT_KEY);
     const token=sessionStorage.getItem(TOKEN_KEY);
     const status=document.getElementById('ytStatus');
-    const btn=document.getElementById('connectYoutube');
     if(token && status){status.textContent='● Verbunden';status.style.color='#69e1af';}
-    if(r){try{const data=JSON.parse(r);show(data.message||'');}catch{}} 
-    if(btn && token){btn.textContent='YouTube verbunden';btn.disabled=false;}
+    if(r){try{const data=JSON.parse(r);show(data.message||'');}catch{}}
   });
 })();
 </script>
-<script src="app.js?v=35"></script>
+<script src="app.js?v=36"></script>
 </body>
 </html>

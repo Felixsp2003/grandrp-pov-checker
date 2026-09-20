@@ -10,9 +10,9 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V29';
-  const META_KEY='grandrp_pov_meta_v29';
-  const DB_NAME='grandrp_pov_db_v29';
+  const BUILD='V36';
+  const META_KEY='grandrp_pov_meta_v36';
+  const DB_NAME='grandrp_pov_db_v36';
   const STORE='videos';
 
   const ALLOWED_REASONS=[
@@ -684,15 +684,15 @@
     if(!r.ok)throw new Error((await r.text()).slice(0,500));
   }
   function setupSettings(){
-    state.settings.frames=Number(localStorage.getItem('v29_frames')||24);
-    state.settings.window=Number(localStorage.getItem('v29_window')||4.5);
-    state.settings.step=Number(localStorage.getItem('v29_step')||.5);
+    state.settings.frames=Number(localStorage.getItem('v36_frames')||24);
+    state.settings.window=Number(localStorage.getItem('v36_window')||4.5);
+    state.settings.step=Number(localStorage.getItem('v36_step')||.5);
     $('#frameCount').value=state.settings.frames;
     $('#refineWindow').value=state.settings.window;
     $('#refineStep').value=state.settings.step;
-    $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v29_frames',state.settings.frames)};
-    $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v29_window',state.settings.window)};
-    $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v29_step',state.settings.step)};
+    $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v36_frames',state.settings.frames)};
+    $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v36_window',state.settings.window)};
+    $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v36_step',state.settings.step)};
     $('#clientId').addEventListener('input',e=>{state.clientId=String(e.target.value||'').trim();localStorage.setItem('yt_client_id',state.clientId);});
     $('#clientId').addEventListener('change',e=>{state.clientId=String(e.target.value||'').trim();localStorage.setItem('yt_client_id',state.clientId);});
     // YouTube buttons use the inline full-page redirect in index.html, so OAuth never depends on app.js loading.
