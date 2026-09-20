@@ -589,7 +589,7 @@
     if(!(window.google?.accounts?.oauth2)) throw new Error('Google OAuth ist noch nicht geladen. Bitte Seite neu laden.');
     state.tokenClient=window.google.accounts.oauth2.initTokenClient({
       client_id:id,
-      scope:'https://www.googleapis.com/auth/youtube.upload',
+      scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
       include_granted_scopes:true,
       callback:(resp)=>{
         clearTimeout(state.oauthTimeout);
@@ -678,7 +678,7 @@
       client_id:clientId,
       redirect_uri:oauthRedirectUri(),
       response_type:'token',
-      scope:'https://www.googleapis.com/auth/youtube.upload',
+      scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
       include_granted_scopes:'true',
       state:stateValue
     });
@@ -741,7 +741,10 @@
       const url=`https://www.googleapis.com/youtube/v3/videos?part=processingDetails,status&id=${encodeURIComponent(videoId)}`;
       const r=await fetch(url,{headers:{Authorization:`Bearer ${token}`}});
       if(!r.ok){
-        const body=(await r.text()).slice(0,500);
+        const body=(await r.text()).slice(0,900);
+        if(r.status===403 && /insufficient|scope/i.test(body)){
+          throw new Error('YouTube-Berechtigung für die Verarbeitungsprüfung fehlt. Bitte „Berechtigung erneut“ drücken und den neuen YouTube-Zugriff bestätigen. OCR bleibt bis dahin gesperrt.');
+        }
         throw new Error(`YouTube-Verarbeitungsstatus konnte nicht gelesen werden: ${body}`);
       }
       const data=await r.json();
@@ -787,15 +790,15 @@
     if(!r.ok)throw new Error((await r.text()).slice(0,500));
   }
   function setupSettings(){
-    state.settings.frames=Number(localStorage.getItem('v38_frames')||24);
-    state.settings.window=Number(localStorage.getItem('v38_window')||4.5);
-    state.settings.step=Number(localStorage.getItem('v38_step')||.5);
+    state.settings.frames=Number(localStorage.getItem('v43_frames')||24);
+    state.settings.window=Number(localStorage.getItem('v43_window')||4.5);
+    state.settings.step=Number(localStorage.getItem('v43_step')||.5);
     $('#frameCount').value=state.settings.frames;
     $('#refineWindow').value=state.settings.window;
     $('#refineStep').value=state.settings.step;
-    $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v38_frames',state.settings.frames)};
-    $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v38_window',state.settings.window)};
-    $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v38_step',state.settings.step)};
+    $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v43_frames',state.settings.frames)};
+    $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v43_window',state.settings.window)};
+    $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v43_step',state.settings.step)};
     $('#clientId').addEventListener('input',e=>{state.clientId=String(e.target.value||'').trim();localStorage.setItem('yt_client_id',state.clientId);});
     $('#clientId').addEventListener('change',e=>{state.clientId=String(e.target.value||'').trim();localStorage.setItem('yt_client_id',state.clientId);});
     // YouTube buttons use the inline full-page redirect in index.html, so OAuth never depends on app.js loading.

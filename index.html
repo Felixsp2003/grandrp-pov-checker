@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=42">
+<link rel="stylesheet" href="styles.css?v=43">
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
@@ -137,8 +137,10 @@
   'use strict';
   const CLIENT_KEY='yt_client_id';
   const TOKEN_KEY='yt_access_token';
-  const STATE_KEY='grandrp_oauth_state_v38';
-  const RESULT_KEY='grandrp_oauth_result_v38';
+  const STATE_KEY='grandrp_oauth_state_v43';
+  const SCOPE_KEY='grandrp_yt_scope_v43';
+  const YT_SCOPES='https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly';
+  const RESULT_KEY='grandrp_oauth_result_v43';
   function callbackUrl(){ return new URL('oauth-callback.html', location.href).href; }
   function validClientId(id){ return /^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(String(id||'').trim()); }
   function state(){
@@ -162,7 +164,7 @@
         client_id:id,
         redirect_uri:callbackUrl(),
         response_type:'token',
-        scope:'https://www.googleapis.com/auth/youtube.upload',
+        scope:YT_SCOPES,
         include_granted_scopes:'true',
         state:s
       });
@@ -189,7 +191,9 @@
     if(input){input.value=localStorage.getItem(CLIENT_KEY)||''; input.addEventListener('input',()=>localStorage.setItem(CLIENT_KEY,input.value.trim()));}
     const uri=document.getElementById('ytRedirectUriText'); if(uri) uri.textContent=callbackUrl();
     const status=document.getElementById('ytStatus');
-    const token=localStorage.getItem(TOKEN_KEY)||sessionStorage.getItem(TOKEN_KEY)||'';
+    const scopeReady=localStorage.getItem(SCOPE_KEY)==='1';
+    const token=scopeReady?(localStorage.getItem(TOKEN_KEY)||sessionStorage.getItem(TOKEN_KEY)||''):'';
+    if(!scopeReady){localStorage.removeItem(TOKEN_KEY);sessionStorage.removeItem(TOKEN_KEY);}
     if(token){sessionStorage.setItem(TOKEN_KEY,token); if(status){status.textContent='● Verbunden';status.style.color='#69e1af';}}
     const resultRaw=localStorage.getItem(RESULT_KEY)||sessionStorage.getItem(RESULT_KEY)||'';
     if(resultRaw){try{const data=JSON.parse(resultRaw);show(data.message||'',data.ok?'#69e1af':'#ff8ebd'); if(data.ok)localStorage.removeItem(RESULT_KEY); sessionStorage.removeItem(RESULT_KEY);}catch{}}
@@ -198,6 +202,6 @@
   });
 })();
 </script>
-<script src="app.js?v=42"></script>
+<script src="app.js?v=43"></script>
 </body>
 </html>
