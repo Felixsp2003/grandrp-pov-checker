@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const META_KEY='grandrp_pov_meta_v13', DB_NAME='grandrp_pov_db_v1', STORE='videos';
+const META_KEY='grandrp_pov_meta_v15', DB_NAME='grandrp_pov_db_v1', STORE='videos';
 const state={entries:[],queue:[],filter:'all',editing:null,selectedTypes:[],accessToken:sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',processing:false};
 const views={archive:['Archiv','POV-Fälle, Bans und PC-Checks'],cases:['Verdachtsfälle','Nicht eindeutig erkannte Fälle zur manuellen Prüfung'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','YouTube und OCR']};
 function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
@@ -270,6 +270,12 @@ function bestVote(values,normalizer,minLen=1){const vals=values.map(v=>normalize
 function voteConfidence(values,normalizer,winner){const vals=values.map(v=>normalizer(v)).filter(Boolean);if(!vals.length||!winner)return 0;return vals.filter(v=>v===winner).length/vals.length}
 function inferTypes(reason){switch(reason){case 'PC Check Positiv':case 'PC Check Verweigert':case 'PC-Check Positiv 4.1 (Discord)':case 'PC-Check Positiv 4.1 (Redux)':case 'PC-Check Positiv (Banevading)':case 'PC Check Positiv (Cleaning)':return ['pccheck'];case 'Cheating':return ['cheater'];default:return[]}}
 async function ocr(worker,canvas,params={}){await worker.setParameters({tessedit_pageseg_mode:params.psm??6,tessedit_char_whitelist:params.whitelist||'',preserve_interword_spaces:'1',user_defined_dpi:'300'});const r=await worker.recognize(canvas);return r.data||{text:'',words:[]}}
+function validDate(iso){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(iso||''))) return false;
+  const [y,m,d]=String(iso).split('-').map(Number);
+  const dt=new Date(Date.UTC(y,m-1,d));
+  return dt.getUTCFullYear()===y && dt.getUTCMonth()===m-1 && dt.getUTCDate()===d;
+}
 function extractDate(s){
   let m=String(s||'').match(/\b(20\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})\b/);if(m)return`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
   m=String(s||'').match(/\b(\d{1,2})[.\-/](\d{1,2})[.\-/](20\d{2})\b/);return m?`${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`:'';

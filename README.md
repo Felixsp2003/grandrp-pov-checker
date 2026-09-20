@@ -1,12 +1,11 @@
-# Grand RP POV Checker V12
+# Grand RP POV Checker V16
 
-Erweitert die zulässigen Bann-Gründe um:
-- PC-Check Positiv 4.1 (Discord)
-- PC-Check Positiv 4.1 (Redux)
-- PC-Check Positiv (Banevading)
-- PC Check Positiv (Cleaning)
+Fix für den Laufzeitfehler `validDate is not defined` aus V15.
 
-
-V13: reason-marker-only classification, strict target-ID parsing after 'hat', SC extraction allowing 38-42 hex chars, dedicated yellow server badge detection, 30-frame fast scan + focused precision scan.
-
-V14: CSV-Export direkt aus dem Archiv; Spalten Proof, Datum, ID, SOC, RID (= SC), Discord ID, Familie, Grund. SOC und Familie bleiben leer, wenn nicht vorhanden.
+Enthält weiterhin:
+- Multi-POV-Upload
+- OCR der letzten 40 Sekunden
+- CSV-Export mit Proof, Datum, ID, SOC, RID (= SC), Discord ID, Familie, Grund
+- SOC und Familie bleiben leer, wenn nicht vorhanden
+- POV wird erst nach vollständiger Verarbeitung/Prüfung endgültig benannt und gespeichert
+- fehlende Felder können über einen neuen POV-Tab an der erkannten Zeit geprüft werden
