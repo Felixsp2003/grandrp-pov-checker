@@ -1,11 +1,14 @@
-Grand RP POV Checker V33
+Grand RP POV Checker V34
 
-YouTube OAuth V33:
-- Uses Google Identity Services token client.
-- Main connect button requests an access token with prompt="" after the user has already granted access.
-- A separate re-authorize action can force consent.
-- No await occurs between the button click and requestAccessToken().
-- Visible diagnostic status is shown below the YouTube button.
-- Cache-buster is V33 in index.html.
+YouTube OAuth uses a robust same-page Google redirect fallback so it does not depend on browser popups.
 
-Workflow: YouTube upload -> 100% -> local OCR -> manual review -> final filename/title.
+ONE-TIME GOOGLE CLOUD SETUP
+Add this exact Authorized redirect URI to the Web application OAuth client:
+https://felixsp2003.github.io/grandrp-pov-checker/
+
+The Authorized JavaScript origin remains:
+https://felixsp2003.github.io
+
+After Google redirects back, the app reads the access token from the URL fragment, validates state, removes the fragment, and stores the token for the current browser session.
+
+The app keeps YouTube uploads unlisted. OCR starts only after the upload reaches 100%.

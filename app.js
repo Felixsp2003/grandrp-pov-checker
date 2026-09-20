@@ -566,70 +566,101 @@
     return true;
   }
 
+  function oauthRedirectUri(){
+    return `${location.origin}${location.pathname}`;
+  }
+  function randomState(){
+    const bytes=new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    return [...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+  function handleOAuthRedirect(){
+    const hash=String(location.hash||'').replace(/^#/,'');
+    if(!hash)return false;
+    const p=new URLSearchParams(hash);
+    const stateValue=p.get('state')||'';
+    const expected=sessionStorage.getItem('grandrp_oauth_state')||'';
+    const token=p.get('access_token');
+    const error=p.get('error');
+    const desc=p.get('error_description')||'';
+    if(!token && !error)return false;
+    history.replaceState(null,document.title,location.pathname+location.search);
+    sessionStorage.removeItem('grandrp_oauth_state');
+    if(expected && stateValue!==expected){
+      showYoutubeHelp('Google OAuth abgebrochen: Sicherheitsprüfung fehlgeschlagen. Bitte erneut verbinden.','error');
+      return true;
+    }
+    if(error){
+      const msg=desc||error;
+      showYoutubeHelp(`Google OAuth: ${msg}`,'error');
+      toast(`Google OAuth: ${msg}`);
+      setYoutubeButton('Mit YouTube verbinden',false);
+      return true;
+    }
+    state.accessToken=token;
+    sessionStorage.setItem('yt_access_token',token);
+    updateYtStatus(true);
+    showYoutubeHelp('YouTube ist verbunden.','good');
+    toast('YouTube verbunden.');
+    setYoutubeButton('YouTube verbunden',false);
+    return true;
+  }
+  function startRedirectOAuth(clientId,forceConsent=false){
+    const stateValue=randomState();
+    sessionStorage.setItem('grandrp_oauth_state',stateValue);
+    const params=new URLSearchParams({
+      client_id:clientId,
+      redirect_uri:oauthRedirectUri(),
+      response_type:'token',
+      scope:'https://www.googleapis.com/auth/youtube.upload',
+      include_granted_scopes:'true',
+      state:stateValue
+    });
+    if(forceConsent) params.set('prompt','consent');
+    location.assign('https://accounts.google.com/o/oauth2/v2/auth?'+params.toString());
+  }
   function initYoutube(){
     const help=$('#ytConnectHelp');
-    const btn=$('#connectYoutube');
     const entered=String($('#clientId')?.value||'').trim();
     if(entered){state.clientId=entered;localStorage.setItem('yt_client_id',entered);}
     const clientId=String(state.clientId||'').trim();
-    if(help) help.textContent='';
     if(!clientId){
-      const msg='Bitte zuerst die Google OAuth Client-ID in Einstellungen eintragen.';
-      showYoutubeHelp(msg,'error'); toast(msg); return;
+      showYoutubeHelp('Bitte zuerst die Google OAuth Client-ID in Einstellungen eintragen.','error');
+      toast('Bitte zuerst die Google OAuth Client-ID eintragen.');
+      return;
     }
-    if(!window.google?.accounts?.oauth2){
-      const msg='Google OAuth ist noch nicht geladen. Deaktiviere ggf. Shields/Adblock für diese Website und lade die Seite neu.';
-      showYoutubeHelp(msg,'error'); toast(msg); return;
+    if(!validClientId(clientId)){
+      showYoutubeHelp('Die Google OAuth Client-ID sieht ungültig aus.','error');
+      return;
     }
+    setYoutubeButton('Google wird geöffnet…',true);
+    if(help) help.textContent='Google-Anmeldung wird geöffnet…';
+    // Robust fallback for browsers that block GIS popups: use Google's legacy browser redirect flow.
+    // The token is returned in the URL fragment and handled immediately on return.
     try{
-      setYoutubeButton('Google wird geöffnet…',true);
-      configureYoutubeClient(clientId);
-      showYoutubeHelp('Google-Anmeldung wird geöffnet… Wenn du bereits bestätigt hast, wird der Zugriff ohne erneute Einwilligung angefordert.');
-      state.oauthTimeout=setTimeout(()=>{
-        if(!state.accessToken){
-          const msg='Google OAuth antwortet nicht. Prüfe, ob das Google-Popup blockiert wird, und erlaube Popups für diese Website.';
-          showYoutubeHelp(msg,'error');
-          setYoutubeButton('Mit YouTube verbinden',false);
-          toast(msg);
-        }
-      },15000);
-      // IMPORTANT: no await / promise before this line. This is the direct click gesture.
-      state.tokenClient.requestAccessToken({prompt:''});
+      startRedirectOAuth(clientId,false);
     }catch(err){
-      clearTimeout(state.oauthTimeout);
       const msg=err?.message||String(err);
       showYoutubeHelp(msg,'error');
-      toast(msg);
       setYoutubeButton('Mit YouTube verbinden',false);
+      toast(msg);
     }
   }
 
   function reauthorizeYoutube(){
-    const help=$('#ytConnectHelp');
-    const btn=$('#connectYoutube');
+    const entered=String($('#clientId')?.value||'').trim();
+    if(entered){state.clientId=entered;localStorage.setItem('yt_client_id',entered);}
+    const clientId=String(state.clientId||'').trim();
+    if(!clientId){showYoutubeHelp('Bitte zuerst die Google OAuth Client-ID eintragen.','error');return;}
     try{
-      if(!state.tokenClient){
-        const entered=String($('#clientId')?.value||'').trim();
-        if(entered){state.clientId=entered;localStorage.setItem('yt_client_id',entered);}
-        configureYoutubeClient(state.clientId);
-      }
-      if(!state.tokenClient){throw new Error('Google OAuth ist noch nicht vorbereitet.');}
       setYoutubeButton('Berechtigung wird geöffnet…',true);
-      if(help) help.textContent='Google fragt die YouTube-Berechtigung erneut ab…';
-      state.oauthTimeout=setTimeout(()=>{
-        if(!state.accessToken){
-          const msg='Google antwortet nicht. Öffne Popups für felixsp2003.github.io und versuche es erneut.';
-          showYoutubeHelp(msg,'error');
-          setYoutubeButton('Mit YouTube verbinden',false);
-          toast(msg);
-        }
-      },12000);
-      state.tokenClient.requestAccessToken({prompt:'consent'});
+      showYoutubeHelp('Google fragt die YouTube-Berechtigung erneut ab…');
+      startRedirectOAuth(clientId,true);
     }catch(err){
       const msg=err?.message||String(err);
       showYoutubeHelp(msg,'error');
-      toast(msg);
       setYoutubeButton('Mit YouTube verbinden',false);
+      toast(msg);
     }
   }
   window.connectYouTubeNow=initYoutube;
@@ -669,5 +700,5 @@
   }
 
   window.addEventListener('beforeunload',()=>{try{state.worker?.terminate();}catch{}});
-  setupNav();setupUpload();setupEditor();setupSettings();loadMeta();renderArchive();renderQueue();updateYtStatus();
+  setupNav();setupUpload();setupEditor();setupSettings();loadMeta();renderArchive();renderQueue();updateYtStatus(); if(handleOAuthRedirect()){ renderQueue(); }
 })();
