@@ -669,10 +669,26 @@
     const namedFile=new File([base.file],finalName,{type:base.file.type||'video/mp4',lastModified:base.file.lastModified||Date.now()}); if(namedFile.size!==base.file.size)throw new Error('Die Dateigröße hat sich beim Umbenennen verändert. Speicherung abgebrochen.');
     const yt=base.youtube||ctx.item?.youtube||ctx.entry?.youtube||null;
     const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,sc:offline?'':sc,server,date,types:finalTypes,perma:$('#perma').checked,notBanned:$('#notBanned').checked,discordId:$('#discordId').value.trim(),proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',timestamps:base.result?.timestamps||base.timestamps||{},missing:[],file:namedFile,youtube:yt};
-    await putVideo(record.id,namedFile); state.entries=[record,...state.entries.filter(x=>x.id!==record.id)]; saveMeta();
+    await putVideo(record.id,namedFile);
+    // YouTube must receive the exact final filename (including .mp4). The title update
+    // is completed and verified before the saved POV is finalized in the UI.
+    if(yt?.id){
+      try{
+        await updateYoutubeTitle(yt.id,finalName,state.accessToken||'');
+        record.youtubeTitle=finalName;
+      }catch(err){
+        console.error(err);
+        if(err?.code==='YT_SCOPE_REQUIRED'){
+          toast('YouTube-Titel braucht einmalig die neue Berechtigung „Berechtigung erneut“.');
+        }else{
+          toast('YouTube-Titel konnte nicht aktualisiert werden: '+(err?.message||err));
+        }
+        throw err;
+      }
+    }
+    state.entries=[record,...state.entries.filter(x=>x.id!==record.id)]; saveMeta();
     if(ctx.item){ctx.item.file=namedFile;ctx.item.finalName=finalName;ctx.item.result={...ctx.item.result,...record};ctx.item.status='Gespeichert';ctx.item.progress=100;renderQueue();}
-    closeEditor(); renderArchive(); renderCases(); renderCsv(); toast('Gespeichert. Die POV wurde erst nach vollständiger Verarbeitung final benannt.');
-    if(yt?.id&&state.accessToken){try{await updateYoutubeTitle(yt.id,finalName.replace(/\.mp4$/i,''),state.accessToken);toast('YouTube-Titel aktualisiert.');}catch(err){console.error(err);toast('YouTube-Titel konnte nicht aktualisiert werden. Das Video bleibt online.');}}
+    closeEditor(); renderArchive(); renderCases(); renderCsv(); toast('Gespeichert. YouTube-Titel und Dateiname sind identisch.');
   }
   window.addEventListener('message',e=>{if(e.data?.type==='grandrp-manual-field'){applyManualField(e.data.field,e.data.value,e.data.time);}});
 
@@ -793,7 +809,7 @@
           // after a long-running multi-POV queue.
           state.tokenClient=window.google.accounts.oauth2.initTokenClient({
             client_id:clientId,
-            scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
+            scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl',
             include_granted_scopes:true,
             callback
           });
@@ -822,7 +838,7 @@
     if(!(window.google?.accounts?.oauth2)) throw new Error('Google OAuth ist noch nicht geladen. Bitte Seite neu laden.');
     state.tokenClient=window.google.accounts.oauth2.initTokenClient({
       client_id:id,
-      scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
+      scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl',
       include_granted_scopes:true,
       callback:(resp)=>{
         clearTimeout(state.oauthTimeout);
@@ -910,7 +926,7 @@
       client_id:clientId,
       redirect_uri:oauthRedirectUri(),
       response_type:'token',
-      scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
+      scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl',
       include_granted_scopes:'true',
       state:stateValue
     });
@@ -1092,13 +1108,57 @@
   }
   async function updateYoutubeTitle(videoId,title,token){
     if(!videoId)return;
-    const safeTitle=String(title||'POV').slice(0,100);
-    const meta={id:videoId,snippet:{title:safeTitle,description:'Grand RP POV Checker',categoryId:'20'}};
-    const send=async(t)=>fetch('https://www.googleapis.com/youtube/v3/videos?part=snippet',{method:'PUT',headers:{Authorization:`Bearer ${t}`,'Content-Type':'application/json'},body:JSON.stringify(meta)});
-    let r=await send(state.accessToken||token||'');
-    if(r.status===401){const fresh=await refreshYoutubeToken(true);r=await send(fresh);}
-    if(!r.ok)throw new Error((await r.text()).slice(0,500));
+    const desiredTitle=String(title||'POV').trim();
+    if(!desiredTitle)throw new Error('YouTube-Titel ist leer.');
+    if(desiredTitle.length>100)throw new Error(`YouTube-Titel ist zu lang (${desiredTitle.length}/100 Zeichen).`);
+    let accessToken=state.accessToken||token||'';
+    if(!accessToken)throw new Error('YouTube nicht verbunden.');
+
+    const api=async(path,options={})=>{
+      const res=await fetch(path,{...options,headers:{...(options.headers||{}),Authorization:`Bearer ${accessToken}`}});
+      if(res.status===401){
+        accessToken=await refreshYoutubeToken(true);
+        return fetch(path,{...options,headers:{...(options.headers||{}),Authorization:`Bearer ${accessToken}`}});
+      }
+      return res;
+    };
+
+    // Read the current snippet first so we only change the title and do not
+    // accidentally wipe tags/default language/description metadata.
+    let get=await api(`https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${encodeURIComponent(videoId)}`);
+    if(!get.ok){
+      const body=await get.text();
+      if(get.status===403 && /insufficient|scope/i.test(body)){const e=new Error('YouTube benötigt die Berechtigung „youtube.force-ssl“. Bitte einmal „Berechtigung erneut“ ausführen.');e.code='YT_SCOPE_REQUIRED';throw e;}
+      throw new Error(`YouTube-Video konnte nicht gelesen werden: ${body.slice(0,500)}`);
+    }
+    const data=await get.json();
+    const current=data.items?.[0];
+    if(!current?.snippet)throw new Error('YouTube-Video für Titel-Update nicht gefunden.');
+    const oldSnippet=current.snippet;
+    const meta={id:videoId,snippet:{
+      title:desiredTitle,
+      description:String(oldSnippet.description||''),
+      categoryId:String(oldSnippet.categoryId||'20')
+    }};
+    if(Array.isArray(oldSnippet.tags))meta.snippet.tags=oldSnippet.tags;
+    if(oldSnippet.defaultLanguage)meta.snippet.defaultLanguage=oldSnippet.defaultLanguage;
+
+    let put=await api('https://www.googleapis.com/youtube/v3/videos?part=snippet',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(meta)});
+    if(!put.ok){
+      const body=await put.text();
+      if(put.status===403 && /insufficient|scope/i.test(body)){const e=new Error('YouTube benötigt die Berechtigung „youtube.force-ssl“. Bitte einmal „Berechtigung erneut“ ausführen.');e.code='YT_SCOPE_REQUIRED';throw e;}
+      throw new Error(`YouTube-Titel konnte nicht gespeichert werden: ${body.slice(0,500)}`);
+    }
+
+    // Verify the title by reading it back. This prevents the UI from claiming a rename
+    // succeeded when YouTube accepted another/stale metadata state.
+    let verify=await api(`https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${encodeURIComponent(videoId)}`);
+    if(!verify.ok)throw new Error(`YouTube-Titel konnte nicht verifiziert werden: ${(await verify.text()).slice(0,500)}`);
+    const verified=await verify.json();
+    const actual=verified.items?.[0]?.snippet?.title||'';
+    if(actual!==desiredTitle)throw new Error(`YouTube-Titel weicht ab: erwartet „${desiredTitle}“ · erhalten „${actual}“`);
   }
+
   function setupSettings(){
     state.settings.frames=Number(localStorage.getItem('v44_frames')||24);
     state.settings.window=Number(localStorage.getItem('v44_window')||4.5);

@@ -147,10 +147,10 @@
   'use strict';
   const CLIENT_KEY='yt_client_id';
   const TOKEN_KEY='yt_access_token';
-  const STATE_KEY='grandrp_oauth_state_v43';
-  const SCOPE_KEY='grandrp_yt_scope_v43';
-  const YT_SCOPES='https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly';
-  const RESULT_KEY='grandrp_oauth_result_v43';
+  const STATE_KEY='grandrp_oauth_state_v51';
+  const SCOPE_KEY='grandrp_yt_scope_v51';
+  const YT_SCOPES='https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl';
+  const RESULT_KEY='grandrp_oauth_result_v51';
   const EXPIRES_KEY='yt_access_expires_at_v50';
   function callbackUrl(){ return new URL('oauth-callback.html', location.href).href; }
   function validClientId(id){ return /^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(String(id||'').trim()); }
@@ -213,6 +213,6 @@
   });
 })();
 </script>
-<script src="app.js?v=50"></script>
+<script src="app.js?v=51"></script>
 </body>
 </html>

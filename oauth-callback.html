@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Grand RP · YouTube Verbindung</title><style>body{margin:0;background:#08060f;color:#f5effb;font-family:Inter,system-ui,Arial,sans-serif;display:grid;place-items:center;min-height:100vh}.card{width:min(560px,calc(100% - 32px));background:#0f0b18;border:1px solid #281b37;border-radius:14px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.45)}h1{margin:0 0 8px;font-size:22px}p{color:#aaa0b0;line-height:1.5}.ok{color:#69e1af}.err{color:#ff8ebd}.small{font-size:12px}</style></head><body><div class="card"><h1 id="title">YouTube wird verbunden…</h1><p id="msg">Bitte warten. Google leitet dich zurück zur Website.</p></div><script>(function(){
 'use strict';
-const TOKEN='yt_access_token',STATE='grandrp_oauth_state_v43',RESULT='grandrp_oauth_result_v43',EXPIRES='yt_access_expires_at_v50';
+const TOKEN='yt_access_token',STATE='grandrp_oauth_state_v51',RESULT='grandrp_oauth_result_v51',EXPIRES='yt_access_expires_at_v50';
 function done(msg,ok){document.getElementById('title').textContent=ok?'YouTube verbunden':'YouTube-Verbindung fehlgeschlagen';document.getElementById('msg').textContent=msg;document.getElementById('msg').className=ok?'ok':'err';}
 const hash=new URLSearchParams(location.hash.replace(/^#/,''));
 const expected=localStorage.getItem(STATE)||sessionStorage.getItem(STATE)||'';
@@ -26,7 +26,7 @@ if(expected && returned!==expected){
   done(m,false);setTimeout(()=>location.replace('./'),1400);return;
 }
 // Persist the token in both storage types so the main page sees it after returning.
-localStorage.setItem(TOKEN,token);sessionStorage.setItem(TOKEN,token);localStorage.setItem(EXPIRES,String(Date.now()+Math.max(60,expiresIn-30)*1000));localStorage.setItem('grandrp_yt_scope_v43','1');
+localStorage.setItem(TOKEN,token);sessionStorage.setItem(TOKEN,token);localStorage.setItem(EXPIRES,String(Date.now()+Math.max(60,expiresIn-30)*1000));localStorage.setItem('grandrp_yt_scope_v51','1');
 const data={message:'YouTube ist verbunden.',ok:true};
 localStorage.setItem(RESULT,JSON.stringify(data));sessionStorage.setItem(RESULT,JSON.stringify(data));
 localStorage.removeItem(STATE);sessionStorage.removeItem(STATE);
