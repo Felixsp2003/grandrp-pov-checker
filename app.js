@@ -25,266 +25,170 @@ function waitForEditorClose(){return new Promise(resolve=>{const check=()=>state
 function loaded(v){return new Promise((res,rej)=>{let done=false;const ok=()=>{if(done)return;done=true;cleanup();res()};const bad=()=>{if(done)return;done=true;cleanup();rej(new Error('Video konnte nicht gelesen werden.'))};const cleanup=()=>{v.removeEventListener('loadedmetadata',ok);v.removeEventListener('error',bad)};v.addEventListener('loadedmetadata',ok,{once:true});v.addEventListener('error',bad,{once:true});setTimeout(()=>bad(),15000)})}
 function seek(v,t){return new Promise((res,rej)=>{let done=false;const ok=()=>{if(done)return;done=true;cleanup();res()};const bad=()=>{if(done)return;done=true;cleanup();rej(new Error('Video-Suche Timeout'))};const cleanup=()=>v.removeEventListener('seeked',ok);v.addEventListener('seeked',ok,{once:true});v.currentTime=Math.min(Math.max(0,t),Math.max(0,v.duration-.05));setTimeout(bad,12000)})}
 function crop(v,x,y,w,h,scale=1.35){const c=document.createElement('canvas'),vw=v.videoWidth,vh=v.videoHeight;c.width=Math.max(1,Math.round(vw*w*scale));c.height=Math.max(1,Math.round(vh*h*scale));const ctx=c.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.drawImage(v,Math.round(vw*x),Math.round(vh*y),Math.round(vw*w),Math.round(vh*h),0,0,c.width,c.height);return c}
-function preprocess(src,mode='normal'){const c=document.createElement('canvas');c.width=src.width;c.height=src.height;const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(src,0,0);if(mode==='normal')return c;const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;for(let i=0;i<d.length;i+=4){const r=d[i],g=d[i+1],b=d[i+2];let v=.299*r+.587*g+.114*b;if(mode==='high')v=v<105?0:255;else if(mode==='dark')v=v<135?0:255;else if(mode==='light')v=v<175?0:255;d[i]=d[i+1]=d[i+2]=v}ctx.putImageData(im,0,0);return c}
+function crop(v,x,y,w,h,scale=1.35){
+  const c=document.createElement('canvas'),vw=v.videoWidth,vh=v.videoHeight;
+  c.width=Math.max(1,Math.round(vw*w*scale));
+  c.height=Math.max(1,Math.round(vh*h*scale));
+  const ctx=c.getContext('2d',{willReadFrequently:true});
+  ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(v,Math.round(vw*x),Math.round(vh*y),Math.round(vw*w),Math.round(vh*h),0,0,c.width,c.height);
+  return c;
+}
+function preprocess(src,mode='normal'){
+  const c=document.createElement('canvas');c.width=src.width;c.height=src.height;
+  const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(src,0,0);
+  if(mode==='normal')return c;
+  const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
+  for(let i=0;i<d.length;i+=4){
+    const r=d[i],g=d[i+1],b=d[i+2];
+    let v=.299*r+.587*g+.114*b;
+    if(mode==='high')v=v<105?0:255;
+    else if(mode==='dark')v=v<135?0:255;
+    else if(mode==='light')v=v<175?0:255;
+    d[i]=d[i+1]=d[i+2]=v;
+  }
+  ctx.putImageData(im,0,0);return c;
+}
+function yellowMask(src){
+  const c=document.createElement('canvas');c.width=src.width;c.height=src.height;
+  const s=src.getContext('2d').getImageData(0,0,src.width,src.height).data;
+  const o=c.getContext('2d'),im=o.createImageData(src.width,src.height),d=im.data;
+  for(let i=0;i<s.length;i+=4){
+    const r=s[i],g=s[i+1],b=s[i+2];
+    const y=(r>145&&g>100&&b<135&&r>b*1.35&&g>b*1.15);
+    const v=y?255:0; d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
+  }
+  o.putImageData(im,0,0);return c;
+}
 function serverDigitCrops(v){
-  // Grand-style HUD: server badge is the small yellow badge at the extreme top-right.
-  // Detect the yellow badge by color/shape instead of OCR'ing the whole HUD.
-  const base=crop(v,.88,0,.12,.14,4.5),ctx=base.getContext('2d',{willReadFrequently:true});
-  const im=ctx.getImageData(0,0,base.width,base.height),d=im.data,w=base.width,h=base.height;
-  const mask=new Uint8Array(w*h);
-  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
-    const i=(y*w+x)*4,r=d[i],g=d[i+1],b=d[i+2];
-    mask[y*w+x]=(r>155&&g>120&&b<120&&r>b*1.5&&g>b*1.25)?1:0;
-  }
-  const seen=new Uint8Array(w*h), comps=[];
-  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
-    const p=y*w+x;if(!mask[p]||seen[p])continue;
-    const q=[p];seen[p]=1;let minX=x,maxX=x,minY=y,maxY=y,n=0;
-    for(let qi=0;qi<q.length;qi++){
-      const z=q[qi],zx=z%w,zy=(z-zx)/w;n++;minX=Math.min(minX,zx);maxX=Math.max(maxX,zx);minY=Math.min(minY,zy);maxY=Math.max(maxY,zy);
-      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const nx=zx+dx,ny=zy+dy;if(nx<0||ny<0||nx>=w||ny>=h)continue;const np=ny*w+nx;if(mask[np]&&!seen[np]){seen[np]=1;q.push(np)}}
-    }
-    const cw=maxX-minX+1,ch=maxY-minY+1,fill=n/(cw*ch);
-    if(n>80&&cw>=12&&ch>=12&&cw<=base.width*.7&&ch<=base.height*.7&&cw/ch>.55&&cw/ch<1.8&&fill>.28){
-      comps.push({n,minX,maxX,minY,maxY,fill});
-    }
-  }
-  comps.sort((a,b)=>a.minY-b.minY||b.n-a.n);
   const out=[];
-  for(const box of comps.slice(0,5)){
-    const pad=Math.max(10,Math.round(Math.min(box.maxX-box.minX+1,box.maxY-box.minY+1)*.45));
-    const sx=Math.max(0,box.minX-pad),sy=Math.max(0,box.minY-pad),ex=Math.min(w,box.maxX+pad+1),ey=Math.min(h,box.maxY+pad+1);
-    const c=document.createElement('canvas');c.width=ex-sx;c.height=ey-sy;c.getContext('2d').putImageData(ctx.getImageData(sx,sy,c.width,c.height),0,0);out.push(c);
-  }
-  // Fallback: a deliberately narrow fixed crop around the badge, not the rest of the HUD.
-  if(!out.length)out.push(crop(v,.955,.004,.04,.045,7));
+  // Fixed crops around the small yellow server badge at the top-right.
+  out.push(crop(v,.958,.000,.042,.075,9));
+  out.push(crop(v,.945,.000,.055,.095,8));
+  const wide=crop(v,.930,.000,.070,.120,7), mask=yellowMask(wide);
+  out.push(mask);
   return out;
 }
-function serverVotesFromTexts(texts){
-  const vals=[];
-  for(const t of texts){
-    const s=String(t||'').replace(/[^1-4]/g,'');
-    if(s.length===1)vals.push(s);
-    else if(/\b[1-4]\b/.test(t))vals.push(t.match(/\b([1-4])\b/)?.[1]||'');
-  }
-  return vals.filter(Boolean);
+function serverVotesFromText(t){
+  const raw=String(t||'').trim();
+  const compact=raw.replace(/\s+/g,'');
+  if(/^[1-4]$/.test(compact))return [compact];
+  const m=raw.match(/\b([1-4])\b/);return m?[m[1]]:[];
 }
-
 function normalizeOcr(s){
   return String(s||'')
     .replace(/\r/g,'')
-    .replace(/[“”]/g,'"')
-    .replace(/[‘’]/g,"'")
-    .replace(/[‐‑‒–—]/g,'-')
-    .replace(/\u00a0/g,' ')
-    .split('\n')
-    .map(line=>line.replace(/[ \t]+/g,' ').trim())
-    .filter(Boolean)
-    .join('\n');
+    .replace(/[“”]/g,'"').replace(/[‘’]/g,"'")
+    .replace(/[‐‑‒–—]/g,'-').replace(/\u00a0/g,' ')
+    .split('\n').map(line=>line.replace(/[ \t]+/g,' ').trim()).filter(Boolean).join('\n');
 }
-
 function cleanText(s){
-  return String(s||'')
-    .replace(/\r/g,' ')
-    .replace(/\b(?:\[?A\]?\s*)?IP\s*:[\s\S]*$/i,'')
-    .replace(/\bSC\s*:[\s\S]*$/i,'')
-    .replace(/\b(?:für|for)\s+\d+\s+(?:Tage|Days)\b[\s\S]*$/i,'')
-    .replace(/\s+/g,' ')
-    .replace(/[|]+$/,'')
-    .trim();
+  return String(s||'').replace(/\r/g,' ').replace(/\s+/g,' ').trim();
 }
-
-const ALLOWED_REASONS=[
-  'PC Check Positiv',
-  'PC Check Verweigert',
-  'Cheating',
-  'Acc 1.1',
-  'Acc 1.4',
-  'Event 1.7'
-];
-
-function normalizeId(s){
-  return String(s||'').toUpperCase()
-    .replace(/[OQIDL|]/g,'1').replace(/[Z]/g,'2').replace(/[S]/g,'5')
-    .replace(/[G]/g,'6').replace(/[T]/g,'7').replace(/[B]/g,'8')
-    .replace(/[^0-9]/g,'');
-}
-function normalizeHex(s){
-  // Never rewrite valid A-F characters. Only map characters that cannot be a hex digit.
-  return String(s||'')
-    .replace(/[OoQq]/g,'0').replace(/[IiLl|]/g,'1')
-    .replace(/[Zz]/g,'2').replace(/[Ss]/g,'5').replace(/[Gg]/g,'6')
-    .replace(/[^0-9A-Fa-f]/g,'');
-}
+const ALLOWED_REASONS=['PC Check Positiv','PC Check Verweigert','PC-Check Positiv 4.1 (Discord)','PC-Check Positiv 4.1 (Redux)','PC-Check Positiv (Banevading)','PC Check Positiv (Cleaning)','Cheating','Acc 1.1','Acc 1.4','Event 1.7'];
 function reasonKey(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'')}
-function levenshtein(a,b){
-  a=String(a);b=String(b);if(a===b)return 0;if(!a)return b.length;if(!b)return a.length;
-  let prev=Array.from({length:b.length+1},(_,i)=>i);
-  for(let i=1;i<=a.length;i++){
-    const cur=[i];
-    for(let j=1;j<=b.length;j++) cur[j]=Math.min(cur[j-1]+1,prev[j]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));
-    prev=cur;
-  }
-  return prev[b.length];
-}
+function levenshtein(a,b){a=String(a);b=String(b);if(a===b)return 0;if(!a)return b.length;if(!b)return a.length;let p=Array.from({length:b.length+1},(_,i)=>i);for(let i=1;i<=a.length;i++){const c=[i];for(let j=1;j<=b.length;j++)c[j]=Math.min(c[j-1]+1,p[j]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c}return p[b.length]}
 function similarity(a,b){a=reasonKey(a);b=reasonKey(b);if(!a||!b)return 0;return 1-levenshtein(a,b)/Math.max(a.length,b.length)}
-function normalizeReasonOcrText(s){
-  return String(s||'').toLowerCase()
-    .replace(/[‐‑‒–—]/g,'-')
-    .replace(/[|]/g,'i')
-    .replace(/0/g,'o')
-    .replace(/[^a-z0-9. -]/g,' ')
-    .replace(/\s+/g,' ').trim();
-}
-function reasonScoreForWindow(text, allowed){
-  const nk=reasonKey(text), ak=reasonKey(allowed);
-  let score=similarity(nk,ak);
-  const compact=nk;
-  if(allowed==='Cheating'){
-    if(/cheat(?:ing|er)?/.test(compact)) score=Math.max(score,.96);
-  }else if(/^Acc 1\.1$/.test(allowed)){
-    if(/\bacc?\s*1\s*1\b/.test(text)||/acc11/.test(compact)) score=Math.max(score,.95);
-  }else if(/^Acc 1\.4$/.test(allowed)){
-    if(/\bacc?\s*1\s*4\b/.test(text)||/acc14/.test(compact)) score=Math.max(score,.95);
-  }else if(/^Event 1\.7$/.test(allowed)){
-    if(/event\s*1\s*7/.test(text)||/event17/.test(compact)) score=Math.max(score,.95);
-  }else if(allowed==='PC Check Positiv'){
-    const pc=/p.?c.?\s*check/.test(compact), pos=/posit/.test(compact)||/posi/.test(compact);
-    if(pc&&pos)score=Math.max(score,.96);
-  }else if(allowed==='PC Check Verweigert'){
-    const pc=/p.?c.?\s*check/.test(compact), ver=/verweig|verweiger|verweigert/.test(compact);
-    // OCR often turns "Check Verweigerung" into fragmented tokens; PC + an approximate "verweig" is enough.
-    if(pc&&ver)score=Math.max(score,.96);
-    if(pc&&/rwe|we1g|we!g/.test(compact))score=Math.max(score,.90);
-  }
-  return score;
-}
+function normalizeReasonOcrText(s){return String(s||'').toLowerCase().replace(/[‐‑‒–—]/g,'-').replace(/[|]/g,'i').replace(/0/g,'o').replace(/[^a-z0-9. -]/g,' ').replace(/\s+/g,' ').trim()}
 function classifyAllowedReason(src){
-  const normalized=normalizeOcr(src);
-  const lines=normalized.split('\n').map(x=>x.trim()).filter(Boolean);
-  const lower=normalized.toLowerCase();
-  const marker=/gr[uú]nd\s*[:\-]?/i.exec(lower);
-  const candidateChunks=[];
-  if(marker){
-    const after=normalized.slice(marker.index+marker[0].length);
-    const stop=after.search(/\b(?:IP|SC|5C|Social\s+Club)\s*:/i);
-    candidateChunks.push((stop>=0?after.slice(0,stop):after).slice(0,120));
-  }
-  // Also score each OCR line and short 2-4 line windows. This handles arbitrary line breaks.
-  candidateChunks.push(...lines.slice(0,12));
+  const n=normalizeOcr(src), lines=n.split('\n').map(x=>x.trim()).filter(Boolean);
+  const candidates=[];
   for(let i=0;i<lines.length;i++){
-    candidateChunks.push(lines.slice(i,Math.min(lines.length,i+4)).join(' '));
-  }
-  let best={reason:'',score:0};
-  for(const chunk of candidateChunks){
-    const clean=normalizeReasonOcrText(chunk);
-    for(const allowed of ALLOWED_REASONS){
-      let score=reasonScoreForWindow(clean,allowed);
-      // Compare the clean text to short windows of tokens to avoid IP/SC noise dominating.
-      const words=clean.split(/\s+/).filter(Boolean);
-      for(let i=0;i<words.length;i++){
-        let acc='';
-        for(let j=i;j<Math.min(words.length,i+7);j++){
-          acc+=(acc?' ':'')+words[j];
-          score=Math.max(score,reasonScoreForWindow(acc,allowed));
-        }
-      }
-      if(score>best.score)best={reason:allowed,score};
+    const line=lines[i];
+    const m=line.match(/\bgr[uú]nd\s*[:\-]?\s*(.*)$/i);
+    if(m){
+      let after=m[1];
+      after=after.split(/\b(?:IP|SC|5C|S\s*C|Social\s+Club)\s*:/i)[0];
+      candidates.push(after);
     }
   }
-  return best.score>=.76?best:{reason:'',score:best.score};
+  // Also inspect short windows, but never allow a raw IP/SC tail to define the reason.
+  candidates.push(...lines.slice(0,8));
+  for(let i=0;i<lines.length;i++)candidates.push(lines.slice(i,Math.min(lines.length,i+3)).join(' '));
+  let best={reason:'',score:0};
+  for(const raw of candidates){
+    const t=normalizeReasonOcrText(raw), k=reasonKey(t);
+    if(!k)continue;
+    let r='',score=0;
+    const pc=/p.?c.?\s*check|p.?c.?check/.test(t);
+    const pos=/posit|posi/.test(t), ver=/verweig|verweiger|verweigu|rweig|we1g/.test(t);
+    if(pc&&ver){r='PC Check Verweigert';score=.99}
+    else if(/pc[- ]?check.*4\.?1.*discord/.test(t) || /4\.?1.*discord.*pc[- ]?check/.test(t)){r='PC-Check Positiv 4.1 (Discord)';score=.99}
+    else if(/pc[- ]?check.*4\.?1.*redux/.test(t) || /4\.?1.*redux.*pc[- ]?check/.test(t)){r='PC-Check Positiv 4.1 (Redux)';score=.99}
+    else if(/pc[- ]?check.*banevading/.test(k) || /banevading.*pc[- ]?check/.test(t)){r='PC-Check Positiv (Banevading)';score=.99}
+    else if(/pc[- ]?check.*cleaning/.test(k) || /cleaning.*pc[- ]?check/.test(t)){r='PC Check Positiv (Cleaning)';score=.99}
+    else if(pc&&pos){r='PC Check Positiv';score=.99}
+    else if(/cheat(?:ing|er)?/.test(k)){r='Cheating';score=.99}
+    else if(/acc\s*1\s*1|acc11/.test(t)){r='Acc 1.1';score=.99}
+    else if(/acc\s*1\s*4|acc14/.test(t)){r='Acc 1.4';score=.99}
+    else if(/event\s*1\s*7|event17/.test(t)){r='Event 1.7';score=.99}
+    else{
+      for(const allowed of ALLOWED_REASONS){const sc=similarity(t,allowed);if(sc>score){score=sc;r=allowed}}
+    }
+    if(score>best.score)best={reason:r,score};
+  }
+  return best.score>=.82?best:{reason:'',score:best.score};
+}
+function normalizeId(s){
+  return String(s||'').toUpperCase().replace(/[OQIL|]/g,'1').replace(/[Z]/g,'2').replace(/[S]/g,'5').replace(/[G]/g,'6').replace(/[T]/g,'7').replace(/[B]/g,'8').replace(/[^0-9]/g,'');
 }
 function findTargetId(src){
-  const text=normalizeOcr(src);
-  let m=text.match(/\bhat\s+[^\n\[]{1,90}\[(\d{1,8})\]/i);
-  if(m)return normalizeId(m[1]);
-  // Prefer the second bracketed ID in the administrator ban sentence.
-  const line=text.split('\n').find(x=>/hat/i.test(x));
-  if(line){
-    const ids=[...line.matchAll(/\[(?:\s*)([0-9OIQLZSGB]{1,8})(?:\s*)\]/gi)].map(x=>normalizeId(x[1])).filter(Boolean);
-    if(ids.length>=2)return ids[1];
-    if(ids.length===1)return ids[0];
+  const text=normalizeOcr(src), lines=text.split('\n').map(x=>x.trim()).filter(Boolean);
+  // ONLY accept an ID occurring after "hat". This prevents Administrator [15340] being used as the target.
+  for(const line of lines){
+    let m=line.match(/\bhat\s+[^\n\[]{1,90}\[\s*([0-9OIQLZSGB]{3,8})\s*\]\s*(?:für|for)\b/i);
+    if(m)return normalizeId(m[1]);
+    m=line.match(/\bhat\s+[^0-9\n]{1,70}([0-9]{3,8})\s*(?:für|for)\b/i);
+    if(m)return normalizeId(m[1]);
+    if(/\bhat\b/i.test(line)){
+      const ids=[...line.matchAll(/\[(?:\s*)([0-9OIQLZSGB]{3,8})(?:\s*)\]/gi)].map(x=>normalizeId(x[1])).filter(Boolean);
+      if(ids.length>=2)return ids[1];
+    }
   }
-  const ids=[...text.matchAll(/\[(?:\s*)([0-9OIQLZSGB]{3,8})(?:\s*)\]/gi)].map(x=>normalizeId(x[1])).filter(Boolean);
-  return ids.length>=2?ids[1]:(ids[0]||'');
+  return '';
 }
-function extractSc40(text){
-  const raw=String(text||'');
-  const compact=normalizeHex(raw);
-  const hits=compact.match(/[0-9a-f]{40}/gi)||[];
-  return hits.filter(x=>x.length===40).map(x=>x.toLowerCase());
+function normalizeHexLoose(s){
+  return String(s||'').replace(/[OoQq]/g,'0').replace(/[IiLl|]/g,'1').replace(/[Zz]/g,'2').replace(/[Ss]/g,'5').replace(/[Gg]/g,'6').replace(/[^0-9A-Fa-f]/g,'').toLowerCase();
+}
+function extractSc40FromRegion(block){
+  const lines=String(block||'').split('\n').slice(0,3), out=[];
+  for(const line of lines){
+    const x=normalizeHexLoose(line);if(x.length>=40&&x.length<=48)out.push(x.slice(0,40));
+  }
+  const j=normalizeHexLoose(lines.join(''));if(j.length>=40&&j.length<=48)out.push(j.slice(0,40));
+  return out.filter(x=>/^[0-9a-f]{40}$/.test(x));
 }
 function extractScCandidatesFromText(src){
-  const n=normalizeOcr(src);
-  const lines=n.split('\n');
-  const out=[];
+  const lines=normalizeOcr(src).split('\n'),out=[];
   const markerRe=/\b(?:SC|5C|S\s*C|SOCIAL\s+CLUB(?:\s+ID)?)\b\s*[:\-]?/i;
-  let idx=-1,match=null;
   for(let i=0;i<lines.length;i++){
-    const m=markerRe.exec(lines[i]);
-    if(m){idx=i;match=m;break;}
-  }
-  if(idx>=0){
-    const same=match?lines[idx].slice(match.index+match[0].length):'';
-    const block=[same,lines[idx+1]||'',lines[idx+2]||''].join('\n');
-    out.push(...extractSc40(block));
+    const m=markerRe.exec(lines[i]);if(!m)continue;
+    const block=[lines[i].slice(m.index+m[0].length),lines[i+1]||'',lines[i+2]||''].join('\n');
+    out.push(...extractSc40FromRegion(block));
   }
   return [...new Set(out)];
 }
 function extractScFromDetailed(data,canvas){
-  const candidates=[];
+  const out=[];
   for(const d of data){
     const words=(d?.words||[]).filter(w=>String(w.text||'').trim());
     for(const w of words){
-      const wt=String(w.text||'').replace(/[^A-Za-z0-9]/g,'').toLowerCase();
-      if(!/^(sc|5c|social|club)$/.test(wt))continue;
-      const b=w.bbox||{},lineH=Math.max(18,(b.y1||0)-(b.y0||0));
-      const x0=Math.max(0,Math.floor((b.x0||0)-lineH*.1));
-      const y0=Math.max(0,Math.floor((b.y0||0)-lineH*.15));
-      const y1=Math.min(canvas.height,Math.floor((b.y1||0)+lineH*2.8));
-      const c=document.createElement('canvas');c.width=Math.max(40,canvas.width-x0);c.height=Math.max(20,y1-y0);
-      c.getContext('2d').drawImage(canvas,x0,y0,c.width,c.height,0,0,c.width,c.height);
-      candidates.push(c);
+      const wt=String(w.text||'').replace(/[^A-Za-z0-9 ]/g,'').trim().toLowerCase();
+      if(!/^(sc|5c|s c|social club|social club id)$/.test(wt))continue;
+      const b=w.bbox||{}, h=Math.max(18,(b.y1||0)-(b.y0||0));
+      const x0=Math.max(0,Math.floor((b.x1||0)+h*.12)), y0=Math.max(0,Math.floor((b.y0||0)-h*.15));
+      const y1=Math.min(canvas.height,Math.floor((b.y1||0)+h*2.0));
+      const c=document.createElement('canvas');c.width=Math.max(80,canvas.width-x0);c.height=Math.max(24,y1-y0);
+      c.getContext('2d').drawImage(canvas,x0,y0,c.width,c.height,0,0,c.width,c.height);out.push(c);
     }
   }
-  return candidates.slice(0,5);
+  return out.slice(0,6);
 }
-function validDate(s){return /^20\d{2}-\d{2}-\d{2}$/.test(s||'')}
-function bestVote(values,normalizer,minLen=1){const vals=values.map(v=>normalizer(v)).filter(v=>v&&v.length>=minLen);if(!vals.length)return'';const map=new Map();for(const v of vals)map.set(v,(map.get(v)||0)+1);return [...map.entries()].sort((a,b)=>b[1]-a[1])[0][0]}
+function sameReason(a,b){return !!a&&!!b&&(a===b||similarity(a,b)>=.86)}
+function bestVote(values,normalizer,minLen=1){const vals=values.map(v=>normalizer(v)).filter(v=>v&&v.length>=minLen);if(!vals.length)return'';const map=new Map();for(const v of vals)map.set(v,(map.get(v)||0)+1);return[...map.entries()].sort((a,b)=>b[1]-a[1])[0][0]}
 function voteConfidence(values,normalizer,winner){const vals=values.map(v=>normalizer(v)).filter(Boolean);if(!vals.length||!winner)return 0;return vals.filter(v=>v===winner).length/vals.length}
-function inferTypes(reason){
-  switch(reason){
-    case 'PC Check Positiv': return ['pccheck'];
-    case 'PC Check Verweigert': return ['pccheck'];
-    case 'Cheating': return ['cheater'];
-    default:return[];
-  }
-}
-function serverDigitCrops(v){
-  const crops=[];
-  // Very tight top-right crops; only the yellow server badge is considered.
-  for(const [x,y,w,h,s] of [[.935,.005,.065,.10,7],[.91,.00,.09,.12,6]]) crops.push(crop(v,x,y,w,h,s));
-  return crops;
-}
-function serverVotesFromText(t){
-  const s=String(t||'').replace(/[^1-4]/g,'');
-  return s.length===1?[s]:[];
-}
-function preprocess(src,mode='normal'){
-  const c=document.createElement('canvas');c.width=src.width;c.height=src.height;const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(src,0,0);
-  if(mode==='normal')return c;
-  const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
-  for(let i=0;i<d.length;i+=4){const r=d[i],g=d[i+1],b=d[i+2];let v=.299*r+.587*g+.114*b;if(mode==='high')v=v<105?0:255;else if(mode==='dark')v=v<135?0:255;else if(mode==='light')v=v<175?0:255;d[i]=d[i+1]=d[i+2]=v;}
-  ctx.putImageData(im,0,0);return c;
-}
-function crop(v,x,y,w,h,scale=1.35){
-  const c=document.createElement('canvas'),vw=v.videoWidth,vh=v.videoHeight;c.width=Math.max(1,Math.round(vw*w*scale));c.height=Math.max(1,Math.round(vh*h*scale));
-  const ctx=c.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.drawImage(v,Math.round(vw*x),Math.round(vh*y),Math.round(vw*w),Math.round(vh*h),0,0,c.width,c.height);return c;
-}
-async function ocr(worker,canvas,params={}){
-  await worker.setParameters({tessedit_pageseg_mode:params.psm??6,tessedit_char_whitelist:params.whitelist||'',preserve_interword_spaces:'1',user_defined_dpi:'300'});
-  const r=await worker.recognize(canvas);return r.data||{text:'',words:[]};
-}
+function inferTypes(reason){switch(reason){case 'PC Check Positiv':case 'PC Check Verweigert':case 'PC-Check Positiv 4.1 (Discord)':case 'PC-Check Positiv 4.1 (Redux)':case 'PC-Check Positiv (Banevading)':case 'PC Check Positiv (Cleaning)':return ['pccheck'];case 'Cheating':return ['cheater'];default:return[]}}
+async function ocr(worker,canvas,params={}){await worker.setParameters({tessedit_pageseg_mode:params.psm??6,tessedit_char_whitelist:params.whitelist||'',preserve_interword_spaces:'1',user_defined_dpi:'300'});const r=await worker.recognize(canvas);return r.data||{text:'',words:[]}}
 function extractDate(s){
   let m=String(s||'').match(/\b(20\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})\b/);if(m)return`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
   m=String(s||'').match(/\b(\d{1,2})[.\-/](\d{1,2})[.\-/](20\d{2})\b/);return m?`${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`:'';
@@ -307,69 +211,56 @@ function chooseSc(candidates){
   return {value:observed[0],confidence:support/vals.length,count:support};
 }
 async function analyzeVideo(video,duration,onProgress){
-  const frames=Math.max(24,Math.min(72,Number(localStorage.getItem('frame_count_v10')||36)));
-  const start=Math.max(0,duration-40),span=Math.max(.1,duration-start);
-  const worker=await Tesseract.createWorker('eng',1);
+  const frames=Math.max(24,Math.min(60,Number(localStorage.getItem('frame_count_v11')||30)));
+  const startT=Math.max(0,duration-40),span=Math.max(.1,duration-startT),worker=await Tesseract.createWorker('eng',1);
   const idRecords=[],reasonRecords=[],broadFrames=[];
   try{
-    // Fast broad pass: one normal OCR per frame. We deliberately do not OCR SC/IP/date here.
     for(let i=0;i<frames;i++){
-      const t=start+span*((i+.12)/frames);await seek(video,t);
-      const left=crop(video,0,.055,.72,.28,2.8);
-      const a=await ocr(worker,left,{psm:6});
-      const parsed=parseSingleFrame(a.text||'');
-      idRecords.push(parsed.id);reasonRecords.push({reason:parsed.reason,score:parsed.reasonScore||0});
-      broadFrames.push({i,t,parsed,text:a.text||''});
-      onProgress(10+((i+1)/frames)*48,`Schnellscan · ${i+1}/${frames}`);
+      const t=startT+span*((i+.12)/frames);await seek(video,t);
+      const left=crop(video,0,.055,.72,.29,3.0), a=await ocr(worker,left,{psm:6});
+      const parsed=parseSingleFrame(a.text||'');idRecords.push(parsed.id);reasonRecords.push(parsed.reason);broadFrames.push({i,t,parsed,text:a.text||''});
+      onProgress(8+((i+1)/frames)*42,`Schnellscan · ${i+1}/${frames}`);
     }
-    const id=bestVote(idRecords,normalizeId,3);
-    const reasonVotes=reasonRecords.filter(x=>x.reason).map(x=>x.reason);
-    const reason=bestVote(reasonVotes,x=>x,1);
-    // Focus on the strongest frames plus nearby frames. This is much faster and more precise than brute-force OCR everywhere.
-    const ranked=broadFrames
-      .filter(x=>x.parsed.id===id || x.parsed.reason===reason)
-      .sort((a,b)=>(b.parsed.id===id?1:0)+(b.parsed.reason===reason?1:0)+b.parsed.reasonScore-( (a.parsed.id===id?1:0)+(a.parsed.reason===reason?1:0)+a.parsed.reasonScore));
-    const focusIdx=new Set();
-    for(const r of ranked.slice(0,8)){for(let d=-1;d<=1;d++){const idx=r.i+d;if(idx>=0&&idx<broadFrames.length)focusIdx.add(idx)}}
-    const focusFrames=[...focusIdx].sort((a,b)=>a-b).map(i=>broadFrames[i]);
-
-    const scCandidates=[];const serverVotes=[];const dateVotes=[];
-    for(let k=0;k<focusFrames.length;k++){
-      const fr=focusFrames[k];await seek(video,fr.t);
-      const left=crop(video,0,.055,.72,.30,3.4);
+    const id=bestVote(idRecords,normalizeId,3), reason=bestVote(reasonRecords.filter(Boolean),x=>x,1);
+    // Only frames that show BOTH target ID and allowed reason become anchors.
+    const anchors=broadFrames.filter(x=>x.parsed.id===id&&sameReason(x.parsed.reason,reason));
+    const focusIdx=new Set();for(const a of anchors.slice(0,6))for(let d=-1;d<=1;d++){const idx=a.i+d;if(idx>=0&&idx<broadFrames.length)focusIdx.add(idx)}
+    const focus=[...focusIdx].sort((a,b)=>a-b).map(i=>broadFrames[i]);
+    const scCandidates=[],serverVotes=[],dateVotes=[];
+    for(let k=0;k<focus.length;k++){
+      const fr=focus[k];await seek(video,fr.t);
+      const left=crop(video,0,.055,.72,.30,3.8);
       const normal=await ocr(worker,left,{psm:6});
-      const line11=await ocr(worker,preprocess(left,'dark'),{psm:11});
-      const combinedText=[normal.text||'',line11.text||''].join('\n');
-      const p=parseSingleFrame(combinedText);
-      if(p.id===id && p.reason===reason){
-        scCandidates.push(...extractScCandidatesFromText(combinedText));
-        const markerCrops=extractScFromDetailed([normal,line11],left);
-        for(const c of markerCrops.slice(0,3)){
-          const s=await ocr(worker,c,{psm:6,whitelist:'0123456789abcdefABCDEF'});
-          scCandidates.push(...extractSc40(s.text||''));
+      const sparse=await ocr(worker,preprocess(left,'dark'),{psm:11});
+      const combined=[normal.text||'',sparse.text||''].join('\n'), p=parseSingleFrame(combined);
+      const blockMatch=p.id===id&&sameReason(p.reason,reason), nearAnchor=anchors.some(a=>Math.abs(a.i-fr.i)<=1);
+      if(blockMatch||nearAnchor){
+        // SC is accepted ONLY from a frame in the same target/reason neighborhood, and only after the SC marker.
+        scCandidates.push(...extractScCandidatesFromText(combined));
+        if(blockMatch){
+          for(const mc of extractScFromDetailed([normal,sparse],left)){
+            const q1=await ocr(worker,mc,{psm:7,whitelist:'0123456789abcdefABCDEF'});
+            const q2=await ocr(worker,preprocess(mc,'light'),{psm:7,whitelist:'0123456789abcdefABCDEF'});
+            scCandidates.push(...extractSc40FromRegion(q1.text||''),...extractSc40FromRegion(q2.text||''));
+          }
         }
+        // Server/date are also tied to this block. This prevents a later HUD/chat state from winning.
+        for(const scrop of serverDigitCrops(video)){
+          const q1=await ocr(worker,scrop,{psm:10,whitelist:'1234'}), q2=await ocr(worker,preprocess(scrop,'high'),{psm:10,whitelist:'1234'});
+          serverVotes.push(...serverVotesFromText(q1.text||''),...serverVotesFromText(q2.text||''));
+        }
+        const dc=crop(video,.86,.87,.14,.13,5.2),d1=await ocr(worker,dc,{psm:7,whitelist:'0123456789./-'}),d2=await ocr(worker,preprocess(dc,'dark'),{psm:7,whitelist:'0123456789./-'}),dt=extractDate((d1.text||'')+'\n'+(d2.text||''));
+        if(validDate(dt))dateVotes.push(dt);
       }
-      // Server badge: only the tight top-right yellow badge crops, never the whole HUD.
-      for(const scrop of serverDigitCrops(video)){
-        const s=await ocr(worker,scrop,{psm:10,whitelist:'1234'});serverVotes.push(...serverVotesFromText(s.text||''));
-        const sh=await ocr(worker,preprocess(scrop,'high'),{psm:10,whitelist:'1234'});serverVotes.push(...serverVotesFromText(sh.text||''));
-      }
-      // Date: right-bottom only.
-      const dc=crop(video,.82,.86,.18,.14,4.5);const d1=await ocr(worker,dc,{psm:7,whitelist:'0123456789./-'});const d2=await ocr(worker,preprocess(dc,'dark'),{psm:7,whitelist:'0123456789./-'});
-      const dt=extractDate((d1.text||'')+'\n'+(d2.text||''));if(validDate(dt))dateVotes.push(dt);
-      onProgress(58+((k+1)/Math.max(1,focusFrames.length))*37,`Präzisionsscan · ${k+1}/${focusFrames.length}`);
+      onProgress(50+((k+1)/Math.max(1,focus.length))*45,`Präzisionsscan · ${k+1}/${focus.length}`);
     }
     const scChoice=chooseSc(scCandidates);
-    const sc=scChoice.value;
-    const serverMap=new Map();for(const s of serverVotes)serverMap.set(s,(serverMap.get(s)||0)+1);const serverSorted=[...serverMap.entries()].sort((a,b)=>b[1]-a[1]);
-    const serverTop=serverSorted[0];const server=serverTop&&serverTop[1]>=6&&serverTop[1]/Math.max(1,serverVotes.length)>=.62?serverTop[0]:'';
-    const date=bestVote(dateVotes,x=>x,10);
-    const types=inferTypes(reason);
-    const idConf=voteConfidence(idRecords,normalizeId,id),reasonConf=voteConfidence(reasonVotes,x=>x,reason);
-    const serverConf=serverTop?serverTop[1]/Math.max(1,serverVotes.length):0,dateConf=voteConfidence(dateVotes,x=>x,date);
-    // Complete only when the OCR has a real SC cluster. No guessing from single frames.
-    const complete=!!(id&&ALLOWED_REASONS.includes(reason)&&sc&&server&&date&&idConf>=.45&&reasonConf>=.50&&scChoice.count>=3&&serverConf>=.62&&dateConf>=.50);
-    return {id,reason,sc,server,date,types,complete,found:complete,confidence:{id:idConf,reason:reasonConf,sc:scChoice.confidence,server:serverConf,date:dateConf},debug:{scCandidates:scCandidates.length,serverVotes:serverVotes.length,focusFrames:focusFrames.length}};
+    const sm=new Map();for(const x of serverVotes)sm.set(x,(sm.get(x)||0)+1);const sv=[...sm.entries()].sort((a,b)=>b[1]-a[1])[0];
+    const server=sv&&sv[1]>=4&&sv[1]/Math.max(1,serverVotes.length)>=.58?sv[0]:'';
+    const date=bestVote(dateVotes,x=>x,1),types=inferTypes(reason);
+    const idConf=voteConfidence(idRecords,normalizeId,id),reasonConf=voteConfidence(reasonRecords.filter(Boolean),x=>x,reason),serverConf=sv?sv[1]/Math.max(1,serverVotes.length):0,dateConf=voteConfidence(dateVotes,x=>x,date);
+    const complete=!!(id&&ALLOWED_REASONS.includes(reason)&&scChoice.value&&server&&date&&idConf>=.60&&reasonConf>=.60&&scChoice.count>=3&&serverConf>=.58&&dateConf>=.50);
+    return{ id,reason,sc:scChoice.value,server,date,types,complete,found:complete,confidence:{id:idConf,reason:reasonConf,sc:scChoice.confidence,server:serverConf,date:dateConf},debug:{anchors:anchors.length,focusFrames:focus.length,scCandidates:scCandidates.length,serverVotes:serverVotes.length} };
   }finally{await worker.terminate()}
 }
 function parseSingleFrame(texts){
@@ -391,7 +282,7 @@ $('#archiveGrid').innerHTML=entries.map(x=>`<article class="entry"><div class="t
 $$('.del-entry').forEach(b=>b.onclick=async()=>{const x=state.entries.find(e=>e.createdAt===b.dataset.id);if(x){state.entries=state.entries.filter(e=>e.createdAt!==b.dataset.id);saveMeta();if(x.videoKey)await delVideo(x.videoKey);if(x.videoUrl)URL.revokeObjectURL(x.videoUrl);renderArchive()}});$$('.edit-entry').forEach(b=>b.onclick=async()=>{const x=state.entries.find(e=>e.createdAt===b.dataset.id);if(x){const f=await getVideo(x.videoKey);if(!f){toast('POV-Datei wurde lokal nicht gefunden.');return}openEditor({...x,id:x.videoKey,file:f,result:{...x,complete:true},types:x.types})}})}
 function renderCases(){const bad=state.queue.filter(x=>x.result&&!x.result.complete);$('#casesList').innerHTML=bad.length?bad.map(x=>`<div class="case-row"><div><strong>${esc(x.file.name)}</strong><small>OCR: ID ${x.result.id?'✓':'×'} · Grund ${x.result.reason?'✓':'×'} · SC ${x.result.sc?'✓':'×'} · Server ${x.result.server?'✓':'×'} · Datum ${x.result.date?'✓':'×'}</small></div><button class="mini-btn edit-q" data-id="${x.id}">Daten ergänzen</button></div>`).join(''):'<div class="empty"><h2>Keine offenen Verdachtsfälle</h2><p>Alle bisher erkannten Fälle sind geprüft.</p></div>';$$('.edit-q').forEach(b=>b.onclick=()=>{const x=state.queue.find(x=>x.id===b.dataset.id);if(x)openEditor(x)})}
 function toast(t){const el=$('#toast');el.textContent=t;el.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove('show'),4000)}
-$('#clientId').value=state.clientId;$('#clientId').oninput=e=>{state.clientId=e.target.value.trim();localStorage.setItem('yt_client_id',state.clientId);initGoogle()};$('#frameCount').value=Math.max(24,Math.min(72,Number(localStorage.getItem('frame_count_v10')||36)));$('#frameCount').onchange=e=>localStorage.setItem('frame_count_v10',Math.max(24,Math.min(72,Number(e.target.value)||36)));
+$('#clientId').value=state.clientId;$('#clientId').oninput=e=>{state.clientId=e.target.value.trim();localStorage.setItem('yt_client_id',state.clientId);initGoogle()};$('#frameCount').value=Math.max(24,Math.min(72,Number(localStorage.getItem('frame_count_v11')||30)));$('#frameCount').onchange=e=>localStorage.setItem('frame_count_v11',Math.max(24,Math.min(72,Number(e.target.value)||36)));
 function initGoogle(){if(!window.google?.accounts?.oauth2||!state.clientId)return;state.tokenClient=google.accounts.oauth2.initTokenClient({client_id:state.clientId,scope:'https://www.googleapis.com/auth/youtube.upload',callback:r=>{if(r.error)return toast('Google-Anmeldung abgebrochen.');state.accessToken=r.access_token;sessionStorage.setItem('yt_access_token',r.access_token);updateYtStatus()}})}
 $('#connectYoutube').onclick=()=>{initGoogle();if(!state.tokenClient)return toast('Bitte zuerst die Google OAuth Client-ID eintragen.');state.tokenClient.requestAccessToken({prompt:'consent'})};$('#disconnectYoutube').onclick=()=>{state.accessToken='';sessionStorage.removeItem('yt_access_token');updateYtStatus()};function updateYtStatus(){$('#ytStatus').innerHTML=state.accessToken?'<span class="status-dot"></span>YouTube verbunden':'<span class="status-dot muted-dot"></span>Nicht verbunden'}setTimeout(initGoogle,1200);
 $('#clearLocal').onclick=async()=>{if(!confirm('Wirklich alle lokalen Archivdaten und POV-Dateien löschen?'))return;state.entries=[];state.queue=[];localStorage.removeItem(META_KEY);await clearDB();renderArchive();renderQueue();renderCases();toast('Lokales Archiv gelöscht.')};
