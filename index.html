@@ -7,9 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=34">
+<link rel="stylesheet" href="styles.css?v=35">
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-<script src="https://accounts.google.com/gsi/client"></script>
 </head>
 <body>
 <div class="app-shell">
@@ -96,8 +95,8 @@
         <div class="settings-card">
           <div class="card-title">YouTube-Verbindung <span id="ytStatus" class="connection">● Nicht verbunden</span></div>
           <p class="hint">Die POV wird zuerst vollständig zu YouTube hochgeladen (nicht gelistet). Erst danach startet die OCR. Nach dem Prüfen wird der YouTube-Titel auf den finalen Dateinamen aktualisiert.</p>
-          <label>Google OAuth Client ID<input id="clientId" placeholder="...apps.googleusercontent.com"></label>
-          <div class="settings-actions"><button type="button" class="pink" id="connectYoutube">Mit YouTube verbinden</button><button type="button" class="ghost" id="reauthorizeYoutube">Berechtigung erneut</button><button type="button" class="ghost" id="disconnectYoutube">Verbindung entfernen</button></div><div id="ytConnectHelp" class="hint" style="margin-top:10px"></div>
+          <label>Google OAuth Client ID<input id="clientId" placeholder="...apps.googleusercontent.com" autocomplete="off" oninput="localStorage.setItem('yt_client_id', this.value.trim())"></label>
+          <div class="settings-actions"><button type="button" class="pink" id="connectYoutube" onclick="grandrpStartYouTubeAuth(false)">Mit YouTube verbinden</button><button type="button" class="ghost" id="reauthorizeYoutube" onclick="grandrpStartYouTubeAuth(true)">Berechtigung erneut</button><button type="button" class="ghost" id="disconnectYoutube" onclick="grandrpDisconnectYouTube()">Verbindung entfernen</button></div><div id="ytConnectHelp" class="hint" style="margin-top:10px"></div><div class="setting-note" style="margin-top:10px"><b>OAuth-Weiterleitung:</b> <code id="ytRedirectUriText"></code><br><span>Diese URL einmal in Google Cloud unter „Autorisierte Weiterleitungs-URIs“ eintragen.</span></div>
         </div>
         <div class="settings-card">
           <div class="card-title">Lokale Daten</div>
@@ -133,6 +132,68 @@
 
 <div id="toast" class="toast"></div>
 <video id="videoProbe" class="hidden-video" muted playsinline preload="metadata"></video>
-<script src="app.js?v=34"></script>
+<script>
+(function(){
+  'use strict';
+  const CLIENT_KEY='yt_client_id';
+  const TOKEN_KEY='yt_access_token';
+  const STATE_KEY='grandrp_oauth_state_v35';
+  const RESULT_KEY='grandrp_oauth_result_v35';
+  function baseUrl(){ return new URL('oauth-callback.html', location.href).href; }
+  function validClientId(id){ return /^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(String(id||'').trim()); }
+  function randState(){
+    const bytes=new Uint8Array(24); crypto.getRandomValues(bytes);
+    return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+  }
+  function show(text,color){
+    const el=document.getElementById('ytConnectHelp'); if(!el)return;
+    el.textContent=text; el.style.color=color||'';
+  }
+  window.grandrpStartYouTubeAuth=function(forceConsent){
+    const input=document.getElementById('clientId');
+    const id=String(input?.value||localStorage.getItem(CLIENT_KEY)||'').trim();
+    if(input) input.value=id;
+    if(!id){ show('Bitte zuerst die Google OAuth Client-ID eintragen.','#ff8ebd'); return; }
+    if(!validClientId(id)){ show('Die Google OAuth Client-ID hat kein gültiges Format.','#ff8ebd'); return; }
+    localStorage.setItem(CLIENT_KEY,id);
+    const state=randState(); sessionStorage.setItem(STATE_KEY,state);
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(RESULT_KEY);
+    const redirect=baseUrl();
+    const p=new URLSearchParams({
+      client_id:id,
+      redirect_uri:redirect,
+      response_type:'token',
+      scope:'https://www.googleapis.com/auth/youtube.upload',
+      include_granted_scopes:'true',
+      state
+    });
+    if(forceConsent) p.set('prompt','consent');
+    show('Google wird geöffnet…');
+    const b=document.getElementById(forceConsent?'reauthorizeYoutube':'connectYoutube');
+    if(b){b.disabled=true; b.dataset.oldText=b.textContent; b.textContent='Google wird geöffnet…';}
+    // Full-page redirect: no popup blockers and no dependency on GIS JavaScript.
+    location.assign('https://accounts.google.com/o/oauth2/v2/auth?'+p.toString());
+  };
+  window.grandrpDisconnectYouTube=function(){
+    sessionStorage.removeItem(TOKEN_KEY);sessionStorage.removeItem(RESULT_KEY);sessionStorage.removeItem(STATE_KEY);
+    const status=document.getElementById('ytStatus'); if(status){status.textContent='● Nicht verbunden';status.style.color='#7f7488';}
+    show('YouTube-Verbindung entfernt.');
+  };
+  window.addEventListener('DOMContentLoaded', function(){
+    const input=document.getElementById('clientId');
+    if(input) input.value=localStorage.getItem(CLIENT_KEY)||'';
+    const uri=document.getElementById('ytRedirectUriText'); if(uri) uri.textContent=baseUrl();
+    const r=sessionStorage.getItem(RESULT_KEY);
+    const token=sessionStorage.getItem(TOKEN_KEY);
+    const status=document.getElementById('ytStatus');
+    const btn=document.getElementById('connectYoutube');
+    if(token && status){status.textContent='● Verbunden';status.style.color='#69e1af';}
+    if(r){try{const data=JSON.parse(r);show(data.message||'');}catch{}} 
+    if(btn && token){btn.textContent='YouTube verbunden';btn.disabled=false;}
+  });
+})();
+</script>
+<script src="app.js?v=35"></script>
 </body>
 </html>

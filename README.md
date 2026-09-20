@@ -1,14 +1,23 @@
-Grand RP POV Checker V34
+Grand RP POV Checker V35
 
-YouTube OAuth uses a robust same-page Google redirect fallback so it does not depend on browser popups.
+YouTube-Verbindung wurde auf einen robusten Full-Page-Redirect umgestellt. Kein Popup, kein GIS-Token-Client nötig.
 
-ONE-TIME GOOGLE CLOUD SETUP
-Add this exact Authorized redirect URI to the Web application OAuth client:
-https://felixsp2003.github.io/grandrp-pov-checker/
-
-The Authorized JavaScript origin remains:
+EINMALIG IN GOOGLE CLOUD
+Autorisierte JavaScript-Quelle:
 https://felixsp2003.github.io
 
-After Google redirects back, the app reads the access token from the URL fragment, validates state, removes the fragment, and stores the token for the current browser session.
+Autorisierte Weiterleitungs-URI (EXAKT):
+https://felixsp2003.github.io/grandrp-pov-checker/oauth-callback.html
 
-The app keeps YouTube uploads unlisted. OCR starts only after the upload reaches 100%.
+Die Weiterleitungs-URI muss Zeichen für Zeichen mit der Google-OAuth-Konfiguration übereinstimmen.
+
+ABLAUF
+1. Client-ID eintragen.
+2. Mit YouTube verbinden.
+3. Die Website öffnet die Google-Autorisierung im aktuellen Tab.
+4. Nach Freigabe geht es zu oauth-callback.html.
+5. Das Zugriffstoken wird für diese Browsersitzung gespeichert.
+6. Danach zurück zur Website.
+7. Erst beim echten POV-Upload wird die YouTube-API mit dem Token benutzt.
+
+Hinweis: Der direkte Token-Redirect ist ein Legacy-Webflow. Für eine moderne OAuth-Code/PKCE-Implementierung wäre ein Backend nötig. Diese statische GitHub-Pages-Variante bleibt bewusst ohne Server.

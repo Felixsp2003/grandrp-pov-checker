@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V29
+/* Grand RP DC Checker V35
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -684,21 +684,23 @@
     if(!r.ok)throw new Error((await r.text()).slice(0,500));
   }
   function setupSettings(){
-    state.settings.frames=Number(localStorage.getItem('v29_frames')||24);state.settings.window=Number(localStorage.getItem('v29_window')||4.5);state.settings.step=Number(localStorage.getItem('v29_step')||.5);
-    $('#frameCount').value=state.settings.frames;$('#refineWindow').value=state.settings.window;$('#refineStep').value=state.settings.step;
+    state.settings.frames=Number(localStorage.getItem('v29_frames')||24);
+    state.settings.window=Number(localStorage.getItem('v29_window')||4.5);
+    state.settings.step=Number(localStorage.getItem('v29_step')||.5);
+    $('#frameCount').value=state.settings.frames;
+    $('#refineWindow').value=state.settings.window;
+    $('#refineStep').value=state.settings.step;
     $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v29_frames',state.settings.frames)};
     $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v29_window',state.settings.window)};
     $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v29_step',state.settings.step)};
-    $('#clientId').addEventListener('input',e=>{const v=String(e.target.value||'').trim();state.clientId=v;localStorage.setItem('yt_client_id',v);try{if(v)configureYoutubeClient(v);}catch(err){const help=$('#ytConnectHelp');if(help)help.textContent=err.message;}});
-    $('#clientId').addEventListener('change',e=>{const v=String(e.target.value||'').trim();state.clientId=v;localStorage.setItem('yt_client_id',v);try{if(v)configureYoutubeClient(v);}catch(err){const help=$('#ytConnectHelp');if(help)help.textContent=err.message;}});
-    $('#connectYoutube').onclick=initYoutube;
-    const reauth=$('#reauthorizeYoutube'); if(reauth) reauth.onclick=reauthorizeYoutube;
-    $('#disconnectYoutube').onclick=()=>{state.accessToken='';state.tokenClient=null;sessionStorage.removeItem('yt_access_token');updateYtStatus();$('#ytConnectHelp').textContent='YouTube-Verbindung entfernt.';};
-    try{if(state.clientId)configureYoutubeClient(state.clientId);}catch(err){const help=$('#ytConnectHelp');if(help)help.textContent=err.message;}
+    $('#clientId').addEventListener('input',e=>{state.clientId=String(e.target.value||'').trim();localStorage.setItem('yt_client_id',state.clientId);});
+    $('#clientId').addEventListener('change',e=>{state.clientId=String(e.target.value||'').trim();localStorage.setItem('yt_client_id',state.clientId);});
+    // YouTube buttons use the inline full-page redirect in index.html, so OAuth never depends on app.js loading.
+    if($('#disconnectYoutube')) $('#disconnectYoutube').addEventListener('click',()=>{if(window.grandrpDisconnectYouTube)window.grandrpDisconnectYouTube();else{state.accessToken='';sessionStorage.removeItem('yt_access_token');updateYtStatus(false);}});
     $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen?'))return;state.entries=[];state.queue=[];saveMeta();await clearDB();renderArchive();renderCases();renderCsv();renderQueue();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }
 
-  window.addEventListener('beforeunload',()=>{try{state.worker?.terminate();}catch{}});
-  setupNav();setupUpload();setupEditor();setupSettings();loadMeta();renderArchive();renderQueue();updateYtStatus(); if(handleOAuthRedirect()){ renderQueue(); }
+  window.addEventListener('beforeunload' ,()=>{try{state.worker?.terminate();}catch{}});
+  setupNav();setupUpload();setupEditor();setupSettings();loadMeta();renderArchive();renderQueue();updateYtStatus();
 })();
