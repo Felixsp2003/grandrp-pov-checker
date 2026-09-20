@@ -1,6 +1,3 @@
-Grand RP POV Checker V8
-- 60 default OCR frames (20-120 configurable)
-- Multi-frame consensus
-- Separate ID/Grund/SC parsing including wrapped SC and Social Club ID layouts
-- Yellow server badge detection with consensus; uncertain server remains blank for manual confirmation
-- YouTube unlisted upload support
+# Grand RP POV Checker V9
+
+SC attribution fix: the SC is now linked to the same target-ID + reason block, with a small temporal neighborhood for wrapped lines. Server voting prefers frames belonging to the detected ban block and requires stronger agreement before auto-filling.

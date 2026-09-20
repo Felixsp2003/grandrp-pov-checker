@@ -120,25 +120,27 @@ async function analyzeVideo(video,duration,onProgress){
   const frames=Math.max(20,Math.min(120,Number(localStorage.getItem('frame_count')||60)));
   const start=Math.max(0,duration-40),span=Math.max(.1,duration-start);
   const worker=await Tesseract.createWorker('eng',1);
-  const ids=[],reasons=[],scs=[],servers=[],dates=[];
+  const ids=[],reasons=[],servers=[],dates=[];
+  const frameRecords=[];
   try{
     for(let i=0;i<frames;i++){
-      await seek(video,start+span*((i+.27)/frames));
-      // Bann text: use two scales and two thresholds. The UI may wrap IP/SC onto the next line.
+      const t=start+span*((i+.27)/frames);
+      await seek(video,t);
       const left=preprocess(crop(video,0,.07,.70,.29,2.8),'normal');
       const left2=preprocess(left,'high');
       const left3=preprocess(left,'dark');
       const [a,b,c]=await Promise.all([
         ocr(worker,left,{psm:6}),ocr(worker,left2,{psm:6}),ocr(worker,left3,{psm:11})
       ]);
-      const texts=[a.text||'',b.text||'',c.text||''];
-      for(const text of texts){
-        const parsed=parseSingleFrame([text]);
-        if(parsed.id)ids.push(parsed.id);
-        if(parsed.reason)reasons.push(parsed.reason);
-        if(parsed.sc)scs.push(parsed.sc);
-      }
-      // Server: detect the actual yellow badge first, then require agreement between several OCR modes.
+      const parsed=parseSingleFrame([a.text||'',b.text||'',c.text||'']);
+      if(parsed.id)ids.push(parsed.id);
+      if(parsed.reason)reasons.push(parsed.reason);
+
+      // Keep SC attached to the same target-ID + reason block. This prevents a later
+      // Social Club line for another player from being combined with this ban.
+      const frameSc=(parsed.id&&parsed.reason)?parsed.sc:'';
+
+      const frameServers=[];
       const serverCrops=serverDigitCrops(video);
       for(const canvas of serverCrops.slice(0,3)){
         const [s1,s2,s3]=await Promise.all([
@@ -146,24 +148,54 @@ async function analyzeVideo(video,duration,onProgress){
           ocr(worker,preprocess(canvas,'high'),{psm:10,whitelist:'1234'}),
           ocr(worker,preprocess(canvas,'dark'),{psm:13,whitelist:'1234'})
         ]);
-        const sv=serverVotesFromTexts([s1.text||'',s2.text||'',s3.text||'']);
-        servers.push(...sv);
+        frameServers.push(...serverVotesFromTexts([s1.text||'',s2.text||'',s3.text||'']));
       }
+
       const dateCanvas=preprocess(crop(video,.84,.86,.16,.14,3.5),'normal');
       const [d1,d2]=await Promise.all([ocr(worker,dateCanvas,{psm:7,whitelist:'0123456789./-'}),ocr(worker,preprocess(dateCanvas,'dark'),{psm:7,whitelist:'0123456789./-'})]);
       const dt=extractDate((d1.text||'')+'\n'+(d2.text||''));if(dt)dates.push(dt);
+
+      frameRecords.push({i,t,id:parsed.id,reason:parsed.reason,sc:frameSc,servers:frameServers,date:dt});
       onProgress(10+(i+1)/frames*85,`Präzisions-OCR · Frame ${i+1}/${frames}`)
     }
   }finally{await worker.terminate()}
-  const id=bestVote(ids,normalizeId,3),reason=bestVote(reasons,cleanText,3),sc=bestVote(scs,normalizeHex,40),date=bestVote(dates,x=>x,10)||'';
-  // Never silently choose a server from weak/contradictory OCR. Require a clear vote.
-  const serverCounts=new Map();for(const v of servers)serverCounts.set(v,(serverCounts.get(v)||0)+1);
+
+  const id=bestVote(ids,normalizeId,3);
+  const reason=bestVote(reasons,cleanText,3);
+
+  // First use SC values from frames that identify the same player + reason.
+  // Then allow ±2 frames so a wrapped SC line is still associated with the same block.
+  const targetFrames=frameRecords.map((r,idx)=>({r,idx})).filter(x=>x.r.id===id&&x.r.reason===reason);
+  const scCandidates=[];
+  for(const {r,idx} of targetFrames){
+    if(r.sc)scCandidates.push(r.sc);
+    for(let j=Math.max(0,idx-2);j<=Math.min(frameRecords.length-1,idx+2);j++){
+      const n=frameRecords[j];
+      if(n.id===id&&n.sc)scCandidates.push(n.sc);
+    }
+  }
+  const sc=bestVote(scCandidates,normalizeHex,40);
+
+  // Prefer server votes from the target block. Fall back to all server frames only if
+  // no target block was found. Require stronger agreement before auto-filling.
+  const targetServerVotes=targetFrames.flatMap(x=>x.r.servers||[]);
+  const serverPool=targetServerVotes.length?targetServerVotes:frameRecords.flatMap(r=>r.servers||[]);
+  const serverCounts=new Map();for(const v of serverPool)serverCounts.set(v,(serverCounts.get(v)||0)+1);
   const serverSorted=[...serverCounts.entries()].sort((a,b)=>b[1]-a[1]);
-  const server=serverSorted.length&&serverSorted[0][1]>=Math.max(3,Math.ceil(servers.length*.55))?serverSorted[0][0]:'';
+  const topServer=serverSorted[0];
+  const server=topServer&&topServer[1]>=Math.max(3,Math.ceil(serverPool.length*.60))?topServer[0]:'';
+
+  const date=bestVote(dates,x=>x,10)||'';
   const types=inferTypes(reason);
-  const confidence={id:voteConfidence(ids,normalizeId,id),reason:voteConfidence(reasons,cleanText,reason),sc:voteConfidence(scs,normalizeHex,sc),server:server?serverSorted[0][1]/Math.max(1,servers.length):0,date:voteConfidence(dates,x=>x,date)};
-  const complete=!!(id&&reason&&sc&&server&&date&&confidence.id>=.6&&confidence.reason>=.6&&confidence.sc>=.6&&confidence.server>=.55&&confidence.date>=.5);
-  return{id,reason,sc,server,date,types,confidence,complete,found:complete}
+  const confidence={
+    id:voteConfidence(ids,normalizeId,id),
+    reason:voteConfidence(reasons,cleanText,reason),
+    sc:voteConfidence(scCandidates,normalizeHex,sc),
+    server:server&&topServer?topServer[1]/Math.max(1,serverPool.length):0,
+    date:voteConfidence(dates,x=>x,date)
+  };
+  const complete=!!(id&&reason&&sc&&server&&date&&confidence.id>=.6&&confidence.reason>=.6&&confidence.sc>=.8&&confidence.server>=.60&&confidence.date>=.5);
+  return{id,reason,sc,server,date,types,confidence,complete,found:complete};
 }
 function voteConfidence(values,normalizer,winner){const vals=values.map(v=>normalizer(v)).filter(Boolean);if(!vals.length||!winner)return 0;return vals.filter(v=>v===winner).length/vals.length}
 function parseSingleFrame(texts){
