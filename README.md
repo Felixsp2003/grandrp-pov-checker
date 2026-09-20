@@ -1,11 +1,12 @@
-# Grand RP POV Checker V16
+# Grand RP POV Checker V25
 
-Fix für den Laufzeitfehler `validDate is not defined` aus V15.
-
-Enthält weiterhin:
-- Multi-POV-Upload
-- OCR der letzten 40 Sekunden
-- CSV-Export mit Proof, Datum, ID, SOC, RID (= SC), Discord ID, Familie, Grund
-- SOC und Familie bleiben leer, wenn nicht vorhanden
-- POV wird erst nach vollständiger Verarbeitung/Prüfung endgültig benannt und gespeichert
-- fehlende Felder können über einen neuen POV-Tab an der erkannten Zeit geprüft werden
+Rebuilt OCR pipeline focused on correctness:
+- Target ID is strictly 1–6 digits and comes from the target after `hat ... [ID] ... für`.
+- Administrator IDs are never accepted as target IDs.
+- Reason is classified only against the allowed list.
+- SC is the second long identifier after the IP inside the same ban block; offline players may have no IP/SC.
+- Server is read from the yellow top-right badge only.
+- Date is read from the bottom-right HUD.
+- Missing/ambiguous values remain empty and can be checked from a new POV tab at the relevant timestamp.
+- POV is only renamed after the record is fully processed and saved.
+- CSV export: Proof, Datum, ID, SOC(blank), RID=SC, Discord ID, Familie(blank), Grund.
