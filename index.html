@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Grand RP · DC Checker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-icon">⊘</span><span>Archiv</span></div>
+    <nav class="nav">
+      <button class="nav-item active" data-view="archive"><span class="nav-icon">▦</span><span>Archiv</span></button>
+      <button class="nav-item" data-view="cases"><span class="nav-icon">◉</span><span>Verdachtsfälle</span></button>
+      <button class="nav-item" data-view="upload"><span class="nav-icon">＋</span><span>POVs hochladen</span></button>
+      <button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span><span>Einstellungen</span></button>
+    </nav>
+    <div class="sidebar-foot">
+      <span class="status-dot"></span>
+      <div><strong>DC Checker</strong><small>fugo • lokal im Browser</small></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-title">
+        <h1 id="pageTitle">Archiv</h1>
+        <p id="pageSubtitle">POV-Fälle, Bans und PC-Checks</p>
+      </div>
+      <div class="topbar-actions">
+        <div class="search top-search"><span>⌕</span><input id="search" placeholder="ID, SC-ID oder Grund suchen"><kbd>/</kbd></div>
+        <button class="ghost-btn" id="reloadBtn">Neu laden</button>
+        <button class="pink-btn" id="newUploadBtn">Neuer Eintrag</button>
+      </div>
+    </header>
+
+    <section id="view-archive" class="view active">
+      <div class="archive-head">
+        <div class="filters" id="filters">
+          <button class="filter active" data-filter="all">Alle <b id="countAll">0</b></button>
+          <button class="filter" data-filter="hardban">Bans <b id="countBan">0</b></button>
+          <button class="filter" data-filter="pccheck">PC-Checks <b id="countPc">0</b></button>
+          <button class="filter" data-filter="socban">Soc-Ban <b id="countSoc">0</b></button>
+          <button class="filter" data-filter="hardbanOnly">Hardbann <b id="countHard">0</b></button>
+          <button class="filter" data-filter="cheater">Cheater <b id="countCheat">0</b></button>
+          <button class="filter" data-filter="negativ">Negativ <b id="countNeg">0</b></button>
+          <button class="filter" data-filter="novideo">Ohne Video <b id="countNoVideo">0</b></button>
+        </div>
+      </div>
+      <div id="archiveGrid" class="grid"></div>
+      <div id="emptyState" class="empty hidden">
+        <div class="empty-icon">⊘</div><h2>Noch keine Einträge</h2><p>Lade mehrere POVs gleichzeitig hoch. Die komplette Aufnahme wird erst nach dem Upload analysiert.</p>
+        <button class="pink-btn" id="emptyUploadBtn">POVs hochladen</button>
+      </div>
+    </section>
+
+    <section id="view-cases" class="view">
+      <div class="panel-head"><div><h2>Verdachtsfälle</h2><p>Einträge, bei denen OCR-Daten fehlen oder manuell geprüft werden müssen.</p></div><button class="ghost-btn" id="casesRefresh">Aktualisieren</button></div>
+      <div id="casesList" class="cases-list"></div>
+    </section>
+
+    <section id="view-upload" class="view">
+      <div class="upload-layout">
+        <div class="upload-main">
+          <div id="dropzone" class="dropzone">
+            <input type="file" id="fileInput" accept="video/*" multiple hidden>
+            <div class="drop-icon">↑</div>
+            <h2>POVs hier ablegen</h2>
+            <p>Mehrere Dateien gleichzeitig auswählen · MP4, WebM, MOV</p>
+            <button class="pink-btn" id="chooseBtn">POVs auswählen</button>
+            <small>Alle Dateien werden zuerst vollständig eingelesen. Erst danach startet die OCR der letzten 40 Sekunden.</small>
+          </div>
+          <div class="queue-head"><strong>Upload-Warteschlange</strong><span id="queueCount">0 Dateien</span></div>
+          <div id="uploadQueue" class="upload-queue"></div>
+        </div>
+        <aside class="side-info">
+          <div class="info-card"><span class="info-icon">✓</span><div><strong>Automatische Erkennung</strong><p>ID, Grund, SC, Server und Datum werden aus den definierten Bildschirmbereichen gelesen.</p></div></div>
+          <div class="info-card"><span class="info-icon">40s</span><div><strong>Letzte 40 Sekunden</strong><p>Die Analyse wartet auf den vollständigen Upload und nutzt danach nur den relevanten Zeitraum.</p></div></div>
+          <div class="info-card"><span class="info-icon">YT</span><div><strong>YouTube</strong><p>Nach Bestätigung kann jede POV automatisch als „nicht gelistet“ hochgeladen werden.</p></div></div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="view-settings" class="view">
+      <div class="settings-card">
+        <div class="card-title">YouTube-Verbindung <span id="ytStatus" class="connection"><span class="status-dot muted-dot"></span>Nicht verbunden</span></div>
+        <p class="hint">Die Website selbst benötigt keinen bezahlten Server. Für automatische YouTube-Uploads wird einmalig dein eigener Google-OAuth-Client benötigt.</p>
+        <label>Google OAuth Client ID<input id="clientId" placeholder="…apps.googleusercontent.com"></label>
+        <div class="settings-actions"><button class="pink-btn" id="connectYoutube">Mit YouTube verbinden</button><button class="ghost-btn" id="disconnectYoutube">Verbindung entfernen</button></div>
+        <hr>
+        <div class="card-title">OCR-Einstellungen</div>
+        <label>Frames in den letzten 40 Sekunden<input id="frameCount" type="number" min="4" max="20" value="10"></label>
+        <p class="hint">10 Frames sind ein guter Start. Bei schnellen UI-Wechseln kannst du die Zahl erhöhen.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="editorModal" class="modal hidden"><div class="modal-card wide">
+  <div class="modal-head"><div><h2 id="modalTitle">POV bearbeiten</h2><p id="modalFile"></p></div><button class="icon-btn" id="closeModal">×</button></div>
+  <form id="entryForm">
+    <input id="editingIndex" type="hidden">
+    <div class="form-grid">
+      <label>Ziel-ID<input id="targetId" placeholder="z. B. 173291"></label>
+      <label>Grund<input id="reason" placeholder="z. B. Cheating"></label>
+      <label>SC<input id="sc" placeholder="lange Buchstabenfolge"></label>
+      <label>Server<input id="server" placeholder="z. B. 3 oder 4"></label>
+      <label>Datum<input id="date" type="date"></label>
+      <label>YT-Titel<input id="titlePreview" readonly></label>
+    </div>
+    <div class="section-label">Bann-Typen <span>Mehrfachauswahl möglich</span></div>
+    <div class="chips" id="banTypes">
+      <button type="button" class="chip" data-value="hardban">Hardban</button><button type="button" class="chip" data-value="socban">Soc-Ban</button><button type="button" class="chip" data-value="cheater">Cheater</button><button type="button" class="chip" data-value="negativ">Negativ</button><button type="button" class="chip" data-value="pccheck">PC-Check</button>
+    </div>
+    <div class="switches"><label class="switch-row">Perma-Bann<input id="perma" type="checkbox"><span class="switch"></span></label><label class="switch-row">Nicht gebannt<input id="notBanned" type="checkbox"><span class="switch"></span></label></div>
+    <div id="ocrWarning" class="ocr-warning hidden">⚠ Nicht alle Angaben konnten sicher erkannt werden. Bitte ergänzen oder korrigieren.</div>
+    <div class="modal-actions"><button type="button" class="ghost-btn" id="cancelBtn">Abbrechen</button><button type="submit" class="pink-btn" id="saveBtn">Speichern & YouTube hochladen</button></div>
+  </form>
+</div></div>
+
+<div id="toast" class="toast"></div><video id="videoProbe" class="hidden-video" muted playsinline></video><canvas id="ocrCanvas" class="hidden-video"></canvas>
+<script src="app.js"></script>
+</body></html>
