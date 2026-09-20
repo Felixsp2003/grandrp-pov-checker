@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const META_KEY='grandrp_pov_meta_v15', DB_NAME='grandrp_pov_db_v1', STORE='videos';
+const META_KEY='grandrp_pov_meta_v17', DB_NAME='grandrp_pov_db_v1', STORE='videos';
 const state={entries:[],queue:[],filter:'all',editing:null,selectedTypes:[],accessToken:sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',processing:false};
 const views={archive:['Archiv','POV-Fälle, Bans und PC-Checks'],cases:['Verdachtsfälle','Nicht eindeutig erkannte Fälle zur manuellen Prüfung'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','YouTube und OCR']};
 function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
@@ -89,6 +89,18 @@ const ALLOWED_REASONS=['PC Check Positiv','PC Check Verweigert','PC-Check Positi
 function reasonKey(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'')}
 function levenshtein(a,b){a=String(a);b=String(b);if(a===b)return 0;if(!a)return b.length;if(!b)return a.length;let p=Array.from({length:b.length+1},(_,i)=>i);for(let i=1;i<=a.length;i++){const c=[i];for(let j=1;j<=b.length;j++)c[j]=Math.min(c[j-1]+1,p[j]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c}return p[b.length]}
 function similarity(a,b){a=reasonKey(a);b=reasonKey(b);if(!a||!b)return 0;return 1-levenshtein(a,b)/Math.max(a.length,b.length)}
+function normalizeHexLoose(s){
+  // OCR often confuses a few glyphs in hexadecimal Social Club IDs.
+  // Only map characters that are common, visually similar OCR confusions.
+  return String(s||'')
+    .replace(/[OoQq]/g,'0')
+    .replace(/[IiLl]/g,'1')
+    .replace(/[Ss]/g,'5')
+    .replace(/[Gg]/g,'6')
+    .replace(/[Zz]/g,'2')
+    .replace(/[^0-9A-Fa-f]/g,'')
+    .toLowerCase();
+}
 function normalizeReasonOcrText(s){return String(s||'').toLowerCase().replace(/[‐‑‒–—]/g,'-').replace(/[|]/g,'i').replace(/0/g,'o').replace(/[^a-z0-9. -]/g,' ').replace(/\s+/g,' ').trim()}
 function classifyAllowedReason(src){
   const n=normalizeOcr(src), lines=n.split('\n').map(x=>x.trim()).filter(Boolean);
