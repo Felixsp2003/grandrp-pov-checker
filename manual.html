@@ -7,7 +7,7 @@
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 :root{color-scheme:dark;--bg:#07060c;--panel:#120d19;--panel2:#17101f;--line:#30243a;--text:#f5eef8;--muted:#aaa0b0;--accent:#ff2380;--good:#69e1af;--warn:#ffbf66}
-*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Arial,sans-serif}.app{height:100%;display:flex;flex-direction:column}.bar{padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap}.bar strong{margin-right:auto}.bar button,.bar input,.bar select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px}.bar button:hover{border-color:#5b4769}.bar .primary{background:var(--accent);border-color:var(--accent)}.bar .good{background:#123326;border-color:#215f46}.tip{padding:10px 16px;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px}.workspace{flex:1;min-height:0;display:flex;flex-direction:column}.stage-wrap{flex:1;min-height:0;display:grid;place-items:center;padding:16px;overflow:auto}.stage{position:relative;display:inline-block;max-width:100%;max-height:100%;background:#000;box-shadow:0 15px 50px rgba(0,0,0,.35)}video{display:block;max-width:min(96vw,1600px);max-height:68vh;background:#000}.overlay{position:absolute;left:0;top:0;cursor:crosshair;touch-action:none}.bottom{border-top:1px solid var(--line);background:var(--panel);padding:12px 16px;display:grid;gap:10px}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.row textarea{width:100%;min-height:84px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px;resize:vertical}.status{font-size:13px;color:var(--muted)}.status.good{color:var(--good)}.status.warn{color:var(--warn)}.preset{display:flex;gap:6px;flex-wrap:wrap}.preset button{font-size:12px}.server-buttons button{min-width:48px}.hidden{display:none}.title{font-size:14px}.sub{font-size:12px;color:var(--muted)}.check{font-size:12px;color:var(--muted)}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Arial,sans-serif}.app{height:100%;display:flex;flex-direction:column}.bar{padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap}.bar strong{margin-right:auto}.bar button,.bar input,.bar select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px}.bar button:hover{border-color:#5b4769}.bar .primary{background:var(--accent);border-color:var(--accent)}.bar .good{background:#123326;border-color:#215f46}.tip{padding:10px 16px;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px}.workspace{flex:1;min-height:0;display:flex;flex-direction:column}.stage-wrap{flex:1;min-height:0;display:grid;place-items:center;padding:16px;overflow:auto}.stage{position:relative;display:inline-block;max-width:100%;max-height:100%;background:#000;box-shadow:0 15px 50px rgba(0,0,0,.35)}video{display:block;max-width:min(96vw,1600px);max-height:68vh;background:#000}.overlay{position:absolute;left:0;top:0;cursor:crosshair;touch-action:none;pointer-events:none}.overlay.draw-active{pointer-events:auto}.bottom{border-top:1px solid var(--line);background:var(--panel);padding:12px 16px;display:grid;gap:10px}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.row textarea{width:100%;min-height:84px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px;resize:vertical}.status{font-size:13px;color:var(--muted)}.status.good{color:var(--good)}.status.warn{color:var(--warn)}.preset{display:flex;gap:6px;flex-wrap:wrap}.preset button{font-size:12px}.server-buttons button{min-width:48px}.hidden{display:none}.title{font-size:14px}.sub{font-size:12px;color:var(--muted)}.check{font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -20,6 +20,7 @@
     <button id="next">+0,5 s</button>
     <button id="prev2">−5 s</button>
     <button id="next2">+5 s</button>
+    <button id="drawMode" class="primary">Rahmen ziehen: AUS</button>
     <select id="preset">
       <option value="">Bereich wählen</option>
       <option value="chat">Links oben · Bannblock</option>
@@ -30,7 +31,7 @@
       <option value="reason">Grund · hinter Grund:</option>
     </select>
   </div>
-  <div class="tip" id="tip">Ziehe mit der Maus einen Rahmen um die Information. Das Fenster ist eine normale GitHub-Pages-Seite – kein about:blank. Für SC/IP markierst du am besten die Zeilen mit IP und SC.</div>
+  <div class="tip" id="tip">Video normal abspielen/vor- und zurückspulen. Die Video-Controls funktionieren standardmäßig. Für eine Auswahl „Rahmen ziehen“ aktivieren; danach wieder ausschalten, um normal zu spulen.</div>
   <div class="workspace">
     <div class="stage-wrap">
       <div class="stage">
@@ -60,12 +61,12 @@
 <script>
 (() => {
   'use strict';
-  const DB_NAME='grandrp_pov_db_v36', STORE='videos';
+  const DB_NAME='grandrp_pov_db_v42', STORE='videos';
   const qs=new URLSearchParams(location.search);
   const job=qs.get('job')||''; const field=qs.get('field')||'view'; const start=Number(qs.get('t')||0)||0;
   const ALLOWED=['PC Check Positiv','PC Check Verweigert','PC-Check Positiv 4.1 (Discord)','PC-Check Positiv 4.1 (Redux)','PC-Check Positiv (Banevading)','PC Check Positiv (Cleaning)','Cheating','Acc 1.1','Acc 1.4','Event 1.7'];
   const $=s=>document.querySelector(s), video=$('#video'), overlay=$('#overlay'), ctx=overlay.getContext('2d'), time=$('#time'), manual=$('#manual'), status=$('#status'), fieldTitle=$('#fieldTitle'), tip=$('#tip'), serverButtons=$('#serverButtons');
-  let selection=null,drawing=false,sx=0,sy=0,file=null;
+  let selection=null,drawing=false,sx=0,sy=0,file=null,drawMode=false;
   function setStatus(t,kind=''){status.textContent=t;status.className='status '+kind}
   function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});}
   async function getVideo(id){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const r=tx.objectStore(STORE).get(id);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});}
@@ -81,15 +82,17 @@
   function syncCanvas(){const r=video.getBoundingClientRect();overlay.width=Math.max(1,Math.round(r.width));overlay.height=Math.max(1,Math.round(r.height));overlay.style.width=r.width+'px';overlay.style.height=r.height+'px';draw()}
   function draw(){ctx.clearRect(0,0,overlay.width,overlay.height);if(selection){ctx.fillStyle='rgba(255,35,128,.15)';ctx.fillRect(selection.x,selection.y,selection.w,selection.h);ctx.strokeStyle='#ff2380';ctx.lineWidth=2;ctx.strokeRect(selection.x+.5,selection.y+.5,selection.w,selection.h);}}
   function pos(e){const r=overlay.getBoundingClientRect();return{x:Math.max(0,Math.min(overlay.width,e.clientX-r.left)),y:Math.max(0,Math.min(overlay.height,e.clientY-r.top))}}
+  function setDrawMode(v){drawMode=!!v;overlay.classList.toggle('draw-active',drawMode);const b=$('#drawMode');if(b)b.textContent=drawMode?'Rahmen ziehen: AN':'Rahmen ziehen: AUS';setStatus(drawMode?'Rahmenmodus aktiv. Ziehe jetzt den Bereich über dem Video.':'Rahmenmodus aus. Die normalen Video-Controls funktionieren wieder.');}
+  const drawBtn=$('#drawMode'); if(drawBtn) drawBtn.onclick=()=>setDrawMode(!drawMode);
   overlay.addEventListener('pointerdown',e=>{const p=pos(e);drawing=true;sx=p.x;sy=p.y;selection={x:sx,y:sy,w:0,h:0};overlay.setPointerCapture(e.pointerId);draw()});
   overlay.addEventListener('pointermove',e=>{if(!drawing)return;const p=pos(e);selection={x:Math.min(sx,p.x),y:Math.min(sy,p.y),w:Math.abs(sx-p.x),h:Math.abs(sy-p.y)};draw()});
   overlay.addEventListener('pointerup',()=>{drawing=false}); overlay.addEventListener('pointercancel',()=>{drawing=false});
   function seekTo(t){video.currentTime=Math.max(0,Math.min(video.duration||1e9,Number(t)||0));time.value=video.currentTime.toFixed(1)}
-  function presetRect(name){const W=overlay.width,H=overlay.height;const m={chat:[0,.02,.66,.36],sc:[0,.12,.72,.28],targetId:[0,.04,.72,.16],reason:[0,.14,.72,.14],server:[.86,.0,.14,.18],date:[.78,.80,.22,.20]}[name];if(!m)return;selection={x:W*m[0],y:H*m[1],w:W*m[2],h:H*m[3]};draw();setStatus('Bereich vorgewählt. Du kannst ihn mit der Maus neu ziehen.');}
+  function presetRect(name){const W=overlay.width,H=overlay.height;const m={chat:[0,.02,.66,.36],sc:[0,.12,.72,.28],targetId:[0,.04,.72,.16],reason:[0,.14,.72,.14],server:[.86,.0,.14,.18],date:[.78,.80,.22,.20]}[name];if(!m)return;selection={x:W*m[0],y:H*m[1],w:W*m[2],h:H*m[3]};draw();setDrawMode(false);setStatus('Bereich vorgewählt. Du kannst sofort OCR lesen oder die Auswahl mit „Rahmen ziehen: AN“ neu ziehen.');}
   $('#seek').onclick=()=>seekTo(time.value);$('#prev').onclick=()=>seekTo(video.currentTime-.5);$('#next').onclick=()=>seekTo(video.currentTime+.5);$('#prev2').onclick=()=>seekTo(video.currentTime-5);$('#next2').onclick=()=>seekTo(video.currentTime+5);
-  video.addEventListener('loadedmetadata',()=>{syncCanvas();seekTo(start);setStatus('POV bereit. Ziehe einen Rahmen um die Information.','good')});video.addEventListener('timeupdate',()=>time.value=video.currentTime.toFixed(1));window.addEventListener('resize',syncCanvas);
+  video.addEventListener('loadedmetadata',()=>{syncCanvas();seekTo(start);setDrawMode(false);setStatus('POV bereit. Video-Controls sind frei. Für eine Auswahl zuerst „Rahmen ziehen“ aktivieren.','good')});video.addEventListener('timeupdate',()=>time.value=video.currentTime.toFixed(1));window.addEventListener('resize',syncCanvas);
   $('#preset').onchange=e=>{if(e.target.value)presetRect(e.target.value)};
-  $('#clear').onclick=()=>{selection=null;manual.value='';draw();setStatus('Auswahl gelöscht.')};
+  $('#clear').onclick=()=>{selection=null;manual.value='';draw();setDrawMode(false);setStatus('Auswahl gelöscht.')};
   serverButtons.querySelectorAll('button').forEach(b=>b.onclick=()=>{if(field==='server'){manual.value=b.dataset.server;setStatus(`Server ${b.dataset.server} gewählt.`,'good')}});
   async function runOcr(){
     if(field==='server'){manual.value=manual.value||'3';setStatus('Server ist im aktuellen Workflow standardmäßig 3.','good');return}

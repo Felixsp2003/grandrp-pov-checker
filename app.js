@@ -10,9 +10,9 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V36';
-  const META_KEY='grandrp_pov_meta_v36';
-  const DB_NAME='grandrp_pov_db_v36';
+  const BUILD='V42';
+  const META_KEY='grandrp_pov_meta_v42';
+  const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
 
   const ALLOWED_REASONS=[
@@ -551,7 +551,7 @@
         await putVideo(item.id,item.file);
         item.status='YouTube: vollständiger Upload';item.progress=2;renderQueue();
         item.youtube=await uploadYoutube(item.file,item.file.name,state.accessToken,p=>{item.progress=2+Math.round(p*.33);item.status=`YouTube-Upload ${p}%`;renderQueue();});
-        item.status='YouTube-Upload abgeschlossen · warte auf vollständige Verarbeitung';item.progress=35;renderQueue();
+        item.status='YouTube-Upload abgeschlossen · Verarbeitung läuft';item.progress=35;renderQueue();
         await waitForYoutubeProcessing(item.youtube.id,state.accessToken,p=>{
           item.progress=35+Math.round(p*.25);
           item.status=`YouTube-Verarbeitung ${p}% · OCR wartet`;
@@ -559,7 +559,7 @@
         });
         item.status='YouTube vollständig verarbeitet · OCR startet';item.progress=60;renderQueue();
         const video=$('#videoProbe');const url=URL.createObjectURL(item.file);video.src=url;await loaded(video);item.progress=62;renderQueue();
-        item.result=await analyzeVideo(video,p=>{item.progress=42+Math.round(p*.58);renderQueue();});
+        item.result=await analyzeVideo(video,p=>{item.progress=62+Math.round(p*.38);renderQueue();});
         item.result.originalName=item.file.name;item.result.types=[];item.result.proof=item.youtube.url;item.result.youtube=item.youtube;item.status=item.result.complete?'OCR fertig · Prüfung offen':'OCR unvollständig · Prüfung nötig';renderQueue();openEditor(item);
         await new Promise(resolve=>{const timer=setInterval(()=>{if(!state.editing){clearInterval(timer);resolve();}},150);});
         URL.revokeObjectURL(url);
@@ -749,8 +749,12 @@
       if(!item) throw new Error('YouTube-Video wurde nach dem Upload nicht gefunden.');
       const pd=item.processingDetails||{};
       const status=pd.processingStatus||'';
+      // HARD GATE: OCR may start only after YouTube reports processingStatus=succeeded.
+      // uploadStatus='processed' is deliberately NOT treated as enough because the
+      // Studio/UI can still be processing higher-quality renditions.
+
       const prog=pd.processingProgress;
-      if(status==='succeeded' || item.status?.uploadStatus==='processed') {
+      if(status==='succeeded') {
         onProgress?.(100);
         return item;
       }
