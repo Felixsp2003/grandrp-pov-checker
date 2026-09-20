@@ -257,7 +257,7 @@
   if(isNode){module.exports={ALLOWED_REASONS,compact,similarity,normalizeHexLoose,normalizeIdToken,canonicalReason,parseTargetId,parseReason,extractScOrdered,extractScCandidatesFromString,extractHexCandidateAnyText,consensusHex,extractServerFromOcr,extractDate,serverVote,dateVote,clampId,validDate};return;}
 
   const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-  const state={entries:[],queue:[],filter:'all',editing:null,worker:null,accessToken:sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:24,window:4.5,step:0.5},selectedTypes:new Set()};
+  const state={entries:[],queue:[],filter:'all',editing:null,worker:null,accessToken:localStorage.getItem('yt_access_token')||sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:24,window:4.5,step:0.5},selectedTypes:new Set()};
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
 
   function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2600);}
@@ -544,7 +544,7 @@
           return;
         }
         state.accessToken=resp.access_token;
-        sessionStorage.setItem('yt_access_token',resp.access_token);
+        localStorage.setItem('yt_access_token',resp.access_token);sessionStorage.setItem('yt_access_token',resp.access_token);
         updateYtStatus(true);
         showYoutubeHelp('YouTube ist verbunden.','good');
         toast('YouTube verbunden.');
@@ -598,7 +598,7 @@
       return true;
     }
     state.accessToken=token;
-    sessionStorage.setItem('yt_access_token',token);
+    localStorage.setItem('yt_access_token',token);sessionStorage.setItem('yt_access_token',token);
     updateYtStatus(true);
     showYoutubeHelp('YouTube ist verbunden.','good');
     toast('YouTube verbunden.');
@@ -696,7 +696,7 @@
     $('#clientId').addEventListener('input',e=>{state.clientId=String(e.target.value||'').trim();localStorage.setItem('yt_client_id',state.clientId);});
     $('#clientId').addEventListener('change',e=>{state.clientId=String(e.target.value||'').trim();localStorage.setItem('yt_client_id',state.clientId);});
     // YouTube buttons use the inline full-page redirect in index.html, so OAuth never depends on app.js loading.
-    if($('#disconnectYoutube')) $('#disconnectYoutube').addEventListener('click',()=>{if(window.grandrpDisconnectYouTube)window.grandrpDisconnectYouTube();else{state.accessToken='';sessionStorage.removeItem('yt_access_token');updateYtStatus(false);}});
+    if($('#disconnectYoutube')) $('#disconnectYoutube').addEventListener('click',()=>{if(window.grandrpDisconnectYouTube)window.grandrpDisconnectYouTube();else{state.accessToken='';localStorage.removeItem('yt_access_token');sessionStorage.removeItem('yt_access_token');updateYtStatus(false);}});
     $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen?'))return;state.entries=[];state.queue=[];saveMeta();await clearDB();renderArchive();renderCases();renderCsv();renderQueue();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }

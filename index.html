@@ -137,62 +137,67 @@
   'use strict';
   const CLIENT_KEY='yt_client_id';
   const TOKEN_KEY='yt_access_token';
-  const STATE_KEY='grandrp_oauth_state_v36';
-  const RESULT_KEY='grandrp_oauth_result_v36';
-  function baseUrl(){ return new URL('oauth-callback.html', location.href).href; }
+  const STATE_KEY='grandrp_oauth_state_v37';
+  const RESULT_KEY='grandrp_oauth_result_v37';
+  function callbackUrl(){ return new URL('oauth-callback.html', location.href).href; }
   function validClientId(id){ return /^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(String(id||'').trim()); }
-  function randState(){ const bytes=new Uint8Array(24); crypto.getRandomValues(bytes); return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join(''); }
-  function show(text,color){ const el=document.getElementById('ytConnectHelp'); if(el){el.textContent=text;el.style.color=color||'';} }
-  function buildUrl(forceConsent){
-    const id=String(document.getElementById('clientId')?.value||localStorage.getItem(CLIENT_KEY)||'').trim();
-    if(!id) throw new Error('Bitte zuerst die Google OAuth Client-ID eintragen.');
-    if(!validClientId(id)) throw new Error('Die Google OAuth Client-ID hat kein gültiges Format.');
-    localStorage.setItem(CLIENT_KEY,id);
-    const state=randState();
-    sessionStorage.setItem(STATE_KEY,state);
-    sessionStorage.removeItem(TOKEN_KEY);
-    sessionStorage.removeItem(RESULT_KEY);
-    const p=new URLSearchParams({client_id:id,redirect_uri:baseUrl(),response_type:'token',scope:'https://www.googleapis.com/auth/youtube.upload',include_granted_scopes:'true',state});
-    if(forceConsent) p.set('prompt','consent');
-    return 'https://accounts.google.com/o/oauth2/v2/auth?'+p.toString();
+  function state(){
+    const bytes=new Uint8Array(24); crypto.getRandomValues(bytes);
+    return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
   }
-  window.grandrpPrepareYouTubeAuth=function(forceConsent){
+  function show(text,color){ const el=document.getElementById('ytConnectHelp'); if(el){el.textContent=text;el.style.color=color||'';} }
+  function startAuth(forceConsent){
     try{
-      const url=buildUrl(!!forceConsent);
-      const a=document.getElementById(forceConsent?'reauthorizeYoutube':'connectYoutube');
-      if(a){a.href=url;a.textContent='Google wird geöffnet…';setTimeout(()=>{a.textContent=forceConsent?'Berechtigung erneut':'Mit YouTube verbinden';},1500);}
+      const id=String(document.getElementById('clientId')?.value||localStorage.getItem(CLIENT_KEY)||'').trim();
+      if(!id) throw new Error('Bitte zuerst die Google OAuth Client-ID eintragen.');
+      if(!validClientId(id)) throw new Error('Die Google OAuth Client-ID hat kein gültiges Format.');
+      localStorage.setItem(CLIENT_KEY,id);
+      const s=state();
+      // Persist across the Google round-trip even if the browser recreates the tab context.
+      localStorage.setItem(STATE_KEY,s);
+      sessionStorage.setItem(STATE_KEY,s);
+      localStorage.removeItem(RESULT_KEY);
+      sessionStorage.removeItem(RESULT_KEY);
+      const params=new URLSearchParams({
+        client_id:id,
+        redirect_uri:callbackUrl(),
+        response_type:'token',
+        scope:'https://www.googleapis.com/auth/youtube.upload',
+        include_granted_scopes:'true',
+        state:s
+      });
+      if(forceConsent) params.set('prompt','consent');
       show('Google wird geöffnet…');
-      return true; // native anchor navigation continues after this handler
+      // Direct navigation from the user click. No popup and no async operation.
+      window.location.href='https://accounts.google.com/o/oauth2/v2/auth?'+params.toString();
+      return false;
     }catch(err){
       show(err.message||String(err),'#ff8ebd');
       return false;
     }
-  };
+  }
+  window.grandrpPrepareYouTubeAuth=function(forceConsent){ return startAuth(!!forceConsent); };
   window.grandrpDisconnectYouTube=function(){
-    sessionStorage.removeItem(TOKEN_KEY);sessionStorage.removeItem(RESULT_KEY);sessionStorage.removeItem(STATE_KEY);
+    localStorage.removeItem(TOKEN_KEY);sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(STATE_KEY);sessionStorage.removeItem(STATE_KEY);
+    localStorage.removeItem(RESULT_KEY);sessionStorage.removeItem(RESULT_KEY);
     const status=document.getElementById('ytStatus'); if(status){status.textContent='● Nicht verbunden';status.style.color='#7f7488';}
     show('YouTube-Verbindung entfernt.');
   };
   window.addEventListener('DOMContentLoaded',function(){
     const input=document.getElementById('clientId');
-    if(input){input.value=localStorage.getItem(CLIENT_KEY)||''; input.addEventListener('input',()=>{localStorage.setItem(CLIENT_KEY,input.value.trim());});}
-    const uri=document.getElementById('ytRedirectUriText'); if(uri) uri.textContent=baseUrl();
-    const connect=document.getElementById('connectYoutube'); const reauth=document.getElementById('reauthorizeYoutube');
-    try{
-      const url=buildUrl(false); if(connect) connect.href=url;
-      const url2=buildUrl(true); if(reauth) reauth.href=url2;
-      // Rebuild the main URL immediately before navigation so the state is always fresh.
-      if(connect) connect.addEventListener('mouseenter',()=>{try{connect.href=buildUrl(false);}catch{}});
-      if(reauth) reauth.addEventListener('mouseenter',()=>{try{reauth.href=buildUrl(true);}catch{}});
-    }catch{}
-    const r=sessionStorage.getItem(RESULT_KEY);
-    const token=sessionStorage.getItem(TOKEN_KEY);
+    if(input){input.value=localStorage.getItem(CLIENT_KEY)||''; input.addEventListener('input',()=>localStorage.setItem(CLIENT_KEY,input.value.trim()));}
+    const uri=document.getElementById('ytRedirectUriText'); if(uri) uri.textContent=callbackUrl();
     const status=document.getElementById('ytStatus');
-    if(token && status){status.textContent='● Verbunden';status.style.color='#69e1af';}
-    if(r){try{const data=JSON.parse(r);show(data.message||'');}catch{}}
+    const token=localStorage.getItem(TOKEN_KEY)||sessionStorage.getItem(TOKEN_KEY)||'';
+    if(token){sessionStorage.setItem(TOKEN_KEY,token); if(status){status.textContent='● Verbunden';status.style.color='#69e1af';}}
+    const resultRaw=localStorage.getItem(RESULT_KEY)||sessionStorage.getItem(RESULT_KEY)||'';
+    if(resultRaw){try{const data=JSON.parse(resultRaw);show(data.message||'',data.ok?'#69e1af':'#ff8ebd'); if(data.ok)localStorage.removeItem(RESULT_KEY); sessionStorage.removeItem(RESULT_KEY);}catch{}}
+    const connect=document.getElementById('connectYoutube'); const reauth=document.getElementById('reauthorizeYoutube');
+    if(connect) connect.href='#'; if(reauth) reauth.href='#';
   });
 })();
 </script>
-<script src="app.js?v=36"></script>
+<script src="app.js?v=37"></script>
 </body>
 </html>
