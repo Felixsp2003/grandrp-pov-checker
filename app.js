@@ -486,8 +486,10 @@
     $$('.jump').forEach(btn=>{
       const field=btn.dataset.field;
       let show=!result?.[field];
-      if(field==='server') show=true;
-      if(field==='sc' && result?.offline) show=true;
+      // Always provide manual correction for SC and Discord ID. These fields
+      // are commonly misread by OCR and must be manually selectable even
+      // when an automatic value already exists. Server is also always selectable.
+      if(field==='sc' || field==='discordId' || field==='server') show=true;
       btn.classList.toggle('hidden',!show);
     });
     const warning=$('#ocrWarning');
@@ -527,6 +529,16 @@
   function setupEditor(){
     $('#closeModal').onclick=closeEditor;$('#cancelBtn').onclick=closeEditor;$('#entryForm').addEventListener('submit',saveEditor);['#targetId','#date'].forEach(s=>$(s).addEventListener('input',renderTitlePreview));$('#reason').addEventListener('change',renderTitlePreview);$('#targetId').addEventListener('input',()=>{$('#targetId').value=clampId($('#targetId').value)});
     $$('.chip').forEach(c=>c.onclick=()=>{const v=c.dataset.value;c.classList.toggle('active');if(c.classList.contains('active'))state.selectedTypes.add(v);else state.selectedTypes.delete(v);});
+    // Manual picker buttons: use the user click directly to open the same-origin
+    // picker page. This was missing in earlier builds, so SC/Discord-ID buttons
+    // looked clickable but did nothing.
+    $$('.jump').forEach(btn=>btn.addEventListener('click',async()=>{
+      const ctx=state.editing;
+      if(!ctx){toast('Kein POV zur manuellen Prüfung geöffnet.');return;}
+      const entry=ctx.item||ctx.entry;
+      if(!entry){toast('POV-Eintrag nicht verfügbar.');return;}
+      await openManualPicker(entry,btn.dataset.field);
+    }));
   }
 
   async function processQueue(){
