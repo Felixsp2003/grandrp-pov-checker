@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V29
+/* Grand RP DC Checker V31
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,9 +10,9 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V29';
-  const META_KEY='grandrp_pov_meta_v29';
-  const DB_NAME='grandrp_pov_db_v29';
+  const BUILD='V31';
+  const META_KEY='grandrp_pov_meta_v31';
+  const DB_NAME='grandrp_pov_db_v31';
   const STORE='videos';
 
   const ALLOWED_REASONS=[
@@ -501,61 +501,92 @@
       finally{item.processing=false;}
     }
   }
-  async function waitForGoogleOAuth(timeoutMs=12000){
-    const started=Date.now();
-    while(!(window.google?.accounts?.oauth2)){
-      if(Date.now()-started>=timeoutMs) throw new Error('Google OAuth konnte nicht geladen werden. Prüfe Internetverbindung und ob Brave/Adblock Google-Skripte blockiert.');
-      await new Promise(r=>setTimeout(r,100));
-    }
-    return window.google.accounts.oauth2;
+  function getClientIdFromField(){
+    const entered=String(document.querySelector('#clientId')?.value||'').trim();
+    if(entered){ state.clientId=entered; localStorage.setItem('yt_client_id',entered); }
+    return String(state.clientId||'').trim();
   }
-
-  async function initYoutube(){
-    const help=$('#ytConnectHelp');
-    if(help) help.textContent='';
-    const btn=$('#connectYoutube');
-    if(btn){btn.disabled=true;btn.textContent='Google wird geöffnet…';}
-    try{
-      const entered=String($('#clientId')?.value||'').trim();
-      if(entered){ state.clientId=entered; localStorage.setItem('yt_client_id',entered); }
-      const clientId=String(state.clientId||'').trim();
-      if(!clientId) throw new Error('Bitte zuerst die Google OAuth Client-ID in Einstellungen eintragen.');
-      if(!/^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(clientId)) throw new Error('Die Google OAuth Client-ID sieht ungültig aus.');
-
-      const oauth=await waitForGoogleOAuth();
-      let resolveAuth, rejectAuth;
-      const authPromise=new Promise((resolve,reject)=>{resolveAuth=resolve;rejectAuth=reject;});
-      state.tokenClient=oauth.initTokenClient({
-        client_id:clientId,
-        scope:'https://www.googleapis.com/auth/youtube.upload',
-        include_granted_scopes:true,
-        callback:(resp)=>{
-          if(resp?.error){ rejectAuth(new Error('YouTube OAuth: '+resp.error)); return; }
-          if(!resp?.access_token){ rejectAuth(new Error('Google hat kein Zugriffstoken zurückgegeben.')); return; }
-          state.accessToken=resp.access_token;
-          sessionStorage.setItem('yt_access_token',resp.access_token);
-          updateYtStatus(true);
-          if(help) help.textContent='YouTube ist verbunden.';
-          toast('YouTube verbunden.');
-          resolveAuth(resp);
+  function validGoogleClientId(clientId){
+    return /^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(String(clientId||'').trim());
+  }
+  function setYoutubeButton(loading=false){
+    const btn=document.querySelector('#connectYoutube');
+    if(!btn)return;
+    btn.disabled=!!loading;
+    btn.textContent=loading?'Google wird geöffnet…':(state.accessToken?'YouTube verbunden':'Mit YouTube verbinden');
+  }
+  function buildGoogleTokenClient(){
+    const clientId=getClientIdFromField();
+    if(!clientId) throw new Error('Bitte zuerst die Google OAuth Client-ID in Einstellungen eintragen.');
+    if(!validGoogleClientId(clientId)) throw new Error('Die Google OAuth Client-ID sieht ungültig aus.');
+    const oauth=window.google?.accounts?.oauth2;
+    if(!oauth) throw new Error('Google OAuth wurde nicht geladen. Prüfe Internetverbindung, Brave/Adblocker und ob accounts.google.com erlaubt ist.');
+    const tokenClient=oauth.initTokenClient({
+      client_id:clientId,
+      scope:'https://www.googleapis.com/auth/youtube.upload',
+      include_granted_scopes:true,
+      callback:(resp)=>{
+        const help=document.querySelector('#ytConnectHelp');
+        if(resp?.error){
+          state.accessToken=''; sessionStorage.removeItem('yt_access_token'); updateYtStatus();
+          const msg=`YouTube OAuth-Fehler: ${resp.error}${resp.error_description?` – ${resp.error_description}`:''}`;
+          if(help)help.textContent=msg; toast(msg); setYoutubeButton(false); return;
         }
-      });
-      // Must be called directly as part of the user click to open Google's popup.
+        if(!resp?.access_token){
+          state.accessToken=''; sessionStorage.removeItem('yt_access_token'); updateYtStatus();
+          const msg='Google hat kein Zugriffstoken zurückgegeben.';
+          if(help)help.textContent=msg; toast(msg); setYoutubeButton(false); return;
+        }
+        state.accessToken=resp.access_token;
+        sessionStorage.setItem('yt_access_token',resp.access_token);
+        updateYtStatus();
+        if(help)help.textContent='YouTube ist verbunden.';
+        setYoutubeButton(false); toast('YouTube verbunden.');
+      }
+    });
+    tokenClient.__clientId=clientId;
+    state.tokenClient=tokenClient;
+    return tokenClient;
+  }
+  function prepareGoogleOAuth(){
+    try{
+      if(window.google?.accounts?.oauth2){
+        if(getClientIdFromField()) buildGoogleTokenClient();
+        return;
+      }
+      let attempts=0;
+      const timer=setInterval(()=>{
+        attempts++;
+        try{
+          if(window.google?.accounts?.oauth2){
+            if(getClientIdFromField()) buildGoogleTokenClient();
+            clearInterval(timer);
+          }else if(attempts>=120){clearInterval(timer);}
+        }catch{ if(attempts>=120)clearInterval(timer); }
+      },100);
+    }catch{}
+  }
+  function initYoutube(){
+    const help=document.querySelector('#ytConnectHelp');
+    if(help)help.textContent='';
+    const clientId=getClientIdFromField();
+    if(!clientId){const msg='Bitte zuerst die Google OAuth Client-ID in Einstellungen eintragen.';if(help)help.textContent=msg;toast(msg);return false;}
+    if(!validGoogleClientId(clientId)){const msg='Die Google OAuth Client-ID sieht ungültig aus.';if(help)help.textContent=msg;toast(msg);return false;}
+    if(!window.google?.accounts?.oauth2){const msg='Google OAuth wurde nicht geladen. Prüfe Internetverbindung und Brave/Adblocker.';if(help)help.textContent=msg;toast(msg);return false;}
+    try{
+      if(!state.tokenClient||state.tokenClient.__clientId!==clientId)buildGoogleTokenClient();
+      setYoutubeButton(true);
+      // IMPORTANT: this call must stay in the synchronous user-gesture stack.
       state.tokenClient.requestAccessToken({prompt:'consent'});
-      await authPromise;
       return true;
     }catch(err){
+      setYoutubeButton(false);
       const msg=err?.message||String(err);
-      if(help) help.textContent=msg;
-      toast(msg);
-      throw err;
-    }finally{
-      if(btn){btn.disabled=false;btn.textContent=state.accessToken?'YouTube verbunden':'Mit YouTube verbinden';}
+      if(help)help.textContent=msg; toast(msg); return false;
     }
   }
-
   window.connectYouTubeNow=initYoutube;
-  function updateYtStatus(){const connected=!!state.accessToken;$('#ytStatus').textContent=connected?'● Verbunden':'● Nicht verbunden';$('#ytStatus').style.color=connected?'#69e1af':'#7f7488';}
+
   async function uploadYoutube(file,title,token,onProgress){
     if(!file||!token)throw new Error('YouTube nicht verbunden.');
     const safeTitle=String(title||file.name||'Grand RP POV').replace(/\.[^.]+$/,'').slice(0,100);
@@ -574,15 +605,17 @@
     if(!r.ok)throw new Error((await r.text()).slice(0,500));
   }
   function setupSettings(){
-    state.settings.frames=Number(localStorage.getItem('v29_frames')||24);state.settings.window=Number(localStorage.getItem('v29_window')||4.5);state.settings.step=Number(localStorage.getItem('v29_step')||.5);
+    state.settings.frames=Number(localStorage.getItem('v31_frames')||24);state.settings.window=Number(localStorage.getItem('v31_window')||4.5);state.settings.step=Number(localStorage.getItem('v31_step')||.5);
     $('#frameCount').value=state.settings.frames;$('#refineWindow').value=state.settings.window;$('#refineStep').value=state.settings.step;
-    $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v29_frames',state.settings.frames)};
-    $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v29_window',state.settings.window)};
-    $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v29_step',state.settings.step)};
+    $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v31_frames',state.settings.frames)};
+    $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v31_window',state.settings.window)};
+    $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v31_step',state.settings.step)};
     $('#clientId').addEventListener('input',e=>{const v=String(e.target.value||'').trim();state.clientId=v;localStorage.setItem('yt_client_id',v);});
     $('#clientId').addEventListener('change',e=>{const v=String(e.target.value||'').trim();state.clientId=v;localStorage.setItem('yt_client_id',v);});
-    $('#connectYoutube').onclick=()=>initYoutube().catch(()=>{});
-    $('#disconnectYoutube').onclick=()=>{state.accessToken='';sessionStorage.removeItem('yt_access_token');updateYtStatus();};
+    $('#connectYoutube').onclick=(ev)=>{ev.preventDefault();ev.stopPropagation();initYoutube();};
+    $('#disconnectYoutube').onclick=()=>{state.accessToken='';sessionStorage.removeItem('yt_access_token');updateYtStatus();const h=$('#ytConnectHelp');if(h)h.textContent='YouTube-Verbindung entfernt.';};
+    if($('#reloadBtn'))$('#reloadBtn').onclick=()=>location.reload();
+    setTimeout(prepareGoogleOAuth,0);
     $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen?'))return;state.entries=[];state.queue=[];saveMeta();await clearDB();renderArchive();renderCases();renderCsv();renderQueue();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }

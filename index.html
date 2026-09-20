@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=30">
+<link rel="stylesheet" href="styles.css?v=31">
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://accounts.google.com/gsi/client"></script>
 </head>
@@ -86,7 +86,7 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V29</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V31</span></div>
           <p class="hint">Die Software nutzt einen Schnellscan über die letzten 40 Sekunden und startet danach nur bei einem Treffer einen dichten Präzisionsscan. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
@@ -97,7 +97,7 @@
           <div class="card-title">YouTube-Verbindung <span id="ytStatus" class="connection">● Nicht verbunden</span></div>
           <p class="hint">Die POV wird zuerst vollständig zu YouTube hochgeladen (nicht gelistet). Erst danach startet die OCR. Nach dem Prüfen wird der YouTube-Titel auf den finalen Dateinamen aktualisiert.</p>
           <label>Google OAuth Client ID<input id="clientId" placeholder="...apps.googleusercontent.com"></label>
-          <div class="settings-actions"><button type="button" class="pink" id="connectYoutube">Mit YouTube verbinden</button><button type="button" class="ghost" id="disconnectYoutube">Verbindung entfernen</button></div><div id="ytConnectHelp" class="hint" style="margin-top:10px"></div>
+          <div class="settings-actions"><button type="button" class="pink" id="connectYoutube" onclick="window.connectYouTubeNow && window.connectYouTubeNow()">Mit YouTube verbinden</button><button type="button" class="ghost" id="disconnectYoutube">Verbindung entfernen</button></div><div id="ytConnectHelp" class="hint" style="margin-top:10px"></div>
         </div>
         <div class="settings-card">
           <div class="card-title">Lokale Daten</div>
@@ -133,6 +133,6 @@
 
 <div id="toast" class="toast"></div>
 <video id="videoProbe" class="hidden-video" muted playsinline preload="metadata"></video>
-<script src="app.js?v=30"></script>
+<script src="app.js?v=31"></script>
 </body>
 </html>
