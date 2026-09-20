@@ -9,7 +9,7 @@
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
-<body data-build-version="V13">
+<body data-build-version="V15">
 <div class="app-shell">
 <aside class="sidebar">
   <div class="brand"><span class="brand-icon">⊘</span><span>Archiv</span></div>
@@ -17,16 +17,18 @@
     <button class="nav-item active" data-view="archive"><span class="nav-icon">▦</span><span>Archiv</span></button>
     <button class="nav-item" data-view="cases"><span class="nav-icon">◉</span><span>Verdachtsfälle</span></button>
     <button class="nav-item" data-view="upload"><span class="nav-icon">＋</span><span>POVs hochladen</span></button>
+    <button class="nav-item" data-view="csv"><span class="nav-icon">⇩</span><span>CSV erstellen</span></button>
     <button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span><span>Einstellungen</span></button>
   </nav>
   <div class="sidebar-foot"><span class="status-dot"></span><div><strong>DC Checker</strong><small>POV · OCR · YouTube</small></div></div>
 </aside>
 <main class="main">
 <header class="topbar">
-  <div class="topbar-title"><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans und PC-Checks</p></div>
+  <div class="topbar-title"><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
   <div class="topbar-actions">
     <div class="search top-search"><span>⌕</span><input id="search" placeholder="ID, SC-ID oder Grund suchen"><kbd>/</kbd></div>
     <button class="ghost-btn" id="reloadBtn">Neu laden</button>
+    <button class="ghost-btn" id="exportCsvBtn">CSV erstellen</button>
     <button class="pink-btn" id="newUploadBtn">Neuer Eintrag</button>
   </div>
 </header>
@@ -72,6 +74,18 @@
   </div>
 </section>
 
+<section id="view-csv" class="view">
+  <div class="panel-head"><div><h2>CSV erstellen</h2><p>Die Tabelle wird direkt aus den vollständig gespeicherten Einträgen erzeugt. Leere Informationen bleiben leer.</p></div><div class="topbar-actions"><button class="ghost-btn" id="refreshCsvBtn">Vorschau aktualisieren</button><button class="ghost-btn" id="copyCsvBtn">CSV kopieren</button><button class="pink-btn" id="downloadCsvBtn">CSV herunterladen</button></div></div>
+  <div class="csv-summary" id="csvSummary"></div>
+  <div class="csv-table-wrap">
+    <table class="csv-table">
+      <thead><tr><th>Proof</th><th>Datum</th><th>ID</th><th>SOC</th><th>RID</th><th>Discord ID</th><th>Familie</th><th>Grund</th></tr></thead>
+      <tbody id="csvPreviewBody"></tbody>
+    </table>
+  </div>
+  <div class="empty hidden" id="csvEmpty"><div class="empty-icon">⇩</div><h2>Noch keine CSV-Daten</h2><p>Speichere zuerst vollständig verarbeitete POV-Fälle im Archiv.</p><button class="pink-btn" id="csvUploadBtn">POVs hochladen</button></div>
+</section>
+
 <section id="view-settings" class="view">
   <div class="settings-card">
     <div class="card-title">YouTube-Verbindung <span id="ytStatus" class="connection"><span class="status-dot muted-dot"></span>Nicht verbunden</span></div>
@@ -98,6 +112,8 @@
 <label>Ziel-ID<input id="targetId" placeholder="z. B. 173291"></label>
 <label>Grund<input id="reason" placeholder="z. B. Cheating"></label>
 <label>SC<input id="sc" placeholder="lange Buchstabenfolge"></label>
+<label>Discord ID<input id="discordId" placeholder="optional"></label>
+<label>Proof<input id="proof" placeholder="optional: YouTube-Link / Beweis-Link"></label>
 <label>Server<input id="server" placeholder="z. B. 3 oder 4"></label>
 <label>Datum<input id="date" type="date"></label>
 <label class="full">Dateiname<input id="titlePreview" readonly></label>
@@ -111,5 +127,5 @@
 <div class="modal-actions"><button type="button" class="ghost-btn" id="cancelBtn">Abbrechen</button><button type="submit" class="pink-btn" id="saveBtn">Speichern & YouTube hochladen</button></div>
 </form></div></div>
 <div id="toast" class="toast"></div><video id="videoProbe" class="hidden-video" muted playsinline preload="metadata"></video><canvas id="ocrCanvas" class="hidden-video"></canvas>
-<script src="app.js?v=13"></script>
+<script src="app.js?v=15"></script>
 </body></html>

@@ -1,7 +1,7 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const META_KEY='grandrp_pov_meta_v13', DB_NAME='grandrp_pov_db_v1', STORE='videos';
 const state={entries:[],queue:[],filter:'all',editing:null,selectedTypes:[],accessToken:sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',processing:false};
-const views={archive:['Archiv','POV-Fälle, Bans und PC-Checks'],cases:['Verdachtsfälle','Nicht eindeutig erkannte Fälle zur manuellen Prüfung'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],settings:['Einstellungen','YouTube und OCR']};
+const views={archive:['Archiv','POV-Fälle, Bans und PC-Checks'],cases:['Verdachtsfälle','Nicht eindeutig erkannte Fälle zur manuellen Prüfung'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','YouTube und OCR']};
 function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
 function today(){return new Date().toISOString().slice(0,10)}
 function fmtDate(d){if(!d)return '';const m=d.match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}.${m[2]}.${m[1]}`:d}
@@ -12,8 +12,8 @@ async function getVideo(id){const db=await openDB();return new Promise((res,rej)
 async function delVideo(id){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error)})}
 async function clearDB(){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error)})}
 async function hydrate(){try{state.entries=JSON.parse(localStorage.getItem(META_KEY)||'[]');for(const e of state.entries){try{const f=await getVideo(e.id);if(f)e.videoUrl=URL.createObjectURL(f)}catch{}}}catch{state.entries=[]}}
-function showView(v){$$('.view').forEach(x=>x.classList.remove('active'));$('#view-'+v).classList.add('active');$$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));$('#pageTitle').textContent=views[v][0];$('#pageSubtitle').textContent=views[v][1];if(v==='archive')renderArchive();if(v==='cases')renderCases()}
-$$('.nav-item').forEach(b=>b.onclick=()=>showView(b.dataset.view));$('#newUploadBtn').onclick=()=>showView('upload');$('#emptyUploadBtn').onclick=()=>showView('upload');$('#reloadBtn').onclick=()=>renderArchive();$('#casesRefresh').onclick=()=>renderCases();$('#search').oninput=renderArchive;
+function showView(v){$$('.view').forEach(x=>x.classList.remove('active'));$('#view-'+v).classList.add('active');$$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));$('#pageTitle').textContent=views[v][0];$('#pageSubtitle').textContent=views[v][1];if(v==='archive')renderArchive();if(v==='cases')renderCases();if(v==='csv')renderCsvPreview()}
+$$('.nav-item').forEach(b=>b.onclick=()=>showView(b.dataset.view));$('#newUploadBtn').onclick=()=>showView('upload');$('#emptyUploadBtn').onclick=()=>showView('upload');$('#reloadBtn').onclick=()=>renderArchive();$('#casesRefresh').onclick=()=>renderCases();$('#search').oninput=renderArchive;$('#exportCsvBtn').onclick=()=>showView('csv');$('#refreshCsvBtn').onclick=renderCsvPreview;$('#downloadCsvBtn').onclick=downloadCsv;$('#copyCsvBtn').onclick=copyCsv;$('#csvUploadBtn').onclick=()=>showView('upload');
 $$('.filter').forEach(b=>b.onclick=()=>{state.filter=b.dataset.filter;$$('.filter').forEach(x=>x.classList.toggle('active',x===b));renderArchive()});
 const dz=$('#dropzone'),input=$('#fileInput');$('#chooseBtn').onclick=e=>{e.stopPropagation();input.click()};dz.onclick=e=>{if(e.target.closest('button'))return;input.click()};input.onchange=e=>{addFiles([...e.target.files]);input.value=''};
 ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('drag')}));['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag')}));dz.addEventListener('drop',e=>addFiles([...e.dataTransfer.files].filter(f=>f.type.startsWith('video/')||/\.(mp4|mov|webm|mkv)$/i.test(f.name))));
@@ -298,21 +298,28 @@ async function analyzeVideo(video,duration,onProgress){
   const frames=Math.max(24,Math.min(60,Number(localStorage.getItem('frame_count_v13')||30)));
   const startT=Math.max(0,duration-40),span=Math.max(.1,duration-startT),worker=await Tesseract.createWorker('eng',1);
   const idRecords=[],reasonRecords=[],broadFrames=[],serverVotes=[],dateVotes=[];
+  const fieldTimes={id:0,reason:0,sc:0,server:0,date:0};
   try{
     for(let i=0;i<frames;i++){
       const t=startT+span*((i+.10)/frames);await seek(video,t);
       const left=crop(video,0,.045,.64,.285,3.5), a=await ocr(worker,left,{psm:6}), b=await ocr(worker,preprocess(left,'dark'),{psm:11});
       const combined=[a.text||'',b.text||''].join('\n'),parsed=parseSingleFrame(combined);
       idRecords.push(parsed.id);reasonRecords.push(parsed.reason);broadFrames.push({i,t,parsed,text:combined,details:[a,b]});
-      if(i%3===0){serverVotes.push(...await analyzeServerAtCurrentFrame(video,worker));const dc=crop(video,.86,.865,.14,.135,6);const d1=await ocr(worker,dc,{psm:7,whitelist:'0123456789./-'}),d2=await ocr(worker,preprocess(dc,'dark'),{psm:7,whitelist:'0123456789./-'});const dt=extractDate((d1.text||'')+'\n'+(d2.text||''));if(validDate(dt))dateVotes.push(dt);}
+      if(parsed.id && !fieldTimes.id) fieldTimes.id=t;
+      if(parsed.reason && !fieldTimes.reason) fieldTimes.reason=t;
+      if(i%3===0){
+        const svs=await analyzeServerAtCurrentFrame(video,worker); serverVotes.push(...svs); if(svs.length&&!fieldTimes.server)fieldTimes.server=t;
+        const dc=crop(video,.86,.865,.14,.135,6);const d1=await ocr(worker,dc,{psm:7,whitelist:'0123456789./-'}),d2=await ocr(worker,preprocess(dc,'dark'),{psm:7,whitelist:'0123456789./-'});const dt=extractDate((d1.text||'')+'\n'+(d2.text||''));if(validDate(dt)){dateVotes.push(dt);if(!fieldTimes.date)fieldTimes.date=t;}
+      }
       onProgress(10+((i+1)/frames)*40,`Schnellscan · ${i+1}/${frames}`);
     }
     const id=bestVote(idRecords,normalizeId,3);
-    // Reason is selected ONLY from OCR immediately after a visible/recognized "Grund:" marker.
     const reason=bestVote(reasonRecords.filter(Boolean),x=>x,1);
     const anchors=broadFrames.filter(x=>x.parsed.id===id && x.parsed.reason===reason);
     const nearIds=broadFrames.filter(x=>x.parsed.id===id);
     const sourceFrames=(anchors.length?anchors:nearIds).slice(0,8);
+    const anchorTime=sourceFrames[0]?.t||fieldTimes.id||fieldTimes.reason||Math.max(0,duration-20);
+    if(!fieldTimes.id)fieldTimes.id=anchorTime;if(!fieldTimes.reason)fieldTimes.reason=anchorTime;if(!fieldTimes.server)fieldTimes.server=anchorTime;if(!fieldTimes.date)fieldTimes.date=anchorTime;if(!fieldTimes.sc)fieldTimes.sc=anchorTime;
     const focusIdx=new Set();for(const a of sourceFrames){for(let d=-2;d<=2;d++){const idx=a.i+d;if(idx>=0&&idx<broadFrames.length)focusIdx.add(idx)}}
     const focus=[...focusIdx].sort((a,b)=>a-b).map(i=>broadFrames[i]);
     const scCandidates=[]; let reasonRefined=[];
@@ -322,21 +329,22 @@ async function analyzeVideo(video,duration,onProgress){
       const normal=await ocr(worker,left,{psm:6}), sparse=await ocr(worker,preprocess(left,'dark'),{psm:11});
       const combined=[normal.text||'',sparse.text||''].join('\n');
       const refined=parseSingleFrame(combined);
-      if(refined.reason)reasonRefined.push(refined.reason);
+      if(refined.reason){reasonRefined.push(refined.reason);if(!fieldTimes.reason)fieldTimes.reason=fr.t;}
       for(const rc of extractReasonFromDetailed([normal,sparse],left)){
         const rr1=await ocr(worker,rc,{psm:7}), rr2=await ocr(worker,preprocess(rc,'light'),{psm:7});
-        const rr=classifyAllowedReason(`${rr1.text||''}\n${rr2.text||''}`);
-        if(rr.reason)reasonRefined.push(rr.reason);
+        const rr=classifyAllowedReason(`${rr1.text||''}\n${rr2.text||''}`); if(rr.reason)reasonRefined.push(rr.reason);
       }
-      const blockMatch=refined.id===id && refined.reason===reason;
+      const blockMatch=refined.id===id && sameReason(refined.reason,reason);
       const nearAnchor=sourceFrames.some(a=>Math.abs(a.i-fr.i)<=2);
       if(blockMatch||nearAnchor){
+        const foundBefore=scCandidates.length;
         scCandidates.push(...extractScCandidatesFromText(combined));
         const markerCanvases=extractScFromDetailed([normal,sparse],left);
         for(const mc of markerCanvases){
           const q1=await ocr(worker,mc,{psm:7,whitelist:'0123456789abcdefABCDEF'}),q2=await ocr(worker,preprocess(mc,'dark'),{psm:7,whitelist:'0123456789abcdefABCDEF'});
           scCandidates.push(...extractSc40FromRegion(q1.text||''),...extractSc40FromRegion(q2.text||''));
         }
+        if(scCandidates.length>foundBefore&&!fieldTimes.sc)fieldTimes.sc=fr.t;
       }
       onProgress(50+((k+1)/Math.max(1,focus.length))*43,`Präzisionsscan · ${k+1}/${focus.length}`);
     }
@@ -347,26 +355,90 @@ async function analyzeVideo(video,duration,onProgress){
     const date=bestVote(dateVotes,x=>x,1),types=inferTypes(refinedReason||reason);
     const idConf=voteConfidence(idRecords,normalizeId,id),reasonConf=voteConfidence(reasonRecords.filter(Boolean),x=>x,reason),serverConf=sv?sv[1]/Math.max(1,serverVotes.length):0,dateConf=voteConfidence(dateVotes,x=>x,date);
     const complete=!!(id&&ALLOWED_REASONS.includes(refinedReason||reason)&&scChoice.value&&server&&date&&idConf>=.55&&reasonConf>=.50&&scChoice.count>=2&&serverConf>=.50&&dateConf>=.50);
-    return{id,reason:refinedReason||reason,sc:scChoice.value,server,date,types,complete,found:complete,confidence:{id:idConf,reason:reasonConf,sc:scChoice.confidence,server:serverConf,date:dateConf},debug:{anchors:anchors.length,focusFrames:focus.length,scCandidates:scCandidates.length,serverVotes:serverVotes.length}};
+    return{id,reason:refinedReason||reason,sc:scChoice.value,server,date,types,complete,found:complete,reviewTimes:fieldTimes,confidence:{id:idConf,reason:reasonConf,sc:scChoice.confidence,server:serverConf,date:dateConf},debug:{anchors:anchors.length,focusFrames:focus.length,scCandidates:scCandidates.length,serverVotes:serverVotes.length}};
   }finally{await worker.terminate()}
 }
 function parseSingleFrame(texts){
   const src=normalizeOcr(texts||'');const id=findTargetId(src);const r=classifyAllowedReason(src);return{id,reason:r.reason,reasonScore:r.score};
 }
 
-function openEditor(item){state.editing=item;state.selectedTypes=[...new Set([...(item.types||[]), ...inferTypes((item.result||{}).reason||item.reason||'')])];const p=item.result||{};$('#modalFile').textContent=item.file.name;$('#targetId').value=p.id||item.id||'';$('#reason').value=p.reason||item.reason||'';$('#sc').value=p.sc||item.sc||'';$('#server').value=p.server||item.server||'';$('#date').value=p.date||item.date||today();$('#perma').checked=!!item.perma;$('#notBanned').checked=!!item.notBanned;$$('#banTypes .chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.includes(c.dataset.value)));$('#ocrWarning').classList.toggle('hidden',!!p.complete);updateTitle();$('#editorModal').classList.remove('hidden')}
-function closeEditor(){state.editing=null;$('#editorModal').classList.add('hidden');renderQueue();renderCases()}
+function formatTimecode(sec){sec=Math.max(0,Math.floor(Number(sec)||0));const m=Math.floor(sec/60),s=String(sec%60).padStart(2,'0');return `${m}:${s}`}
+function renderReviewTools(item,p){
+  const box=$('#reviewTools'); if(!box)return;
+  const times=p.reviewTimes||item.reviewTimes||{};
+  const fields=[['id','Ziel-ID',p.id],['reason','Grund',p.reason],['sc','SC / RID',p.sc],['server','Server',p.server],['date','Datum',p.date]];
+  const missing=fields.filter(([key])=>!p[key]);
+  box.innerHTML='';
+  if(!missing.length){box.classList.add('hidden');return}
+  box.classList.remove('hidden');
+  const title=document.createElement('div');title.className='review-title';title.innerHTML='⚠ Fehlende Angaben – die POV wird im neuen Tab direkt an der ermittelten Stelle geöffnet';box.appendChild(title);
+  const row=document.createElement('div');row.className='review-buttons';
+  for(const [key,label,value] of fields){
+    const t=Number(times[key]||0); if(!t)continue;
+    const b=document.createElement('button');b.type='button';b.className='mini-btn review-btn';b.textContent=`${value?`Prüfen: ${label}`:`Fehlt: ${label}`} · ${formatTimecode(t)}`;
+    b.onclick=async()=>{const file=state.editing?.file;if(!file){toast('POV-Datei ist für diese Prüfung nicht verfügbar.');return}openPovAtTime(file,t,`${label} · ${formatTimecode(t)}`)};
+    row.appendChild(b);
+  }
+  if(row.children.length)box.appendChild(row);
+}
+function openPovAtTime(file,seconds,label='POV'){
+  const url=URL.createObjectURL(file),win=window.open('about:blank','_blank');
+  if(!win){URL.revokeObjectURL(url);toast('Pop-up wurde vom Browser blockiert. Bitte Pop-ups für die Website erlauben.');return}
+  const safeLabel=esc(label).replace(/`/g,'');
+  win.document.open();win.document.write(`<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${safeLabel}</title><style>body{margin:0;background:#08070b;color:#eee;font-family:Inter,Arial,sans-serif;display:flex;flex-direction:column;height:100vh}header{padding:12px 16px;border-bottom:1px solid #27202f;background:#100d15;font-size:14px}video{flex:1;width:100%;background:#000}small{color:#9d93a6}</style></head><body><header><strong>${safeLabel}</strong><br><small>Start bei ${formatTimecode(seconds)}</small></header><video id="v" controls autoplay muted playsinline></video><script>const v=document.getElementById('v');v.src=${JSON.stringify(url)};v.addEventListener('loadedmetadata',()=>{v.currentTime=${Math.max(0,Number(seconds)||0)};v.play().catch(()=>{})},{once:true});window.addEventListener('beforeunload',()=>{try{URL.revokeObjectURL(v.src)}catch(e){}});</script></body></html>`);win.document.close();
+}
+function openEditor(item){state.editing=item;state.selectedTypes=[...new Set([...(item.types||[]), ...inferTypes((item.result||{}).reason||item.reason||'')])];const p=item.result||{};$('#modalFile').textContent=item.file.name;$('#targetId').value=p.id||item.id||'';$('#reason').value=p.reason||item.reason||'';$('#sc').value=p.sc||item.sc||'';$('#discordId').value=p.discordId||item.discordId||'';$('#server').value=p.server||item.server||'';$('#date').value=p.date||item.date||today();$('#perma').checked=!!item.perma;$('#notBanned').checked=!!item.notBanned;$$('#banTypes .chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.includes(c.dataset.value)));$('#ocrWarning').classList.toggle('hidden',!!p.complete);renderReviewTools(item,p);updateTitle();$('#editorModal').classList.remove('hidden')}
+function closeEditor(){$('#reviewTools')?.classList.add('hidden');state.editing=null;$('#editorModal').classList.add('hidden');renderQueue();renderCases()}
 $('#closeModal').onclick=closeEditor;$('#cancelBtn').onclick=closeEditor;
 $$('#banTypes .chip').forEach(c=>c.onclick=()=>{c.classList.toggle('active');state.selectedTypes=$$('#banTypes .chip.active').map(x=>x.dataset.value);updateTitle()});
 ['#targetId','#reason','#date'].forEach(s=>$(s).oninput=updateTitle);function updateTitle(){const id=$('#targetId').value.trim()||'UNBEKANNT',r=$('#reason').value.trim()||'Unbekannt',d=$('#date').value||today();$('#titlePreview').value=`${id}, ${r}, ${fmtDate(d)}`}
 $('#perma').onchange=e=>{if(e.target.checked)$('#notBanned').checked=false};$('#notBanned').onchange=e=>{if(e.target.checked)$('#perma').checked=false};
-$('#entryForm').onsubmit=async e=>{e.preventDefault();const item=state.editing;if(!item)return;const entry={id:$('#targetId').value.trim(),reason:$('#reason').value.trim(),sc:$('#sc').value.trim(),server:$('#server').value.trim(),date:$('#date').value||today(),types:[...state.selectedTypes],perma:$('#perma').checked,notBanned:$('#notBanned').checked,fileName:`${$('#targetId').value.trim()||'UNBEKANNT'}, ${$('#reason').value.trim()||'Unbekannt'}, ${fmtDate($('#date').value||today())}${ext(item.file.name)}`,createdAt:new Date().toISOString(),youtubeId:'',status:'Gespeichert · YouTube nicht verbunden',videoUrl:''};if(!entry.id&&!entry.notBanned){toast('ID fehlt. Bitte ergänzen.');return}if(!entry.notBanned&&!entry.reason){toast('Grund fehlt. Bitte ergänzen.');return}$('#saveBtn').disabled=true;$('#saveBtn').textContent='Wird gespeichert …';try{await putVideo(entry.id+'_'+entry.createdAt,item.file);entry.videoKey=entry.id+'_'+entry.createdAt;entry.videoUrl=URL.createObjectURL(item.file);if(state.accessToken&&!entry.notBanned){$('#saveBtn').textContent='YouTube Upload läuft …';entry.youtubeId=await uploadToYouTube(item.file,entry);entry.status='YouTube · Nicht gelistet'}state.entries.unshift(entry);saveMeta();state.queue=state.queue.filter(x=>x.id!==item.id);closeEditor();renderArchive();toast(entry.youtubeId?'POV hochgeladen, nicht gelistet und archiviert.':'Eintrag gespeichert.');showView('archive')}catch(err){console.error(err);toast('Fehler: '+(err.message||err))}finally{$('#saveBtn').disabled=false;$('#saveBtn').textContent='Speichern & YouTube hochladen'}};
+$('#entryForm').onsubmit=async e=>{e.preventDefault();const item=state.editing;if(!item)return;const finalName=`${$('#targetId').value.trim()||'UNBEKANNT'}, ${$('#reason').value.trim()||'Unbekannt'}, ${fmtDate($('#date').value||today())}${ext(item.file.name)}`;const entry={id:$('#targetId').value.trim(),reason:$('#reason').value.trim(),sc:$('#sc').value.trim(),discordId:$('#discordId').value.trim(),server:$('#server').value.trim(),date:$('#date').value||today(),types:[...state.selectedTypes],perma:$('#perma').checked,notBanned:$('#notBanned').checked,reviewTimes:(item.result&&item.result.reviewTimes)||item.reviewTimes||{},fileName:finalName,createdAt:new Date().toISOString(),youtubeId:'',status:'Gespeichert · YouTube nicht verbunden',videoUrl:'',processedAt:new Date().toISOString()};if(!entry.id&&!entry.notBanned){toast('ID fehlt. Bitte ergänzen.');return}if(!entry.notBanned&&!entry.reason){toast('Grund fehlt. Bitte ergänzen.');return}$('#saveBtn').disabled=true;$('#saveBtn').textContent='Wird gespeichert …';try{await putVideo(entry.id+'_'+entry.createdAt,item.file);entry.videoKey=entry.id+'_'+entry.createdAt;entry.videoUrl=URL.createObjectURL(item.file);if(state.accessToken&&!entry.notBanned){$('#saveBtn').textContent='YouTube Upload läuft …';entry.youtubeId=await uploadToYouTube(item.file,entry);entry.status='YouTube · Nicht gelistet'}state.entries.unshift(entry);saveMeta();state.queue=state.queue.filter(x=>x.id!==item.id);closeEditor();renderArchive();renderCsvPreview();toast(entry.youtubeId?'POV hochgeladen, nicht gelistet und archiviert.':'Eintrag gespeichert.');showView('archive')}catch(err){console.error(err);toast('Fehler: '+(err.message||err))}finally{$('#saveBtn').disabled=false;$('#saveBtn').textContent='Speichern & YouTube hochladen'}};
 function ext(n){const m=n.match(/\.[^.]+$/);return m?m[0]:'.mp4'}
 async function uploadToYouTube(file,entry){const metadata={snippet:{title:entry.fileName.replace(/\.[^.]+$/,''),description:`Server: ${entry.server||'unbekannt'}\nSC: ${entry.sc||'unbekannt'}\nPerma-Bann: ${entry.perma?'Ja':'Nein'}\nBann-Typen: ${entry.types.join(', ')||'keiner'}`},status:{privacyStatus:'unlisted',selfDeclaredMadeForKids:false}};const init=await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',{method:'POST',headers:{Authorization:'Bearer '+state.accessToken,'Content-Type':'application/json; charset=UTF-8','X-Upload-Content-Length':String(file.size),'X-Upload-Content-Type':file.type||'application/octet-stream'},body:JSON.stringify(metadata)});if(!init.ok)throw new Error('YouTube: '+await init.text());const url=init.headers.get('Location');if(!url)throw new Error('Keine YouTube Upload-URL erhalten.');let start=0,chunk=8*1024*1024;while(start<file.size){const end=Math.min(start+chunk,file.size)-1;const res=await fetch(url,{method:'PUT',headers:{'Content-Length':String(end-start+1),'Content-Range':`bytes ${start}-${end}/${file.size}`},body:file.slice(start,end+1)});if(res.status===308){const range=res.headers.get('Range');start=range?parseInt(range.split('-')[1])+1:end+1}else if(res.ok){return(await res.json()).id}else throw new Error('YouTube Upload: '+await res.text())}}
+function getVisibleEntries(){
+  const q=($('#search')?.value||'').toLowerCase();
+  return state.entries.filter(x=>{
+    const t=x.types||[];let ok=state.filter==='all'||(state.filter==='ban'&&t.some(v=>['hardban','socban','cheater','negativ'].includes(v)))||(state.filter==='pccheck'&&t.includes('pccheck'))||(state.filter==='socban'&&t.includes('socban'))||(state.filter==='hardban'&&t.includes('hardban'))||(state.filter==='cheater'&&t.includes('cheater'))||(state.filter==='negativ'&&t.includes('negativ'))||(state.filter==='novideo'&&!x.youtubeId);
+    return ok&&JSON.stringify(x).toLowerCase().includes(q);
+  });
+}
+function csvCell(v){return `"${String(v??'').replace(/"/g,'""')}"`}
+function csvRows(){
+  const header=['Proof','Datum','ID','SOC','RID','Discord ID','Familie','Grund'];
+  const rows=state.entries.filter(x=>x&&((x.id||'').trim()||(x.reason||'').trim()||(x.sc||'').trim()||(x.discordId||'').trim()||(x.youtubeId||'').trim()));
+  const data=[header];
+  for(const x of rows){
+    const proof=x.youtubeId?`https://youtu.be/${x.youtubeId}`:'';
+    // Export mapping requested by the user: SOC stays empty, RID is the detected SC, Familie stays empty.
+    data.push([proof,fmtDate(x.date||''),x.id||'','',x.sc||'',x.discordId||'','',x.reason||'']);
+  }
+  return data;
+}
+function csvText(){return csvRows().map(row=>row.map(csvCell).join(';')).join('\r\n')}
+function renderCsvPreview(){
+  const body=$('#csvPreviewBody'),empty=$('#csvEmpty'),summary=$('#csvSummary'); if(!body)return;
+  const data=csvRows(); const rows=data.slice(1);
+  summary.innerHTML=`<span class="csv-pill">${rows.length} Einträge</span><span class="csv-pill">SOC bleibt leer</span><span class="csv-pill">RID = SC</span><span class="csv-pill">Familie bleibt leer</span>`;
+  body.innerHTML=rows.map(r=>`<tr>${r.map((v,i)=>`<td class="${i===0?'proof-cell':''}">${v?esc(v):'<span class="empty-cell">leer</span>'}</td>`).join('')}</tr>`).join('');
+  empty.classList.toggle('hidden',rows.length>0);
+}
+function downloadCsv(){
+  const data=csvRows(); if(data.length===1){toast('Keine gespeicherten Einträge für den CSV-Export vorhanden.');showView('csv');renderCsvPreview();return;}
+  const blob=new Blob(["\uFEFF"+data.map(row=>row.map(csvCell).join(';')).join('\r\n')],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`grandrp-pov-${today()}.csv`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  toast(`${data.length-1} Einträge als CSV erstellt.`);
+}
+async function copyCsv(){
+  const data=csvRows(); if(data.length===1){toast('Keine CSV-Daten vorhanden.');return;}
+  const text=data.map(row=>row.map(csvCell).join(';')).join('\r\n');
+  try{await navigator.clipboard.writeText(text);toast('CSV in die Zwischenablage kopiert.');}
+  catch{toast('Kopieren wurde vom Browser blockiert. Bitte CSV herunterladen.');}
+}
 function renderArchive(){const q=$('#search').value.toLowerCase();const entries=state.entries.filter(x=>{const t=x.types||[];let ok=state.filter==='all'||(state.filter==='ban'&&t.some(v=>['hardban','socban','cheater','negativ'].includes(v)))||(state.filter==='pccheck'&&t.includes('pccheck'))||(state.filter==='socban'&&t.includes('socban'))||(state.filter==='hardban'&&t.includes('hardban'))||(state.filter==='cheater'&&t.includes('cheater'))||(state.filter==='negativ'&&t.includes('negativ'))||(state.filter==='novideo'&&!x.youtubeId);return ok&&JSON.stringify(x).toLowerCase().includes(q)});
 $('#countAll').textContent=state.entries.length;$('#countBan').textContent=state.entries.filter(x=>(x.types||[]).some(t=>['hardban','socban','cheater','negativ'].includes(t))).length;$('#countPc').textContent=state.entries.filter(x=>(x.types||[]).includes('pccheck')).length;$('#countSoc').textContent=state.entries.filter(x=>(x.types||[]).includes('socban')).length;$('#countHard').textContent=state.entries.filter(x=>(x.types||[]).includes('hardban')).length;$('#countCheat').textContent=state.entries.filter(x=>(x.types||[]).includes('cheater')).length;$('#countNeg').textContent=state.entries.filter(x=>(x.types||[]).includes('negativ')).length;$('#countNoVideo').textContent=state.entries.filter(x=>!x.youtubeId).length;
 $('#archiveGrid').innerHTML=entries.map(x=>`<article class="entry"><div class="thumb">${x.videoUrl?`<video src="${esc(x.videoUrl)}" muted preload="metadata"></video>`:'<div class="thumb-placeholder">◉</div>'}<div class="badge-row">${(x.types||[]).map(t=>`<span class="type-badge">${esc(t)}</span>`).join('')}<span class="server-badge">Server ${esc(x.server||'?')}</span></div></div><div class="entry-body"><h3>${esc(x.id||'Nicht gebannt')} · ${esc(x.reason||'Kein Grund')}</h3><div class="meta"><div>ID<strong>${esc(x.id||'—')}</strong></div><div>Datum<strong>${esc(fmtDate(x.date))}</strong></div><div>SC<strong title="${esc(x.sc)}">${esc(x.sc||'—')}</strong></div><div>Perma<strong>${x.perma?'Ja':'Nein'}</strong></div></div><div class="entry-foot"><span>${esc(x.status)}</span><div class="entry-actions">${x.youtubeId?`<a class="mini-btn" target="_blank" href="https://youtu.be/${encodeURIComponent(x.youtubeId)}">YouTube</a>`:''}<button class="mini-btn edit-entry" data-id="${esc(x.createdAt)}">Bearbeiten</button><button class="mini-btn del-entry" data-id="${esc(x.createdAt)}">Löschen</button></div></div></div></article>`).join('');$('#emptyState').classList.toggle('hidden',entries.length>0);
-$$('.del-entry').forEach(b=>b.onclick=async()=>{const x=state.entries.find(e=>e.createdAt===b.dataset.id);if(x){state.entries=state.entries.filter(e=>e.createdAt!==b.dataset.id);saveMeta();if(x.videoKey)await delVideo(x.videoKey);if(x.videoUrl)URL.revokeObjectURL(x.videoUrl);renderArchive()}});$$('.edit-entry').forEach(b=>b.onclick=async()=>{const x=state.entries.find(e=>e.createdAt===b.dataset.id);if(x){const f=await getVideo(x.videoKey);if(!f){toast('POV-Datei wurde lokal nicht gefunden.');return}openEditor({...x,id:x.videoKey,file:f,result:{...x,complete:true},types:x.types})}})}
+$$('.del-entry').forEach(b=>b.onclick=async()=>{const x=state.entries.find(e=>e.createdAt===b.dataset.id);if(x){state.entries=state.entries.filter(e=>e.createdAt!==b.dataset.id);saveMeta();if(x.videoKey)await delVideo(x.videoKey);if(x.videoUrl)URL.revokeObjectURL(x.videoUrl);renderArchive()}});$$('.edit-entry').forEach(b=>b.onclick=async()=>{const x=state.entries.find(e=>e.createdAt===b.dataset.id);if(x){const f=await getVideo(x.videoKey);if(!f){toast('POV-Datei wurde lokal nicht gefunden.');return}openEditor({...x,id:x.videoKey,file:f,result:{...x,complete:true,reviewTimes:x.reviewTimes||{}},types:x.types})}})}
 function renderCases(){const bad=state.queue.filter(x=>x.result&&!x.result.complete);$('#casesList').innerHTML=bad.length?bad.map(x=>`<div class="case-row"><div><strong>${esc(x.file.name)}</strong><small>OCR: ID ${x.result.id?'✓':'×'} · Grund ${x.result.reason?'✓':'×'} · SC ${x.result.sc?'✓':'×'} · Server ${x.result.server?'✓':'×'} · Datum ${x.result.date?'✓':'×'}</small></div><button class="mini-btn edit-q" data-id="${x.id}">Daten ergänzen</button></div>`).join(''):'<div class="empty"><h2>Keine offenen Verdachtsfälle</h2><p>Alle bisher erkannten Fälle sind geprüft.</p></div>';$$('.edit-q').forEach(b=>b.onclick=()=>{const x=state.queue.find(x=>x.id===b.dataset.id);if(x)openEditor(x)})}
 function toast(t){const el=$('#toast');el.textContent=t;el.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove('show'),4000)}
 $('#clientId').value=state.clientId;$('#clientId').oninput=e=>{state.clientId=e.target.value.trim();localStorage.setItem('yt_client_id',state.clientId);initGoogle()};$('#frameCount').value=Math.max(24,Math.min(72,Number(localStorage.getItem('frame_count_v13')||30)));$('#frameCount').onchange=e=>localStorage.setItem('frame_count_v13',Math.max(24,Math.min(72,Number(e.target.value)||36)));
