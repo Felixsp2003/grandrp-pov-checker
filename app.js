@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V54';
+  const BUILD='V55';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -58,8 +58,11 @@
       .replace(/[^0-9A-F]/g,'').toLowerCase();
   }
   function normalizeIdToken(s){
-    const raw=String(s||'').toUpperCase().replace(/[^0-9A-Z]/g,'');
-    if(!raw || !/\d/.test(raw)) return '';
+    // Ziel-ID is numeric only. OCR frequently confuses 0/O/Q, 1/I/i/l/L, 5/S,
+    // 2/Z, 6/G, 8/B and 7/T. Normalize only inside a short ID token so ordinary
+    // words can never leak into the result.
+    const raw=String(s||'').replace(/[|!]/g,'I').toUpperCase().replace(/[^0-9A-Z]/g,'');
+    if(!raw || !/\d|[OQILSZGBT]/.test(raw)) return '';
     const mapped=raw.replace(/[A-Z]/g,ch=>({O:'0',Q:'0',I:'1',L:'1',S:'5',Z:'2',G:'6',B:'8',T:'7'}[ch]||''));
     const digits=mapped.replace(/\D/g,'');
     if(digits.length<1 || digits.length>6) return '';
@@ -107,9 +110,11 @@
 
     // Primary Grand-RP pattern: target ID is AFTER "hat" and BEFORE the ban-duration phrase.
     // We intentionally ignore the administrator ID that appears before "hat".
-    const beforeDuration=/\b(?:für|fur|fiir|fuer|for)\b\s*\d{1,3}\s*(?:tage|days|tag|day)\b/i;
-    const bracketAfterHat=/\bhat\b[\s\S]{0,220}?\[\s*([0-9A-Za-z]{1,10})\s*\][\s\S]{0,100}?\b(?:für|fur|fiir|fuer|for)\b/i;
-    const plainAfterHat=/\bhat\b([\s\S]{0,180})/i;
+    const beforeDuration=/\b(?:für|fur|fiir|fuer|for|fur)\b\s*\d{1,3}\s*(?:tage|days|tag|day)\b/i;
+    // OCR-tolerant variants for the literal "hat": hât/ha1/haI/ha7 and split spacing.
+    const hatWord='(?:h\\s*a\\s*[t7l1i]|ha[t7l1i])';
+    const bracketAfterHat=new RegExp('\\b'+hatWord+'\\b[\\s\\S]{0,220}?\\[\\s*([0-9A-Za-z]{1,10})\\s*\\][\\s\\S]{0,100}?\\b(?:für|fur|fiir|fuer|for)\\b','i');
+    const plainAfterHat=new RegExp('\\b'+hatWord+'\\b([\\s\\S]{0,220})','i');
     for(const j of joined){
       let m=j.match(bracketAfterHat);
       if(m){const id=normalizeIdToken(m[1]); if(/^\d{1,6}$/.test(id)) return id;}
@@ -135,6 +140,26 @@
       const nums=[...pre.matchAll(/\b([0-9]{1,6})\b/g)].map(x=>x[1]);
       if(nums.length){const id=normalizeIdToken(nums[nums.length-1]);if(/^\d{1,6}$/.test(id))return id;}
     }
+    // Numeric-only recovery: when full OCR mangles the surrounding words, inspect
+    // short windows containing common OCR variants of "hat" and the duration phrase.
+    for(const line of lines){
+      const low=compact(line);
+      if(!/(hat|ha1|hal|hai|ha7)/.test(low)) continue;
+      const nums=[...line.matchAll(/(?:\[\s*)?([0-9A-Za-z]{1,6})(?:\s*\])?/g)]
+        .map(m=>normalizeIdToken(m[1])).filter(x=>/^\d{1,6}$/.test(x));
+      if(nums.length){
+        // Prefer a number close to a duration marker; otherwise use the last short token.
+        const dur=line.match(/(?:für|fur|fiir|fuer|for|tage|days|tag|day)/i);
+        if(dur){
+          const before=line.slice(0,dur.index);
+          const near=[...before.matchAll(/(?:\[\s*)?([0-9A-Za-z]{1,6})(?:\s*\])?/g)]
+            .map(m=>normalizeIdToken(m[1])).filter(x=>/^\d{1,6}$/.test(x));
+          if(near.length)return near[near.length-1];
+        }
+        return nums[nums.length-1];
+      }
+    }
+
     // Last resort: preserve the original strict administrator-ban pattern.
     for(const line of lines){
       if(!/(administrator|adminstrator|admin)\b/i.test(line) || !/\bhat\b/i.test(line) || !/(gebannt|banned|\bfür\b|\bfur\b|\bfiir\b|\bfuer\b|\bfor\b)/i.test(line)) continue;
@@ -284,8 +309,31 @@
     const counts=new Map(); exact40.forEach(v=>counts.set(v,(counts.get(v)||0)+1));
     const top=[...counts.entries()].sort((a,b)=>b[1]-a[1])[0];
     if(top && top[1]>=2)return top[0];
-    // Fuzzy cluster: prefer the longest candidate inside the densest similarity cluster.
-    const scored=vals.map((v)=>({v,score:vals.reduce((s,w)=>s+(levenshteinLimited(v,w,10)<=6?1:0),0)})).sort((a,b)=>b.score-a.score||b.v.length-a.v.length);
+
+    // Align only same-length 40-char candidates. For noisy OCR, majority voting per
+    // character is safer than accepting one isolated frame. This also resolves recurring
+    // I/i/1/O/0-style errors because normalizeHexLoose maps impossible hex glyphs first.
+    if(exact40.length>=3){
+      const seed=exact40.slice().sort((a,b)=>{
+        const sa=exact40.reduce((n,w)=>n+(levenshteinLimited(a,w,8)<=6?1:0),0);
+        const sb=exact40.reduce((n,w)=>n+(levenshteinLimited(b,w,8)<=6?1:0),0);
+        return sb-sa;
+      })[0];
+      const cluster=exact40.filter(v=>levenshteinLimited(seed,v,8)<=8);
+      if(cluster.length>=3){
+        let out='';
+        for(let i=0;i<40;i++){
+          const m=new Map();
+          for(const v of cluster){const ch=v[i];m.set(ch,(m.get(ch)||0)+1);}
+          const ranked=[...m.entries()].sort((a,b)=>b[1]-a[1]);
+          out+=ranked[0]?.[0]||seed[i];
+        }
+        if(/^\w{40}$/.test(out))return out;
+      }
+    }
+
+    // Fuzzy cluster for candidates with one inserted/deleted OCR character.
+    const scored=vals.map((v)=>({v,score:vals.reduce((n,w)=>n+(levenshteinLimited(v,w,10)<=6?1:0),0)})).sort((a,b)=>b.score-a.score||b.v.length-a.v.length);
     if(scored[0] && scored[0].score>=3){
       const cluster=vals.filter(v=>levenshteinLimited(scored[0].v,v,10)<=6);
       const exact=cluster.find(v=>v.length===40); if(exact)return exact;
@@ -560,6 +608,8 @@
     // poison the general pass used for Ziel-ID and Grund on the next frame/video.
     const p={tessedit_pageseg_mode:String(opts.psm||6)};
     if(opts.whitelist) p.tessedit_char_whitelist=String(opts.whitelist);
+    if(opts.numeric) p.classify_bln_numeric_mode='1';
+    if(opts.nodict) {p.load_system_dawg='0';p.load_freq_dawg='0';p.tessedit_enable_dict_correction='0';}
     await worker.setParameters(p);
     const r=await worker.recognize(canvas);
     return r.data;
@@ -571,28 +621,65 @@
     for(let i=0;i<d.length;i+=4){const v=Math.round(.299*d[i]+.587*d[i+1]+.114*d[i+2]);d[i]=d[i+1]=d[i+2]=v;}
     ctx.putImageData(im,0,0);return c;
   }
+  function ocrQuality(data){
+    const t=String(data?.text||'');
+    const conf=Number.isFinite(Number(data?.confidence))?Number(data.confidence):0;
+    const words=Array.isArray(data?.words)?data.words.filter(w=>String(w.text||'').trim()).length:0;
+    // Confidence is primary, with a small text/word bonus to avoid selecting an
+    // empty high-confidence fragment over a complete banner line.
+    return conf + Math.min(20,t.length/40) + Math.min(10,words/4);
+  }
+
   async function readChat(worker,chat){
     const texts=[];let best=null;
-    const variants=[
+    // Broad OCR passes. Different preprocessing catches thin fonts, compression and
+    // colored UI text without relying on one Tesseract interpretation.
+    const baseVariants=[
       [grayCanvas(chat),6],
-      [orangeMask(chat),6]
+      [orangeMask(chat),6],
+      [enhancedCanvas(chat,1.55,1.03),6],
+      [grayCanvas(chat),11],
+      [threshold(chat,145),11],
+      [threshold(chat,175),11],
+      [threshold(chat,205),12]
     ];
-    for(const [img,psm] of variants){try{const r=await ocr(worker,img,{psm});if(r?.text)texts.push(cleanText(r.text));if(!best||String(r.text||'').length>String(best.text||'').length)best=r;}finally{clearCanvas(img);}}
+    for(const [img,psm] of baseVariants){try{const r=await ocr(worker,img,{psm});if(r?.text)texts.push(cleanText(r.text));if(!best||ocrQuality(r)>ocrQuality(best))best=r;}finally{clearCanvas(img);}}
+
     let merged=[...new Set(texts.filter(Boolean))].join('\n');
-    // Escalate only when the first two passes missed one of the important fields.
     if(!parseTargetId(merged)||!parseReason(merged)){
       const extra=[
-        [enhancedCanvas(chat,1.45,1.02),11],
-        [threshold(enhancedCanvas(chat,1.25,1.0),155),11]
+        [enhancedCanvas(chat,1.85,1.06),11],
+        [threshold(enhancedCanvas(chat,1.40,1.0),135),6]
       ];
-      for(const [img,psm] of extra){try{const r=await ocr(worker,img,{psm});if(r?.text)texts.push(cleanText(r.text));if(!best||String(r.text||'').length>String(best.text||'').length)best=r;}finally{clearCanvas(img);}}
+      for(const [img,psm] of extra){try{const r=await ocr(worker,img,{psm});if(r?.text)texts.push(cleanText(r.text));if(!best||ocrQuality(r)>ocrQuality(best))best=r;}finally{clearCanvas(img);}}
       merged=[...new Set(texts.filter(Boolean))].join('\n');
-      // One final sparse-layout pass is only attempted when the critical line is still missing.
-      if(!parseTargetId(merged)||!parseReason(merged)){
-        const img=grayCanvas(chat);try{const r=await ocr(worker,img,{psm:12});if(r?.text)texts.push(cleanText(r.text));if(!best||String(r.text||'').length>String(best.text||'').length)best=r;}finally{clearCanvas(img);}
-        merged=[...new Set(texts.filter(Boolean))].join('\n');
-      }
     }
+
+    // Dedicated numeric pass: target IDs and Discord IDs are numeric fields, so an
+    // unrestricted language OCR can confuse I/i/l with 1. A digit whitelist removes
+    // that ambiguity and the parser treats only the short numeric result as an ID.
+    try{
+      const idImg=enhancedCanvas(chat,1.65,1.02);
+      const idPass=await ocr(worker,idImg,{psm:11,whitelist:'0123456789[]()',numeric:true,nodict:true});
+      const idText=cleanText(idPass?.text||''); if(idText)texts.push(idText); clearCanvas(idImg);
+    }catch{}
+
+    // Dedicated hexadecimal pass: Social-Club/RID is hexadecimal. Restricting the
+    // alphabet prevents Tesseract from inventing arbitrary letters; normalizeHexLoose
+    // still maps common OCR confusions such as O/0 and I/1.
+    try{
+      const hx=enhancedCanvas(chat,1.70,1.02);
+      const p1=await ocr(worker,hx,{psm:11,whitelist:'0123456789ABCDEFabcdef',nodict:true});
+      const p2=await ocr(worker,threshold(hx,150),{psm:7,whitelist:'0123456789ABCDEFabcdef',nodict:true});
+      for(const r of [p1,p2]){if(r?.text)texts.push(cleanText(r.text));}
+      clearCanvas(hx);
+    }catch{}
+
+    merged=[...new Set(texts.filter(Boolean))].join('\n');
+    // Keep a clean 40-char hex candidate in the returned text even when general OCR
+    // split it across lines. The SC extractor will only accept it in online/IP context.
+    const hxCandidate=extractHexCandidateAnyText(merged);
+    if(hxCandidate)merged += `\nSC_OCR_EXACT: ${hxCandidate}`;
     return {text:merged,data:best||{}};
   }
   function findWordData(data,needle){const n=compact(needle);return (data?.words||[]).filter(w=>compact(w.text||'').includes(n));}
@@ -651,7 +738,17 @@
       let chat=null;try{
         chat=makeCrop(video,0,.005,.98,.54,3.2);const read=await readChat(worker,chat);const textCandidates=[f.text||'',read.text||''];
         const precise=extractScFromData(read.data,chat);
-        if(precise.canvas){const a=await ocr(specialWorker,precise.canvas,{psm:7,whitelist:'0123456789ABCDEFabcdefOoQqIiLlSsGgZzBbTt'});const b=await ocr(specialWorker,threshold(precise.canvas,145),{psm:7,whitelist:'0123456789ABCDEFabcdefOoQqIiLlSsGgZzBbTt'});const ca=extractHexCandidateAnyText(a.text||'');const cb=extractHexCandidateAnyText(b.text||'');if(ca)scCandidates.push(ca);if(cb)scCandidates.push(cb);textCandidates.push(precise.raw||'');clearCanvas(precise.canvas);}
+        if(precise.canvas){
+          const forms=[
+            [precise.canvas,7],
+            [threshold(precise.canvas,125),7],
+            [threshold(precise.canvas,150),7],
+            [threshold(precise.canvas,180),7],
+            [enhancedCanvas(precise.canvas,1.8,1.02),7]
+          ];
+          for(const [img,psm] of forms){try{const r=await ocr(specialWorker,img,{psm,whitelist:'0123456789ABCDEFabcdef',nodict:true});const c=extractHexCandidateAnyText(r.text||'');if(c)scCandidates.push(c);}finally{if(img!==precise.canvas)clearCanvas(img);}}
+          textCandidates.push(precise.raw||'');clearCanvas(precise.canvas);
+        }
         for(const tx of textCandidates){const r=extractScOrdered(tx,f.id,f.reason);if(r.candidate)scCandidates.push(r.candidate);}const any=extractHexCandidateAnyText(textCandidates.join('\n'));if(any)scCandidates.push(any);
       }catch(err){console.debug('SC precision OCR',err);}finally{clearCanvas(chat);}
     }
