@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V50';
+  const BUILD='V54';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -151,11 +151,11 @@
     if(!c) return '';
     if(/event17|event1l|eventi7/.test(c)) return 'Event 1.7';
     if(/acc11/.test(c)) return 'Acc 1.1';
-    if(/acc14twink|acc1.4twink|acc14twnk|acc14twing/.test(c)) return 'ACC 1.4 (Twink)';
+    if(/acc14twink|acc1.4twink|acc14twnk|acc14twing|acc14twinck|acc14twinkk/.test(c)) return 'ACC 1.4 (Twink)';
     if(/acc14/.test(c)) return 'Acc 1.4';
     if(/cheat|cheats|cheating/.test(c)) return 'Cheating';
     if(/pc/.test(c)){
-      if(/troll|trol|trowl/.test(c)) return 'PC Check Trolling';
+      if(/troll|trol|trowl|troling|trolling/.test(c)) return 'PC Check Trolling';
       if(/banevad|banvad|banevad/.test(c)) return 'PC-Check Positiv (Banevading)';
       if(/clean|cleaning|cleann/.test(c)) return 'PC Check Positiv (Cleaning)';
       if(/discord|discor/.test(c) && /41|4l|4i/.test(c)) return 'PC-Check Positiv 4.1 (Discord)';
@@ -410,10 +410,111 @@
     dropzone.addEventListener('drop',e=>addFiles([...e.dataTransfer.files].filter(f=>f.type.startsWith('video/')||/\.(mp4|mov|webm|mkv)$/i.test(f.name))));
   }
   function addFiles(files){for(const file of files){state.queue.push({id:crypto.randomUUID(),file,status:'Wartet',progress:0,result:null,processing:false,editingDone:false,youtube:null});}renderQueue();processQueue();}
-  function renderQueue(){const q=$('#uploadQueue');$('#queueCount').textContent=`${state.queue.length} ${state.queue.length===1?'Datei':'Dateien'}`;q.innerHTML=state.queue.map(item=>`<div class="queue-item"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(item.finalName||item.file.name)}</strong><small>${formatSize(item.file.size)} · ${esc(item.status)}</small><div class="progress"><i style="width:${item.progress}%"></i></div></div><div class="queue-actions"><button class="mini" data-check="${item.id}">Prüfen</button><button class="mini" data-remove="${item.id}">×</button></div></div>`).join('');$$('[data-check]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.check);if(x?.result)openEditor(x);});$$('[data-remove]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.remove);if(x?.processing){toast('POV wird gerade verarbeitet.');return;}state.queue=state.queue.filter(i=>i.id!==b.dataset.remove);renderQueue();});}
-  async function loaded(v){return new Promise((res,rej)=>{let done=false;const cleanup=()=>{v.removeEventListener('loadedmetadata',ok);v.removeEventListener('error',bad);};const ok=()=>{if(done)return;done=true;cleanup();res();};const bad=()=>{if(done)return;done=true;cleanup();rej(new Error('Video konnte nicht gelesen werden.'));};v.addEventListener('loadedmetadata',ok,{once:true});v.addEventListener('error',bad,{once:true});setTimeout(()=>bad(),20000);});}
-  async function seek(v,t){return new Promise((res,rej)=>{let done=false;const cleanup=()=>v.removeEventListener('seeked',ok);const ok=()=>{if(done)return;done=true;cleanup();res();};v.addEventListener('seeked',ok,{once:true});v.currentTime=Math.max(0,Math.min(Number(t)||0,Math.max(0,v.duration-.05)));setTimeout(()=>{if(done)return;done=true;cleanup();rej(new Error('Video-Suche Timeout'));},10000);});}
-  function makeCrop(v,x,y,w,h,scale=2){const c=document.createElement('canvas');const vw=v.videoWidth,vh=v.videoHeight;c.width=Math.max(1,Math.round(vw*w*scale));c.height=Math.max(1,Math.round(vh*h*scale));const ctx=c.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.drawImage(v,Math.round(vw*x),Math.round(vh*y),Math.round(vw*w),Math.round(vh*h),0,0,c.width,c.height);return c;}
+  async function retryQueueItem(item){
+    if(!item||item.processing)return;
+    if(item.youtube){await retryLocalOCR(item);return;}
+    item.status='Wartet · neuer Versuch';item.progress=0;item.processing=false;renderQueue();await processQueue();
+  }
+  function renderQueue(){const q=$('#uploadQueue');$('#queueCount').textContent=`${state.queue.length} ${state.queue.length===1?'Datei':'Dateien'}`;q.innerHTML=state.queue.map(item=>{const hasError=/^Fehler:/i.test(item.status||'');const retry=(!item.processing&&((!!item.youtube&&!item.result)||hasError));const label=item.youtube?'OCR erneut':'Erneut verarbeiten';return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(item.finalName||item.file.name)}</strong><small>${formatSize(item.file.size)} · ${esc(item.status)}</small><div class="progress"><i style="width:${item.progress}%"></i></div></div><div class="queue-actions">${item.result?`<button class="mini" data-check="${item.id}">Prüfen</button>`:''}${retry?`<button class="mini primary" data-retry="${item.id}">${label}</button>`:''}<button class="mini" data-remove="${item.id}">×</button></div></div>`}).join('');$$('[data-check]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.check);if(x?.result)openEditor(x);});$$('[data-retry]').forEach(b=>b.onclick=async()=>{const x=state.queue.find(i=>i.id===b.dataset.retry);if(x)await retryQueueItem(x);});$$('[data-remove]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.remove);if(x?.processing){toast('POV wird gerade verarbeitet.');return;}state.queue=state.queue.filter(i=>i.id!==b.dataset.remove);renderQueue();});}
+  async function retryLocalOCR(item){
+    if(item.processing)return;
+    item.processing=true;item.status='OCR wird erneut gestartet…';item.progress=60;renderQueue();
+    let media=null;
+    try{
+      const file=item.file||await getVideo(item.id);
+      if(!file)throw new Error('Lokale POV-Datei ist nicht mehr verfügbar.');
+      item.file=file;
+      const stored=await getVideo(item.id);
+      const sourceSize=await verifyLocalFile(file,0,'OCR-Quelle');
+      if(stored && Number(stored.size)!==sourceSize)throw new Error(`OCR-Quelle beschädigt: ${formatBytesExact(sourceSize)} · Archiv ${formatBytesExact(stored.size)}.`);
+      media=await openLocalVideo(file,`POV ${file.name}`,stored&&stored!==file?stored:null);
+      item.result=await analyzeVideo(media.video,p=>{item.progress=60+Math.round(p*.40);item.status=`OCR ${p}% · erneuter Versuch`;renderQueue();});
+      item.result.originalName=file.name;item.result.sourceSize=sourceSize;item.result.remoteSize=Number(item.result.remoteSize||item.youtube?.remoteSize||0);item.result.sourceType=file.type||'video/mp4';item.result.types=[];item.result.proof=item.youtube?.url||item.result.proof||'';item.result.youtube=item.youtube||item.result.youtube;
+      item.status=item.result.complete?`OCR fertig · Quelle ${formatSize(sourceSize)} · Prüfung offen`:'OCR unvollständig · Prüfung nötig';item.progress=100;renderQueue();openEditor(item);
+      await new Promise(resolve=>{const timer=setInterval(()=>{if(!state.editing){clearInterval(timer);resolve();}},150);});
+    }catch(err){item.status='Fehler: '+(err?.message||err);item.progress=0;renderQueue();}finally{closeLocalVideo(media);item.processing=false;renderQueue();}
+  }
+  async function loadVideoElement(v,label='POV'){
+    return await new Promise((res,rej)=>{
+      let done=false;
+      const finish=(fn,val)=>{if(done)return;done=true;cleanup();fn(val);};
+      const cleanup=()=>{
+        clearTimeout(timer);
+        v.removeEventListener('loadedmetadata',ok);
+        v.removeEventListener('durationchange',durationOk);
+        v.removeEventListener('loadeddata',dataOk);
+        v.removeEventListener('canplay',canPlayOk);
+        v.removeEventListener('error',bad);
+      };
+      const ok=()=>{
+        if(Number.isFinite(v.duration)&&v.duration>0)finish(res, v);
+      };
+      const durationOk=()=>ok();
+      const dataOk=()=>ok();
+      const canPlayOk=()=>ok();
+      const bad=()=>{
+        const code=v.error?.code||0;
+        const map={1:'Laden abgebrochen',2:'Netzwerk-/Dateizugriffsfehler',3:'Videodecodierung fehlgeschlagen',4:'Videoformat oder Codec wird vom Browser nicht unterstützt'};
+        finish(rej,new Error(`${label} konnte nicht gelesen werden${code?` (${map[code]||`MediaError ${code}`})`:''}.`));
+      };
+      v.addEventListener('loadedmetadata',ok);
+      v.addEventListener('durationchange',durationOk);
+      v.addEventListener('loadeddata',dataOk);
+      v.addEventListener('canplay',canPlayOk);
+      v.addEventListener('error',bad);
+      const timer=setTimeout(()=>finish(rej,new Error(`${label} konnte nicht gelesen werden (Timeout beim Einlesen der Videodaten).`)),90000);
+      try{v.load();}catch(e){finish(rej,e instanceof Error?e:new Error(String(e)));}
+    });
+  }
+  async function openLocalVideo(file,label='POV',fallbackFile=null){
+    const sources=[];
+    if(file)sources.push(file);
+    if(fallbackFile && fallbackFile!==file)sources.push(fallbackFile);
+    if(!sources.length)throw new Error(`${label}: Datei fehlt.`);
+    let lastErr=null;
+    for(let sourceIndex=0;sourceIndex<sources.length;sourceIndex++){
+      const source=sources[sourceIndex];
+      for(let attempt=1;attempt<=2;attempt++){
+        const v=document.createElement('video');
+        v.muted=true; v.playsInline=true; v.preload='auto';
+        v.style.position='fixed'; v.style.left='-20000px'; v.style.top='-20000px'; v.style.width='2px'; v.style.height='2px';
+        document.body.appendChild(v);
+        const url=URL.createObjectURL(source);
+        try{
+          v.src=url;
+          const suffix=sourceIndex===1?' · Archivkopie':'';
+          await loadVideoElement(v,`${label}${suffix}${attempt===2?' · zweiter Versuch':''}`);
+          return {video:v,url};
+        }catch(err){
+          lastErr=err;
+          try{v.pause();}catch{}
+          v.removeAttribute('src');
+          try{v.load();}catch{}
+          v.remove();
+          URL.revokeObjectURL(url);
+          if(attempt===1)await new Promise(r=>setTimeout(r,250));
+        }
+      }
+    }
+    throw lastErr||new Error(`${label} konnte nicht gelesen werden.`);
+  }
+  function closeLocalVideo(media){
+    if(!media)return;
+    try{media.video.pause();}catch{}
+    try{media.video.removeAttribute('src');media.video.load();}catch{}
+    try{media.video.remove();}catch{}
+    try{URL.revokeObjectURL(media.url);}catch{}
+  }
+  async function seek(v,t,timeout=18000){return new Promise((res,rej)=>{let done=false;const cleanup=()=>{clearTimeout(timer);v.removeEventListener('seeked',ok);v.removeEventListener('error',bad);};const ok=()=>{if(done)return;done=true;cleanup();res();};const bad=()=>{if(done)return;done=true;cleanup();rej(new Error('Videodecoder meldet einen Fehler beim Suchen.'));};v.addEventListener('seeked',ok,{once:true});v.addEventListener('error',bad,{once:true});try{v.currentTime=Math.max(0,Math.min(Number(t)||0,Math.max(0,v.duration-.05)));}catch(e){bad();return;}const timer=setTimeout(()=>{if(done)return;done=true;cleanup();rej(new Error('Video-Suche Timeout'));},timeout);});}
+  async function safeSeek(v,t,tries=3){let last=null;for(let i=0;i<tries;i++){try{await seek(v,t,22000);return true;}catch(err){last=err;try{v.pause();}catch{}await new Promise(r=>setTimeout(r,250*(i+1)));}}return false;}
+  function makeCrop(v,x,y,w,h,scale=2){
+    const c=document.createElement('canvas');const vw=v.videoWidth,vh=v.videoHeight;
+    let cw=Math.max(1,Math.round(vw*w*scale)),ch=Math.max(1,Math.round(vh*h*scale));
+    const maxPixels=5_000_000;
+    if(cw*ch>maxPixels){const factor=Math.sqrt(maxPixels/(cw*ch));cw=Math.max(1,Math.floor(cw*factor));ch=Math.max(1,Math.floor(ch*factor));}
+    c.width=cw;c.height=ch;const ctx=c.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;
+    ctx.drawImage(v,Math.round(vw*x),Math.round(vh*y),Math.round(vw*w),Math.round(vh*h),0,0,c.width,c.height);return c;
+  }
   function threshold(src,cut=145){const c=document.createElement('canvas');c.width=src.width;c.height=src.height;const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(src,0,0);const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;for(let i=0;i<d.length;i+=4){const v=.299*d[i]+.587*d[i+1]+.114*d[i+2];const b=v<cut?0:255;d[i]=d[i+1]=d[i+2]=b;}ctx.putImageData(im,0,0);return c;}
   function yellowMask(src){const c=document.createElement('canvas');c.width=src.width;c.height=src.height;const inCtx=src.getContext('2d',{willReadFrequently:true});const data=inCtx.getImageData(0,0,src.width,src.height).data;const out=c.getContext('2d'),im=out.createImageData(src.width,src.height),d=im.data;for(let i=0;i<data.length;i+=4){const r=data[i],g=data[i+1],b=data[i+2];const y=(r>140&&g>90&&b<150&&r>b*1.35&&g>b*1.12);const v=y?255:0;d[i]=d[i+1]=d[i+2]=v;d[i+3]=255;}out.putImageData(im,0,0);return c;}
   function sharpness(canvas){const ctx=canvas.getContext('2d',{willReadFrequently:true}),w=canvas.width,h=canvas.height;const data=ctx.getImageData(0,0,w,h).data;let s=0,n=0;for(let y=1;y<h-1;y+=3){for(let x=1;x<w-1;x+=3){const i=(y*w+x)*4;const l=((y*w+x-1)*4),r=((y*w+x+1)*4),u=(((y-1)*w+x)*4),d=(((y+1)*w+x)*4);const g=(data[i]+data[i+1]+data[i+2])/3;const gl=(data[l]+data[l+1]+data[l+2])/3,gr=(data[r]+data[r+1]+data[r+2])/3,gu=(data[u]+data[u+1]+data[u+2])/3,gd=(data[d]+data[d+1]+data[d+2])/3;s+=Math.abs(2*g-gl-gr)+Math.abs(2*g-gu-gd);n++;}}return n?s/n:0;}
@@ -423,6 +524,12 @@
     for(let i=0;i<data.length;i+=4){const r=data[i],g=data[i+1],b=data[i+2]; const isOrange=(r>70&&g>18&&b<110&&r>g*1.2&&g>b*1.02); const v=isOrange?0:255; im.data[i]=im.data[i+1]=im.data[i+2]=v; im.data[i+3]=255;}
     out.putImageData(im,0,0); return c;
   }
+  function enhancedCanvas(src,contrast=1.35,brightness=1.02){
+    const c=document.createElement('canvas');c.width=src.width;c.height=src.height;
+    const ctx=c.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.filter=`contrast(${contrast}) brightness(${brightness}) saturate(.8)`;ctx.drawImage(src,0,0);ctx.filter='none';
+    return c;
+  }
+  function clearCanvas(c){try{c.width=1;c.height=1;}catch{}}
   function makeServerBadgeCrop(video){
     // Two-stage ROI: first a generous top-right search, then yellow connected-component crop.
     const raw=makeCrop(video,.88,.01,.12,.17,4.0); const mask=yellowMask(raw);
@@ -465,15 +572,28 @@
     ctx.putImageData(im,0,0);return c;
   }
   async function readChat(worker,chat){
-    const texts=[];
-    const original=grayCanvas(chat);
-    const r1=await ocr(worker,original,{psm:6});
-    if(r1?.text)texts.push(cleanText(r1.text));
-    const r2=await ocr(worker,orangeMask(chat),{psm:6});
-    if(r2?.text)texts.push(cleanText(r2.text));
-    // Preserve the word/line data from the most information-rich pass for SC extraction.
-    const best=(r1?.text||'').length>=(r2?.text||'').length?r1:r2;
-    return {text:[...new Set(texts.filter(Boolean))].join('\n'),data:best||r1||r2||{}};
+    const texts=[];let best=null;
+    const variants=[
+      [grayCanvas(chat),6],
+      [orangeMask(chat),6]
+    ];
+    for(const [img,psm] of variants){try{const r=await ocr(worker,img,{psm});if(r?.text)texts.push(cleanText(r.text));if(!best||String(r.text||'').length>String(best.text||'').length)best=r;}finally{clearCanvas(img);}}
+    let merged=[...new Set(texts.filter(Boolean))].join('\n');
+    // Escalate only when the first two passes missed one of the important fields.
+    if(!parseTargetId(merged)||!parseReason(merged)){
+      const extra=[
+        [enhancedCanvas(chat,1.45,1.02),11],
+        [threshold(enhancedCanvas(chat,1.25,1.0),155),11]
+      ];
+      for(const [img,psm] of extra){try{const r=await ocr(worker,img,{psm});if(r?.text)texts.push(cleanText(r.text));if(!best||String(r.text||'').length>String(best.text||'').length)best=r;}finally{clearCanvas(img);}}
+      merged=[...new Set(texts.filter(Boolean))].join('\n');
+      // One final sparse-layout pass is only attempted when the critical line is still missing.
+      if(!parseTargetId(merged)||!parseReason(merged)){
+        const img=grayCanvas(chat);try{const r=await ocr(worker,img,{psm:12});if(r?.text)texts.push(cleanText(r.text));if(!best||String(r.text||'').length>String(best.text||'').length)best=r;}finally{clearCanvas(img);}
+        merged=[...new Set(texts.filter(Boolean))].join('\n');
+      }
+    }
+    return {text:merged,data:best||{}};
   }
   function findWordData(data,needle){const n=compact(needle);return (data?.words||[]).filter(w=>compact(w.text||'').includes(n));}
   function extractScFromData(data,canvas){
@@ -498,69 +618,50 @@
     return {canvas:c,y:y0,raw,online:true};
   }
   async function analyzeVideo(video,onProgress){
-    const worker=await ensureWorker(); const duration=video.duration; const start=Math.max(0,duration-40); const settings=state.settings;
+    const worker=await ensureWorker();const duration=video.duration;const start=Math.max(0,duration-40);const settings=state.settings;
     if(!Number.isFinite(duration)||duration<=0)throw new Error('Videodauer konnte nicht bestimmt werden.');
-    const baseCount=Math.max(20,Math.min(32,Number(settings.frames)||24)); const coarse=[];
+    const baseCount=Math.max(22,Math.min(34,Number(settings.frames)||28));const coarse=[];let seekFailures=0;
     for(let i=0;i<baseCount;i++){
-      const t=duration<=40?(duration*(i/Math.max(1,baseCount-1))):start + ((duration-start-.5)*i/Math.max(1,baseCount-1));
-      await seek(video,t);
-      // Wider ROI and higher scale: Grand-RP ban messages can extend beyond 58% of the screen.
-      const chat=makeCrop(video,0,.005,.98,.48,3.0);
-      const read=await readChat(worker,chat); const text=read.text;
-      const id=parseTargetId(text),reason=parseReason(text),scInfo=extractScOrdered(text,id,reason);
-      const score=(id?14:0)+(reason?14:0)+(scInfo.candidate?9:0)+(scInfo.online?3:0)+(/administrator|admin/i.test(text)?2:0)+(/grund/i.test(text)?3:0);
-      coarse.push({time:t,chat,data:read.data,text,id,reason,sc:scInfo.candidate,online:scInfo.online,score,sharp:sharpness(chat)});
-      onProgress?.(8+Math.round(i/baseCount*38),`Schnellscan ${i+1}/${baseCount}`);
+      const t=duration<=40?(duration*(i/Math.max(1,baseCount-1))):start+((duration-start-.5)*i/Math.max(1,baseCount-1));
+      if(!(await safeSeek(video,t,3))){seekFailures++;onProgress?.(8+Math.round(i/baseCount*38),`Frame ${i+1}/${baseCount} übersprungen · Decoder wartet`);continue;}
+      try{
+        const chat=makeCrop(video,0,.005,.98,.50,2.8);const read=await readChat(worker,chat);const text=read.text;const id=parseTargetId(text),reason=parseReason(text),scInfo=extractScOrdered(text,id,reason);const sharp=sharpness(chat);clearCanvas(chat);
+        coarse.push({time:t,text,id,reason,sc:scInfo.candidate,online:scInfo.online,score:(id?16:0)+(reason?16:0)+(scInfo.candidate?10:0)+(scInfo.online?3:0)+(/administrator|admin/i.test(text)?2:0)+(/grund/i.test(text)?3:0),sharp});
+      }catch(err){onProgress?.(8+Math.round(i/baseCount*38),`Frame ${i+1}/${baseCount} · OCR-Fehler übersprungen`);}
+      onProgress?.(8+Math.round((i+1)/baseCount*38),`Schnellscan ${i+1}/${baseCount}`);
     }
-    const grouped=new Map();
-    for(const f of coarse){if(f.id||f.reason){const k=`${f.id||'?'}|${f.reason||'?'}`;(grouped.get(k)||grouped.set(k,[]).get(k)).push(f);}}
-    let group=[...grouped.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.score,0)-a.reduce((s,x)=>s+x.score,0))[0]||[];
-    if(!group.length)group=coarse.sort((a,b)=>b.score-a.score||b.sharp-a.sharp).slice(0,6);
-    const seeds=group.slice().sort((a,b)=>b.score-a.score||b.sharp-a.sharp).slice(0,3);
-    const refineTimes=new Set(); const win=Math.max(3,Math.min(7,Number(settings.window)||4.5)); const rstep=Math.max(.4,Math.min(1.0,Number(settings.step)||.5));
+    if(!coarse.length)throw new Error(`Keine verwertbaren Frames gelesen (${seekFailures} Suchfehler).`);
+    const grouped=new Map();for(const f of coarse){if(f.id||f.reason){const k=`${f.id||'?'}|${f.reason||'?'}`;(grouped.get(k)||grouped.set(k,[]).get(k)).push(f);}}
+    let group=[...grouped.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.score,0)-a.reduce((s,x)=>s+x.score,0))[0]||[];if(!group.length)group=coarse.sort((a,b)=>b.score-a.score||b.sharp-a.sharp).slice(0,8);
+    const seeds=group.slice().sort((a,b)=>b.score-a.score||b.sharp-a.sharp).slice(0,4);
+    const refineTimes=new Set();const win=Math.max(3,Math.min(8,Number(settings.window)||5));const rstep=Math.max(.35,Math.min(1.0,Number(settings.step)||.45));
     for(const seed of seeds){for(let t=Math.max(start,seed.time-win/2);t<=Math.min(duration-.05,seed.time+win/2);t+=rstep)refineTimes.add(Math.round(t*20)/20);}
-    const refined=[]; let n=0; const times=[...refineTimes].sort((a,b)=>a-b);
+    const refined=[];let n=0;const times=[...refineTimes].sort((a,b)=>a-b);
     for(const t of times){
-      await seek(video,t);
-      const chat=makeCrop(video,0,.005,.98,.52,3.4); const read=await readChat(worker,chat); const text=read.text;
-      const id=parseTargetId(text),reason=parseReason(text),scInfo=extractScOrdered(text,id,reason);
-      refined.push({time:t,chat,data:read.data,text,id,reason,sc:scInfo.candidate,online:scInfo.online,score:(id?14:0)+(reason?14:0)+(scInfo.candidate?9:0)+(scInfo.online?3:0),sharp:sharpness(chat)});
+      if(!(await safeSeek(video,t,2))){continue;}
+      try{const chat=makeCrop(video,0,.005,.98,.54,3.1);const read=await readChat(worker,chat);const text=read.text;const id=parseTargetId(text),reason=parseReason(text),scInfo=extractScOrdered(text,id,reason);const sharp=sharpness(chat);clearCanvas(chat);refined.push({time:t,text,id,reason,sc:scInfo.candidate,online:scInfo.online,score:(id?16:0)+(reason?16:0)+(scInfo.candidate?10:0)+(scInfo.online?3:0),sharp});}catch{}
       n++;onProgress?.(46+Math.round(n/Math.max(1,times.length)*31),`Präzisionsscan ${n}/${times.length}`);
     }
-    const all=[...coarse,...refined];
-    const coherent=all.filter(f=>f.id&&f.reason); const blockMap=new Map();
-    for(const f of coherent){const k=`${f.id}|${f.reason}`;(blockMap.get(k)||blockMap.set(k,[]).get(k)).push(f);}
-    const bannerFrames=[...([...blockMap.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.score,0)-a.reduce((s,x)=>s+x.score,0))[0]||[])].sort((a,b)=>b.score-a.score||b.sharp-a.sharp);
-    const fallback=all.filter(f=>f.id||f.reason).sort((a,b)=>b.score-a.score||b.sharp-a.sharp).slice(0,10);
-    const frames=bannerFrames.length?bannerFrames:fallback;
-    const idV=uniqueVote(frames.map(f=>f.id)); const reasonV=uniqueVote(frames.map(f=>f.reason));
-    const bannerTime=frames[0]?.time??start; const timestamps={banner:bannerTime}; if(idV?.value)timestamps.targetId=frames.find(f=>f.id===idV.value)?.time??bannerTime; if(reasonV?.value)timestamps.reason=frames.find(f=>f.reason===reasonV.value)?.time??bannerTime;
-
-    const onlineSeen=frames.some(f=>f.online); const scCandidates=[];
-    const specialWorker=await ensureSpecialWorker();
+    const all=[...coarse,...refined];const coherent=all.filter(f=>f.id&&f.reason);const blockMap=new Map();for(const f of coherent){const k=`${f.id}|${f.reason}`;(blockMap.get(k)||blockMap.set(k,[]).get(k)).push(f);}
+    const bannerFrames=[...([...blockMap.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.score,0)-a.reduce((s,x)=>s+x.score,0))[0]||[])].sort((a,b)=>b.score-a.score||b.sharp-a.sharp);const fallback=all.filter(f=>f.id||f.reason).sort((a,b)=>b.score-a.score||b.sharp-a.sharp).slice(0,12);const frames=bannerFrames.length?bannerFrames:fallback;
+    const idV=uniqueVote(frames.map(f=>f.id));const reasonV=uniqueVote(frames.map(f=>f.reason));const bannerTime=frames[0]?.time??start;const timestamps={banner:bannerTime};if(idV?.value)timestamps.targetId=frames.find(f=>f.id===idV.value)?.time??bannerTime;if(reasonV?.value)timestamps.reason=frames.find(f=>f.reason===reasonV.value)?.time??bannerTime;
+    const onlineSeen=frames.some(f=>f.online);const scCandidates=[];const specialWorker=await ensureSpecialWorker();
     for(const f of frames.slice(0,10)){
-      const textCandidates=[f.text||''];
-      try{
-        const precise=extractScFromData(f.data,f.chat);
-        if(precise.canvas){
-          const a=await ocr(specialWorker,precise.canvas,{psm:7,whitelist:'0123456789ABCDEFabcdefOoQqIiLlSsGgZzBbTt'});
-          const b=await ocr(specialWorker,threshold(precise.canvas,145),{psm:7,whitelist:'0123456789ABCDEFabcdefOoQqIiLlSsGgZzBbTt'});
-          const ca=extractHexCandidateAnyText(a.text||''); const cb=extractHexCandidateAnyText(b.text||'');
-          if(ca)scCandidates.push(ca);if(cb)scCandidates.push(cb);textCandidates.push(precise.raw||'');
-        }
-      }catch(err){console.debug('SC precision OCR',err);}
-      for(const tx of textCandidates){const r=extractScOrdered(tx,f.id,f.reason);if(r.candidate)scCandidates.push(r.candidate);}
-      const any=extractHexCandidateAnyText(f.text||'');if(any)scCandidates.push(any);
+      if(!(await safeSeek(video,f.time,2)))continue;
+      let chat=null;try{
+        chat=makeCrop(video,0,.005,.98,.54,3.2);const read=await readChat(worker,chat);const textCandidates=[f.text||'',read.text||''];
+        const precise=extractScFromData(read.data,chat);
+        if(precise.canvas){const a=await ocr(specialWorker,precise.canvas,{psm:7,whitelist:'0123456789ABCDEFabcdefOoQqIiLlSsGgZzBbTt'});const b=await ocr(specialWorker,threshold(precise.canvas,145),{psm:7,whitelist:'0123456789ABCDEFabcdefOoQqIiLlSsGgZzBbTt'});const ca=extractHexCandidateAnyText(a.text||'');const cb=extractHexCandidateAnyText(b.text||'');if(ca)scCandidates.push(ca);if(cb)scCandidates.push(cb);textCandidates.push(precise.raw||'');clearCanvas(precise.canvas);}
+        for(const tx of textCandidates){const r=extractScOrdered(tx,f.id,f.reason);if(r.candidate)scCandidates.push(r.candidate);}const any=extractHexCandidateAnyText(textCandidates.join('\n'));if(any)scCandidates.push(any);
+      }catch(err){console.debug('SC precision OCR',err);}finally{clearCanvas(chat);}
     }
-    let sc=onlineSeen?consensusHex(scCandidates):'';if(sc)timestamps.sc=frames.find(f=>f.sc)?.time??bannerTime;
-
+    const sc=onlineSeen?consensusHex(scCandidates):'';if(sc)timestamps.sc=frames.find(f=>f.sc)?.time??bannerTime;
     const server='3';timestamps.server=bannerTime;
-    const serverTimes=new Set();for(let dt=-1.2;dt<=1.21;dt+=.6)serverTimes.add(Math.max(0,Math.min(duration-.05,bannerTime+dt)));
-    const dateVotes=[];let dc=0;for(const t of serverTimes){if(dc++>=8)break;await seek(video,t);const crop=makeCrop(video,.78,.78,.22,.22,4.0);const d1=await ocr(specialWorker,crop,{psm:6,whitelist:'0123456789./-'});const d2=await ocr(specialWorker,threshold(crop,150),{psm:7,whitelist:'0123456789./-'});for(const tx of [d1.text||'',d2.text||'']){const dv=extractDate(tx);if(dv)dateVotes.push(dv);}}
+    const serverTimes=new Set();for(let dt=-1.5;dt<=1.51;dt+=.5)serverTimes.add(Math.max(0,Math.min(duration-.05,bannerTime+dt)));const dateVotes=[];let dc=0;
+    for(const t of serverTimes){if(dc++>=10)break;if(!(await safeSeek(video,t,2)))continue;try{const crop=makeCrop(video,.76,.74,.24,.26,3.6);const d1=await ocr(specialWorker,crop,{psm:6,whitelist:'0123456789./-'});const d2=await ocr(specialWorker,threshold(crop,145),{psm:11,whitelist:'0123456789./-'});for(const tx of [d1.text||'',d2.text||'']){const dv=extractDate(tx);if(dv)dateVotes.push(dv);}clearCanvas(crop);}catch{}}
     const date=dateVote(dateVotes);if(date)timestamps.date=bannerTime;
-
     const missing=[];if(!idV?.value)missing.push('Ziel-ID');if(!reasonV?.value)missing.push('Grund');if(!server)missing.push('Server');if(!date)missing.push('Datum');if(onlineSeen&&!sc)missing.push('SC');
-    onProgress?.(100,'Analyse abgeschlossen');
+    if(!idV?.value&&!reasonV?.value)onProgress?.(100,'Analyse beendet · Banner nicht zuverlässig gefunden');else onProgress?.(100,'Analyse abgeschlossen');
     return {targetId:/^\d{1,6}$/.test(idV?.value||'')?(idV.value||''):'',reason:reasonV?.value||'',sc:onlineSeen?(sc||''):'',server,date,offline:!onlineSeen,missing,complete:missing.length===0,timestamps,confidence:{id:idV?idV.votes/Math.max(1,frames.length):0,reason:reasonV?reasonV.votes/Math.max(1,frames.length):0,sc:sc?1:0,server:1,date:date?1:0}};
   }
   async function openManualPicker(entry, field){
@@ -602,6 +703,23 @@
       const target=new URL('manual.html',location.href);target.searchParams.set('job',entry.id);target.searchParams.set('field','view');target.searchParams.set('t',String(Number(seconds)||0));
       const w=window.open(target.href,'_blank','noopener'); if(!w)toast('Pop-up blockiert. Bitte Pop-ups für die Website erlauben.');
     }catch(err){console.error(err);toast('POV konnte nicht geöffnet werden: '+err.message);}
+  }
+  const PHOTO_ROIS={banner:[0,.005,.98,.54],targetId:[0,.015,.78,.18],reason:[0,.12,.78,.18],sc:[0,.10,.90,.32],server:[.80,0,.20,.20],date:[.70,.72,.30,.28],discordId:[0,.06,.86,.30]};
+  async function showInfoPhoto(field='banner'){
+    const panel=$('#infoPhotoPanel'),canvas=$('#infoPhotoCanvas'),label=$('#infoPhotoLabel'),meta=$('#infoPhotoMeta');if(!panel||!canvas)return;
+    const ctx=state.editing;const entry=ctx?.item||ctx?.entry;if(!entry)return;
+    let file=entry.file||null;if(!file){try{file=await getVideo(entry.id);if(file)entry.file=file;}catch{}}
+    if(!file){panel.classList.add('hidden');return;}
+    const r=entry.result||entry;const t=Number(r.timestamps?.[field]??r.timestamps?.banner??0)||0;
+    panel.classList.remove('hidden');label.textContent=`Info-Foto · ${field==='targetId'?'Ziel-ID':field==='reason'?'Grund':field==='sc'?'SC / RID':field==='server'?'Server':field==='date'?'Datum':field==='discordId'?'Discord ID':'Bannblock'}`;meta.textContent=`Zeitpunkt ${t.toFixed(2)} s`;
+    for(const b of $$('.photo-field'))b.classList.toggle('active',b.dataset.field===field);
+    let media=null;
+    try{
+      media=await openLocalVideo(file,'Info-Foto');
+      if(!(await safeSeek(media.video,t,2)))throw new Error('Zeitpunkt konnte nicht geladen werden.');
+      const maxW=1280,maxH=720,scale=Math.min(1,maxW/media.video.videoWidth,maxH/media.video.videoHeight);canvas.width=Math.max(1,Math.round(media.video.videoWidth*scale));canvas.height=Math.max(1,Math.round(media.video.videoHeight*scale));
+      const c=canvas.getContext('2d');c.drawImage(media.video,0,0,canvas.width,canvas.height);const roi=PHOTO_ROIS[field]||PHOTO_ROIS.banner;c.save();c.fillStyle='rgba(255,47,139,.10)';c.strokeStyle='#ff2f8b';c.lineWidth=Math.max(2,canvas.width/800);c.fillRect(canvas.width*roi[0],canvas.height*roi[1],canvas.width*roi[2],canvas.height*roi[3]);c.strokeRect(canvas.width*roi[0],canvas.height*roi[1],canvas.width*roi[2],canvas.height*roi[3]);c.restore();
+    }catch(err){canvas.width=1;canvas.height=1;meta.textContent=`Foto konnte nicht geladen werden: ${err.message}`;}finally{closeLocalVideo(media);}
   }
   function setEditorValues(v={}){
     const r=v?.result||v||{};
@@ -653,8 +771,8 @@
     const date=formatDateDE($('#date').value);
     $('#titlePreview').value=(id&&reason&&date)?`${id}, ${reason}, ${date}.mp4`:'';
   }
-  function openEditor(item){state.editing={item};$('#modalFile').textContent=item.finalName||item.file.name;setEditorValues({...item.result,discordId:item.result?.discordId||'',proof:item.result?.proof||'',perma:false,notBanned:false});state.selectedTypes=new Set(item.result?.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus(item);$('#editorModal').classList.remove('hidden');}
-  async function openEditorFromEntry(entry){const file=entry.file||await getVideo(entry.id);if(file)entry.file=file;state.editing={entry};$('#modalFile').textContent=entry.finalName||entry.originalName;setEditorValues(entry);state.selectedTypes=new Set(entry.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus({result:entry});$('#editorModal').classList.remove('hidden');}
+  function openEditor(item){state.editing={item};$('#modalFile').textContent=item.finalName||item.file.name;setEditorValues({...item.result,discordId:item.result?.discordId||'',proof:item.result?.proof||'',perma:false,notBanned:false});state.selectedTypes=new Set(item.result?.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus(item);$('#editorModal').classList.remove('hidden');showInfoPhoto('banner');}
+  async function openEditorFromEntry(entry){const file=entry.file||await getVideo(entry.id);if(file)entry.file=file;state.editing={entry};$('#modalFile').textContent=entry.finalName||entry.originalName;setEditorValues(entry);state.selectedTypes=new Set(entry.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus({result:entry});$('#editorModal').classList.remove('hidden');showInfoPhoto('banner');}
   function closeEditor(){state.editing=null;$('#editorModal').classList.add('hidden');}
   async function saveEditor(e){
     e.preventDefault(); const ctx=state.editing; if(!ctx)return;
@@ -668,7 +786,7 @@
     const finalName=`${targetId}, ${reason}, ${formatDateDE(date)}.mp4`;
     const namedFile=new File([base.file],finalName,{type:base.file.type||'video/mp4',lastModified:base.file.lastModified||Date.now()}); if(namedFile.size!==base.file.size)throw new Error('Die Dateigröße hat sich beim Umbenennen verändert. Speicherung abgebrochen.');
     const yt=base.youtube||ctx.item?.youtube||ctx.entry?.youtube||null;
-    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,sc:offline?'':sc,server,date,types:finalTypes,perma:$('#perma').checked,notBanned:$('#notBanned').checked,discordId:$('#discordId').value.trim(),proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',timestamps:base.result?.timestamps||base.timestamps||{},missing:[],file:namedFile,youtube:yt};
+    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,sc:offline?'':sc,server,date,types:finalTypes,perma:$('#perma').checked,notBanned:$('#notBanned').checked,discordId:$('#discordId').value.trim(),proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',timestamps:base.result?.timestamps||base.timestamps||{},infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
     await putVideo(record.id,namedFile);
     // YouTube must receive the exact final filename (including .mp4). The title update
     // is completed and verified before the saved POV is finalized in the UI.
@@ -695,6 +813,10 @@
   function setupEditor(){
     $('#closeModal').onclick=closeEditor;$('#cancelBtn').onclick=closeEditor;$('#entryForm').addEventListener('submit',saveEditor);['#targetId','#date'].forEach(s=>$(s).addEventListener('input',renderTitlePreview));$('#reason').addEventListener('change',renderTitlePreview);$('#targetId').addEventListener('input',()=>{$('#targetId').value=clampId($('#targetId').value)});
     $$('.chip').forEach(c=>c.onclick=()=>{const v=c.dataset.value;c.classList.toggle('active');if(c.classList.contains('active'))state.selectedTypes.add(v);else state.selectedTypes.delete(v);});
+    $$('.photo-field').forEach(b=>b.onclick=()=>showInfoPhoto(b.dataset.field));
+    $('#photoRefresh')?.addEventListener('click',()=>{const active=$('.photo-field.active');showInfoPhoto(active?.dataset.field||'banner');});
+    $$('#targetId,#reason,#sc,#server,#date,#discordId').forEach(el=>el.addEventListener('focus',()=>showInfoPhoto(el.id==='targetId'?'targetId':el.id)));
+    $('#reanalyzeBtn')?.addEventListener('click',async()=>{const x=state.editing?.item;if(x){closeEditor();await retryLocalOCR(x);}});
     // Manual picker buttons: use the user click directly to open the same-origin
     // picker page. This was missing in earlier builds, so SC/Discord-ID buttons
     // looked clickable but did nothing.
@@ -703,7 +825,7 @@
       if(!ctx){toast('Kein POV zur manuellen Prüfung geöffnet.');return;}
       const entry=ctx.item||ctx.entry;
       if(!entry){toast('POV-Eintrag nicht verfügbar.');return;}
-      await openManualPicker(entry,btn.dataset.field);
+      await showInfoPhoto(btn.dataset.field);await openManualPicker(entry,btn.dataset.field);
     }));
   }
 
@@ -731,11 +853,12 @@
         },sourceSize);
         const remoteSize=Number(ytFinal.fileDetails?.fileSize||0);
         item.status=remoteSize?`YouTube vollständig verarbeitet · ${formatSize(remoteSize)} · OCR startet`:'YouTube vollständig verarbeitet · OCR startet';item.progress=60;renderQueue();
-        const video=$('#videoProbe');const url=URL.createObjectURL(item.file);video.src=url;await loaded(video);item.progress=62;renderQueue();
-        item.result=await analyzeVideo(video,p=>{item.progress=62+Math.round(p*.38);renderQueue();});
-        item.result.originalName=item.file.name;item.result.sourceSize=sourceSize;item.result.remoteSize=remoteSize||0;item.result.sourceType=item.file.type||'video/mp4';item.result.types=[];item.result.proof=item.youtube.url;item.result.youtube=item.youtube;item.status=item.result.complete?`OCR fertig · Quelle ${formatSize(sourceSize)} · Prüfung offen`:'OCR unvollständig · Prüfung nötig';renderQueue();openEditor(item);
-        await new Promise(resolve=>{const timer=setInterval(()=>{if(!state.editing){clearInterval(timer);resolve();}},150);});
-        URL.revokeObjectURL(url);
+        const media=await openLocalVideo(item.file,`POV ${item.file.name}`,storedCopy);item.progress=62;renderQueue();
+        try{
+          item.result=await analyzeVideo(media.video,p=>{item.progress=62+Math.round(p*.38);renderQueue();});
+          item.result.originalName=item.file.name;item.result.sourceSize=sourceSize;item.result.remoteSize=remoteSize||0;item.result.sourceType=item.file.type||'video/mp4';item.result.types=[];item.result.proof=item.youtube.url;item.result.youtube=item.youtube;item.status=item.result.complete?`OCR fertig · Quelle ${formatSize(sourceSize)} · Prüfung offen`:'OCR unvollständig · Prüfung nötig';renderQueue();openEditor(item);
+          await new Promise(resolve=>{const timer=setInterval(()=>{if(!state.editing){clearInterval(timer);resolve();}},150);});
+        }finally{closeLocalVideo(media);}
       }catch(err){console.error(err);item.status='Fehler: '+(err?.message||err);item.progress=0;renderQueue();}
       finally{item.processing=false;}
     }

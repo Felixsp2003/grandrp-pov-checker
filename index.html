@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=44">
+<link rel="stylesheet" href="styles.css?v=54">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -100,7 +100,7 @@
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
           <label>Präzisionsschritt (Sekunden)<input id="refineStep" type="number" min="0.4" max="1" step="0.1" value="0.5"></label>
-          <div class="setting-note">Empfohlen: <b>24 / 4.5 / 0.5</b>. YouTube wird zuerst vollständig hochgeladen, danach OCR. Server ist im aktuellen Workflow fest <b>3</b>. Bei SC und Server ist „Aus Video auswählen“ jederzeit verfügbar.</div>
+          <div class="setting-note">V54: mehrere OCR-Varianten, dichte Nachsuche, robuste Seek-Wiederholungen, Speicherbegrenzung und Info-Foto am Erkennungszeitpunkt. Empfohlen: <b>28 / 5 / 0.45</b>. YouTube wird zuerst vollständig hochgeladen, danach OCR. Server ist im aktuellen Workflow fest <b>3</b>. Bei SC und Server ist „Aus Video auswählen“ jederzeit verfügbar.</div>
         </div>
         <div class="settings-card">
           <div class="card-title">YouTube-Verbindung <span id="ytStatus" class="connection">● Nicht verbunden</span></div>
@@ -121,6 +121,19 @@
 <div id="editorModal" class="modal hidden"><div class="modal-card">
   <div class="modal-head"><div><h2>POV prüfen</h2><p id="modalFile"></p></div><button class="icon-btn" id="closeModal">×</button></div>
   <div id="fieldStatus" class="field-status"></div>
+  <div id="infoPhotoPanel" class="info-photo-panel hidden">
+    <div class="info-photo-head"><div><strong id="infoPhotoLabel">Info-Foto · Bannblock</strong><span id="infoPhotoMeta">Zeitpunkt --</span></div><button type="button" class="ghost mini" id="photoRefresh">Aktualisieren</button></div>
+    <div class="info-photo-stage"><canvas id="infoPhotoCanvas"></canvas></div>
+    <div class="info-photo-fields">
+      <button type="button" class="photo-field active" data-field="banner">Bannblock</button>
+      <button type="button" class="photo-field" data-field="targetId">Ziel-ID</button>
+      <button type="button" class="photo-field" data-field="reason">Grund</button>
+      <button type="button" class="photo-field" data-field="sc">SC / RID</button>
+      <button type="button" class="photo-field" data-field="server">Server</button>
+      <button type="button" class="photo-field" data-field="date">Datum</button>
+      <button type="button" class="photo-field" data-field="discordId">Discord ID</button>
+    </div>
+  </div>
   <form id="entryForm">
     <div class="form-grid">
       <div class="field"><label>Ziel-ID</label><input id="targetId" inputmode="numeric" maxlength="6" placeholder="max. 6 Ziffern"><button type="button" class="jump hidden" data-field="targetId">POV hier öffnen</button></div>
@@ -141,7 +154,6 @@
 </div></div>
 
 <div id="toast" class="toast"></div>
-<video id="videoProbe" class="hidden-video" muted playsinline preload="metadata"></video>
 <script>
 (function(){
   'use strict';
@@ -213,6 +225,6 @@
   });
 })();
 </script>
-<script src="app.js?v=51"></script>
+<script src="app.js?v=54"></script>
 </body>
 </html>
