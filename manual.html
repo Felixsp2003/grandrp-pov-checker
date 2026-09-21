@@ -139,11 +139,13 @@
       let value='';
       if(field==='targetId'){
         // Only accept an ID from the ban structure; never take the admin ID that appears before "hat".
-        value=extractTargetFromBanner(joined)||numericIdVotes(texts);
+        value=extractTargetFromBanner(joined);
       }else if(field==='reason'){
-        const r=reasonFromText(joined);value=r||'';
+        const lines=joined.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+        const reasonText=lines.filter(x=>/grund|pc[ -]?check|cheat|acc|event/i.test(x)).slice(0,4).join(' ');
+        const r=reasonFromText(reasonText);value=r||'';
       }else if(field==='sc'){
-        const ipLike=joined.match(/(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{0,4}/ig)||[];const normalized=String(joined||'').toUpperCase().replace(/[OoQq]/g,'0').replace(/[IiLl|!]/g,'1').replace(/[Ss$]/g,'5').replace(/[Gg]/g,'6').replace(/[Zz]/g,'2').replace(/[Tt]/g,'7').replace(/[^0-9A-F]/g,'').toLowerCase();const candidates=normalized.match(/[0-9a-f]{40}/g)||[];value=candidates[0]||'';if(!value&&ipLike.length){const ip=ipLike[ipLike.length-1].toUpperCase().replace(/[^0-9A-F]/g,'');const pos=normalized.indexOf(ip);if(pos>=0)value=normalized.slice(pos+ip.length,pos+ip.length+40);}}
+        const ipLike=joined.match(/(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{0,4}/ig)||[];const normalized=String(joined||'').toUpperCase().replace(/[OoQq]/g,'0').replace(/[IiLl|!]/g,'1').replace(/[Ss$]/g,'5').replace(/[Gg]/g,'6').replace(/[Zz]/g,'2').replace(/[Tt]/g,'7').replace(/[^0-9A-F]/g,'').toLowerCase();const candidates=normalized.match(/[0-9a-f]{40}/g)||[];value='';if(ipLike.length){const ip=ipLike[ipLike.length-1].replace(/[^0-9A-F]/gi,'').toLowerCase();const pos=normalized.lastIndexOf(ip);if(pos>=0){const after=normalized.slice(pos+ip.length);const m=after.match(/^[0-9a-f]{40}/);value=m?m[0]:'';}}if(!value&&candidates.length===1)value=candidates[0];}
       else if(field==='date'){const m=joined.match(/\b(0?[1-9]|[12]\d|3[01])[\/\.\-](0?[1-9]|1[0-2])[\/\.\-](20\d{2})\b/);value=m?`${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`:''}
       else if(field==='discordId'){const ids=(joined.match(/\b\d{15,22}\b/g)||[]);value=ids.sort((a,b)=>b.length-a.length)[0]||'';}
       manual.value=value;

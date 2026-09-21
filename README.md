@@ -1,4 +1,4 @@
-# Grand RP POV Checker V58
+# Grand RP POV Checker V59
 
 Fixes in V40:
 - Defines the missing `setEditorValues()`, `setFieldStatus()` and `renderTitlePreview()` functions.
@@ -100,3 +100,7 @@ Automatische OCR akzeptiert Ziel-ID/Grund nur aus einem echten Bannblock, in dem
 
 ### V58 Queue-Pipeline
 Nach dem vollständigen resumable YouTube-Upload startet die lokale OCR sofort im Hintergrund. Die Queue wartet nicht mehr auf OCR oder manuelle Prüfung; die nächste POV wird direkt hochgeladen. Es gibt nur noch eine parallele OCR-Auswertung zur Speicherstabilität, während Uploads seriell bleiben.
+
+
+## V59 Queue-/OCR-Fix
+Uploads und OCR sind jetzt vollständig getrennt. Nach dem vollständigen Upload einer POV wird OCR nur als Hintergrundjob gestartet; der Upload-Pump wartet nicht auf OCR, Review oder YouTube-Verarbeitung und beginnt sofort mit der nächsten wartenden POV. Ein „OCR wartet“-Status blockiert den Upload-Pump nicht. Der automatische Bannanker akzeptiert nur einen Bannblock, in dem **Adam Byers** und **[15340]** vor „hat“ gemeinsam erkannt werden. Der Zeitstempel stammt ausschließlich aus dem verifizierten Bannblock. Manuelle OCR wertet beim Zielfeld ausschließlich das angeforderte Feld aus; die Ziel-ID hat keinen generischen Zahlen-Fallback mehr.

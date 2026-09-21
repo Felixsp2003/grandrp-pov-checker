@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V58';
+  const BUILD='V59';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -133,6 +133,7 @@
       const adminIds=[...before.matchAll(/\[\s*([0-9]{1,6})\s*\]/g)].map(m=>m[1]);
       if(!adminIds.includes(BAN_ADMIN_ID))continue;
       const adminName=hasAdamByersAnchor(before);
+      if(!adminName)continue;
       const dur=after.match(/\b(?:für|fur|fiir|fuer|for)\b\s*[0-9]{1,3}\s*(?:tage|days|tag|day)\b/i);
       if(!dur||!/\b(?:gebannt|banned|ban)\b/i.test(j))continue;
       const pre=after.slice(0,dur.index);
@@ -342,7 +343,7 @@
   if(isNode){module.exports={ALLOWED_REASONS,compact,similarity,normalizeHexLoose,normalizeIdToken,canonicalReason,parseTargetId,parseReason,extractScOrdered,extractScCandidatesFromString,extractHexCandidateAnyText,consensusHex,extractServerFromOcr,extractDate,serverVote,dateVote,clampId,validDate};return;}
 
   const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-  const state={entries:[],queue:[],filter:'all',editing:null,worker:null,specialWorker:null,accessToken:localStorage.getItem('yt_access_token')||sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:24,window:4.5,step:0.5},selectedTypes:new Set(),queueRunner:false,tokenExpiresAt:Number(localStorage.getItem('yt_access_expires_at_v50')||0),tokenRefreshPromise:null};
+  const state={entries:[],queue:[],filter:'all',editing:null,worker:null,specialWorker:null,accessToken:localStorage.getItem('yt_access_token')||sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:24,window:4.5,step:0.5},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,tokenExpiresAt:Number(localStorage.getItem('yt_access_expires_at_v50')||0),tokenRefreshPromise:null};
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
 
   function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2600);}
@@ -443,13 +444,13 @@
     ['dragleave','drop'].forEach(ev=>dropzone.addEventListener(ev,e=>{e.preventDefault();dropzone.classList.remove('drag');}));
     dropzone.addEventListener('drop',e=>addFiles([...e.dataTransfer.files].filter(f=>f.type.startsWith('video/')||/\.(mp4|mov|webm|mkv)$/i.test(f.name))));
   }
-  function addFiles(files){for(const file of files){state.queue.push({id:crypto.randomUUID(),file,status:'Wartet',progress:0,result:null,processing:false,editingDone:false,youtube:null});}renderQueue();processQueue();}
+  function addFiles(files){for(const file of files){state.queue.push({id:crypto.randomUUID(),file,status:'Upload wartet',progress:0,result:null,processing:false,uploading:false,ocrProcessing:false,editingDone:false,youtube:null,uploadStarted:false,uploadFailed:false});}renderQueue();pumpUploads();}
   async function retryQueueItem(item){
     if(!item||item.processing)return;
     if(item.youtube){await retryLocalOCR(item);return;}
-    item.status='Wartet · neuer Versuch';item.progress=0;item.processing=false;renderQueue();await processQueue();
+    item.status='Upload wartet · neuer Versuch';item.progress=0;item.processing=false;item.uploading=false;item.uploadStarted=false;item.uploadFailed=false;renderQueue();await pumpUploads();
   }
-  function renderQueue(){const q=$('#uploadQueue');$('#queueCount').textContent=`${state.queue.length} ${state.queue.length===1?'Datei':'Dateien'}`;q.innerHTML=state.queue.map(item=>{const hasError=/^Fehler:/i.test(item.status||'');const retry=(!item.processing&&((!!item.youtube&&!item.result)||hasError));const label=item.youtube?'OCR erneut':'Erneut verarbeiten';return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(item.finalName||item.file.name)}</strong><small>${formatSize(item.file.size)} · ${esc(item.status)}</small><div class="progress"><i style="width:${item.progress}%"></i></div></div><div class="queue-actions">${item.result?`<button class="mini" data-check="${item.id}">Prüfen</button>`:''}${retry?`<button class="mini primary" data-retry="${item.id}">${label}</button>`:''}<button class="mini" data-remove="${item.id}">×</button></div></div>`}).join('');$$('[data-check]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.check);if(x?.result)openEditor(x);});$$('[data-retry]').forEach(b=>b.onclick=async()=>{const x=state.queue.find(i=>i.id===b.dataset.retry);if(x)await retryQueueItem(x);});$$('[data-remove]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.remove);if(x?.processing){toast('POV wird gerade verarbeitet.');return;}state.queue=state.queue.filter(i=>i.id!==b.dataset.remove);renderQueue();});}
+  function renderQueue(){const q=$('#uploadQueue');$('#queueCount').textContent=`${state.queue.length} ${state.queue.length===1?'Datei':'Dateien'}`;q.innerHTML=state.queue.map(item=>{const hasError=/^Fehler:/i.test(item.status||'');const retry=(!item.uploading&&!item.ocrProcessing&&((!!item.youtube&&!item.result)||hasError));const label=item.youtube?'OCR erneut':'Erneut hochladen';return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(item.finalName||item.file.name)}</strong><small>${formatSize(item.file.size)} · ${esc(item.status)}</small><div class="progress"><i style="width:${item.progress}%"></i></div></div><div class="queue-actions">${item.result?`<button class="mini" data-check="${item.id}">Prüfen</button>`:''}${retry?`<button class="mini primary" data-retry="${item.id}">${label}</button>`:''}<button class="mini" data-remove="${item.id}">×</button></div></div>`}).join('');$$('[data-check]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.check);if(x?.result)openEditor(x);});$$('[data-retry]').forEach(b=>b.onclick=async()=>{const x=state.queue.find(i=>i.id===b.dataset.retry);if(x)await retryQueueItem(x);});$$('[data-remove]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.remove);if(x?.uploading){toast('YouTube-Upload läuft noch.');return;}state.queue=state.queue.filter(i=>i.id!==b.dataset.remove);renderQueue();});}
   async function retryLocalOCR(item){
     if(item.processing)return;
     item.processing=true;item.status='OCR wird erneut gestartet…';item.progress=60;renderQueue();
@@ -719,10 +720,20 @@
     const all=[...strictCoarse,...refined].filter(f=>f.ban&&f.ban.adminId===BAN_ADMIN_ID&&f.ban.targetId&&f.ban.reason);const map=new Map();for(const f of all){const k=`${f.ban.targetId}|${f.ban.reason}`;(map.get(k)||map.set(k,[]).get(k)).push(f);}
     const frames=[...(( [...map.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.ban.score,0)-a.reduce((s,x)=>s+x.ban.score,0))[0] )||[])];
     if(!frames.length){onProgress?.(100,'Ban-Anker nicht stabil genug');return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,missing:['Ziel-ID','Grund','Datum'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
-    const idV=uniqueVote(frames.map(f=>f.ban.targetId));const reasonV=uniqueVote(frames.map(f=>f.ban.reason));const anchor=frames.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0];const bannerTime=anchor.time;const timestamps={banner:bannerTime,targetId:bannerTime,reason:bannerTime,server:bannerTime};
+    const idV=uniqueVote(frames.map(f=>f.ban.targetId));const reasonV=uniqueVote(frames.map(f=>f.ban.reason));
+    const rankedFrames=frames.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp);
+    const topForAnchor=rankedFrames.slice(0,Math.min(9,rankedFrames.length));
+    // Pick the temporal centre of the VERIFIED ban block, not an arbitrary first/last
+    // OCR hit. Every candidate here already contains Adam Byers + [15340] + target + reason.
+    const medianTime=topForAnchor.length?topForAnchor.map(f=>f.time).sort((a,b)=>a-b)[Math.floor(topForAnchor.length/2)]:rankedFrames[0].time;
+    const anchor=rankedFrames.slice().sort((a,b)=>Math.abs(a.time-medianTime)-Math.abs(b.time-medianTime)||b.ban.score-a.ban.score||b.sharp-a.sharp)[0]||rankedFrames[0];
+    const bannerTime=anchor.time;
+    const bestIdFrame=frames.slice().filter(f=>f.ban.targetId===idV?.value).sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0]||anchor;
+    const bestReasonFrame=frames.slice().filter(f=>f.ban.reason===reasonV?.value).sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0]||anchor;
+    const timestamps={banner:bannerTime,targetId:bestIdFrame.time,reason:bestReasonFrame.time,server:bestReasonFrame.time};
     const specialWorker=await ensureSpecialWorker();const scCandidates=[];
     for(const f of frames.slice(0,12)){if(!(await safeSeek(video,f.time,2)))continue;let chat=null;try{chat=makeCrop(video,0,.005,.82,.40,3.6);const read=await readChat(worker,chat);const precise=extractScFromData(read.data,chat);if(precise.canvas){for(const [img,psm] of [[precise.canvas,7],[threshold(precise.canvas,125),7],[threshold(precise.canvas,150),7],[enhancedCanvas(precise.canvas,1.8,1.02),7]]){try{const r=await ocr(specialWorker,img,{psm,whitelist:'0123456789ABCDEFabcdef',nodict:true});const c=extractHexCandidateAnyText(r.text||'');if(c)scCandidates.push(c);}finally{if(img!==precise.canvas)clearCanvas(img);}}clearCanvas(precise.canvas);}}catch(err){console.debug('SC precision OCR',err);}finally{clearCanvas(chat);}}
-    const online=frames.some(f=>/\bIP\b/i.test(f.text||''));const sc=online?consensusHex(scCandidates):'';if(sc)timestamps.sc=anchor.time;const server='3';const dateVotes=[];
+    const online=frames.some(f=>/\bIP\b/i.test(f.text||''));const sc=online?consensusHex(scCandidates):'';if(sc){const scFrame=frames.find(f=>/\bIP\b/i.test(f.text||''))||anchor;timestamps.sc=scFrame.time;}const server='3';const dateVotes=[];
     for(let dt=-1.5;dt<=1.51;dt+=.5){const t=Math.max(0,Math.min(duration-.05,bannerTime+dt));if(!(await safeSeek(video,t,2)))continue;try{const crop=makeCrop(video,.76,.74,.24,.26,3.6);const d1=await ocr(specialWorker,crop,{psm:6,whitelist:'0123456789./-'});const d2=await ocr(specialWorker,threshold(crop,145),{psm:11,whitelist:'0123456789./-'});for(const tx of [d1.text||'',d2.text||'']){const dv=extractDate(tx);if(dv)dateVotes.push(dv);}clearCanvas(crop);}catch{}}
     const date=dateVote(dateVotes);if(date)timestamps.date=bannerTime;const missing=[];if(!idV?.value)missing.push('Ziel-ID');if(!reasonV?.value)missing.push('Grund');if(!server)missing.push('Server');if(!date)missing.push('Datum');if(online&&!sc)missing.push('SC');onProgress?.(100,idV?.value&&reasonV?.value?`Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}] erkannt`:'Ban erkannt, Angaben fehlen');
     return {targetId:/^\d{1,6}$/.test(idV?.value||'')?idV.value:'',reason:reasonV?.value||'',sc:online?(sc||''):'',server,date,offline:!online,missing,complete:missing.length===0,timestamps,confidence:{id:idV?idV.votes/Math.max(1,frames.length):0,reason:reasonV?reasonV.votes/Math.max(1,frames.length):0,sc:sc?1:0,server:1,date:date?1:0,ban:anchor.ban.score||0,admin:1}};
@@ -896,11 +907,11 @@
     if(!item)return;
     let media=null;
     try{
-      item.status='OCR startet · YouTube-Upload bereits vollständig abgeschlossen';
+      item.status='OCR läuft im Hintergrund · Upload der nächsten POV ist unabhängig';
       item.progress=60;renderQueue();
       media=await openLocalVideo(item.file,`POV ${item.file.name}`,storedCopy);
       item.progress=62;renderQueue();
-      item.result=await analyzeVideo(media.video,p=>{item.progress=62+Math.round(p*.38);item.status=`OCR ${p}%`;renderQueue();});
+      item.result=await analyzeVideo(media.video,p=>{item.progress=62+Math.round(p*.38);item.status=`OCR läuft ${p}% · Upload-Warteschlange unabhängig`;renderQueue();});
       item.result.originalName=item.file.name;
       item.result.sourceSize=sourceSize;
       item.result.remoteSize=remoteSize||0;
@@ -921,22 +932,31 @@
       if(media)closeLocalVideo(media);
       item.processing=false;
       item.ocrProcessing=false;
+      item.uploading=false;
       renderQueue();
     }
   }
 
-  async function processQueue(){
-    if(state.queueRunner)return;
-    state.queueRunner=true;
+  async function pumpUploads(){
+    // Dedicated upload pump: OCR/review NEVER owns this lock and can never block the
+    // next YouTube upload. Only one large video is uploaded at a time.
+    if(state.uploadRunner)return;
+    state.uploadRunner=true;
     try{
-      // Uploads stay serial so only one large source is transmitted at a time.
-      // Once a YouTube upload is completely accepted, OCR starts in the background
-      // and the next POV is uploaded immediately instead of waiting for OCR/review.
-      for(const item of state.queue){
-        if(item.uploadStarted||item.editingDone||item.status==='Gespeichert')continue;
-        if(!state.accessToken||!state.clientId){item.status='YouTube zuerst verbinden';renderQueue();continue;}
+      while(true){
+        const item=state.queue.find(i=>!i.uploadStarted&&!i.uploadFailed&&!i.editingDone&&i.status!=='Gespeichert'&&!i.youtube);
+        if(!item)break;
+        if(!state.accessToken||!state.clientId){
+          if(item.status!=='YouTube zuerst verbinden')item.status='YouTube zuerst verbinden';
+          renderQueue();
+          break;
+        }
         item.uploadStarted=true;
+        item.uploading=true;
         item.processing=true;
+        item.status='YouTube-Upload wird vorbereitet…';
+        item.progress=1;
+        renderQueue();
         try{
           await ensureYoutubeTokenFresh();
           const sourceSize=await verifyLocalFile(item.file,0,'Ausgewählte POV');
@@ -945,42 +965,51 @@
           if(!storedCopy)throw new Error('Lokale Kopie der POV konnte nicht gelesen werden.');
           if(Number(storedCopy.size)!==sourceSize)throw new Error(`Lokale Speicherung beschädigt: Quelle ${formatBytesExact(sourceSize)} · Archiv ${formatBytesExact(storedCopy.size)}.`);
           if(!(await compareFileEdges(item.file,storedCopy)))throw new Error('Lokale Speicherung stimmt am Anfang/Ende nicht mit der Originaldatei überein.');
-          item.status=`YouTube: vollständiger Upload · Quelle ${formatSize(sourceSize)}`;
-          item.progress=2;renderQueue();
+          item.status=`YouTube-Upload 0% · ${formatSize(sourceSize)} (${formatBytesExact(sourceSize)})`;
+          item.progress=2;
+          renderQueue();
+
           item.youtube=await uploadYoutube(item.file,item.file.name,state.accessToken,p=>{
             item.progress=2+Math.round(p*.58);
             item.status=`YouTube-Upload ${p}% · ${formatSize(sourceSize)} (${formatBytesExact(sourceSize)})`;
             renderQueue();
           });
+
+          // The resumable upload is finished here. Do NOT wait for YouTube processing,
+          // OCR, editor/review, title changes, or any other work before moving on.
           item.progress=60;
-          item.status='YouTube-Upload vollständig abgeschlossen · OCR startet';
+          item.uploading=false;
+          item.processing=false;
+          item.status='Upload fertig · OCR läuft im Hintergrund';
           renderQueue();
 
-          // IMPORTANT: Do not wait for YouTube transcoding here. The resumable upload
-          // returned success only after all source bytes were accepted. This is the
-          // exact point at which OCR may start, and it also frees the queue to upload
-          // the next POV immediately.
+          // Start OCR completely detached from the upload pump. Its promise is kept only
+          // for diagnostics/retry handling; it is NEVER awaited by pumpUploads().
           item.ocrProcessing=true;
           item.ocrPromise=runOcrForUploadedItem(item,sourceSize,storedCopy,0);
-          // Intentionally NOT awaited: next POV upload begins immediately.
         }catch(err){
-          console.error('Queue item failed',err);
+          console.error('Queue upload failed',err);
           item.status='Fehler: '+(err?.message||err);
           item.progress=0;
           item.processing=false;
+          item.uploading=false;
           item.uploadStarted=false;
+          item.uploadFailed=true;
           renderQueue();
         }
       }
     }finally{
-      state.queueRunner=false;
-      // A file may have been added while this pass was uploading another item.
-      // Start a new pass without waiting for any running OCR jobs.
-      if(state.queue.some(i=>!i.uploadStarted&&!i.editingDone&&i.status!=='Gespeichert')){
-        queueMicrotask(()=>processQueue());
+      state.uploadRunner=false;
+      // A new file may have been added while this pump was uploading the previous one.
+      // Start another pump without touching any OCR promises.
+      if(state.queue.some(i=>!i.uploadStarted&&!i.uploadFailed&&!i.editingDone&&i.status!=='Gespeichert'&& !i.youtube)){
+        queueMicrotask(()=>pumpUploads());
       }
     }
   }
+
+  // Compatibility wrapper for older UI handlers.
+  async function processQueue(){return pumpUploads();}
 
   function validClientId(clientId){
     return /^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(String(clientId||'').trim());
@@ -1006,6 +1035,7 @@
         localStorage.setItem('yt_access_expires_at_v50',String(state.tokenExpiresAt));
       }
       updateYtStatus(true);
+      queueMicrotask(()=>pumpUploads());
     }
     return state.accessToken;
   }
