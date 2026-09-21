@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Grand RP · Videoauswahl</title>
+<title>Grand RP · Videoauswahl · V56</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 :root{color-scheme:dark;--bg:#07060c;--panel:#120d19;--panel2:#17101f;--line:#30243a;--text:#f5eef8;--muted:#aaa0b0;--accent:#ff2380;--good:#69e1af;--warn:#ffbf66}
@@ -31,7 +31,7 @@
       <option value="reason">Grund · hinter Grund:</option>
     </select>
   </div>
-  <div class="tip" id="tip">Video normal abspielen/vor- und zurückspulen. Die Video-Controls funktionieren standardmäßig. Für eine Auswahl „Rahmen ziehen“ aktivieren; danach wieder ausschalten, um normal zu spulen.</div>
+  <div class="tip" id="tip">Video normal abspielen/vor- und zurückspulen. Die Video-Controls funktionieren standardmäßig. Für eine Auswahl „Rahmen ziehen“ aktivieren; danach wieder ausschalten, um normal zu spulen. Beim OCR wird ausschließlich das gewählte Feld ausgewertet. Für Ziel-ID gilt zusätzlich: Admin-ID 15340 wird niemals übernommen.</div>
   <div class="workspace">
     <div class="stage-wrap">
       <div class="stage">
@@ -95,28 +95,63 @@
   $('#preset').onchange=e=>{if(e.target.value)presetRect(e.target.value)};
   $('#clear').onclick=()=>{selection=null;manual.value='';draw();setDrawMode(false);setStatus('Auswahl gelöscht.')};
   serverButtons.querySelectorAll('button').forEach(b=>b.onclick=()=>{if(field==='server'){manual.value=b.dataset.server;setStatus(`Server ${b.dataset.server} gewählt.`,'good')}});
+  function fieldConfig(){
+    return {
+      targetId:{psm:[7,8,11], whitelist:'0123456789[]()ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz', label:'Ziel-ID / Bannzeile'},
+      reason:{psm:[6,7,11], whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789().- ', label:'Grund'},
+      sc:{psm:[7,8,11], whitelist:'0123456789ABCDEFabcdef:.- ', label:'SC / RID'},
+      date:{psm:[7,8,11], whitelist:'0123456789./- ', label:'Datum'},
+      discordId:{psm:[7,8,11], whitelist:'0123456789 ', label:'Discord ID'}
+    }[field]||{psm:[6,11],whitelist:'',label:'Auswahl'};
+  }
+  function gray(src){const c=document.createElement('canvas');c.width=src.width;c.height=src.height;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(src,0,0);const im=x.getImageData(0,0,c.width,c.height),d=im.data;for(let i=0;i<d.length;i+=4){const v=Math.round(.299*d[i]+.587*d[i+1]+.114*d[i+2]);d[i]=d[i+1]=d[i+2]=v;}x.putImageData(im,0,0);return c;}
+  function thresh(src,cut=150){const c=gray(src),x=c.getContext('2d',{willReadFrequently:true}),im=x.getImageData(0,0,c.width,c.height),d=im.data;for(let i=0;i<d.length;i+=4){const v=d[i]>=cut?255:0;d[i]=d[i+1]=d[i+2]=v;}x.putImageData(im,0,0);return c;}
+  function clear(c){try{c.width=1;c.height=1}catch{}}
+  function normId(v){const raw=String(v||'').toUpperCase().replace(/[^0-9A-Z]/g,'');const m=raw.replace(/[A-Z]/g,ch=>({O:'0',Q:'0',I:'1',L:'1',S:'5',Z:'2',G:'6',B:'8',T:'7'}[ch]||''));const d=m.replace(/\D/g,'');return /^\d{1,6}$/.test(d)?d:'';}
+  function extractTargetFromBanner(txt){
+    const t=String(txt||'').replace(/\r/g,' ');
+    const m=t.match(/\b15340\b[\s\S]{0,180}?\b(?:hat|ha[t7l1i])\b[\s\S]{0,180}?(?:\[\s*([0-9A-Za-z]{1,8})\s*\]|\bspieler\b\s*([0-9A-Za-z]{1,8}))/i);
+    return normId(m?.[1]||m?.[2]||'');
+  }
+  function numericIdVotes(texts){
+    const votes=new Map();
+    for(const txt of texts){
+      const tokens=[...String(txt||'').matchAll(/(?:\[\s*)?([0-9A-Za-z]{1,8})(?:\s*\])?/g)].map(m=>normId(m[1])).filter(x=>/^\d{1,6}$/.test(x));
+      for(const id of tokens){if(id==='15340')continue;votes.set(id,(votes.get(id)||0)+1);}
+    }
+    return [...votes.entries()].sort((a,b)=>b[1]-a[1]||Number(b[0])-Number(a[0]))[0]?.[0]||'';
+  }
   async function runOcr(){
-    if(field==='server'){manual.value=manual.value||'3';setStatus('Server ist im aktuellen Workflow standardmäßig 3.','good');return}
-    if(!selection||selection.w<6||selection.h<6){setStatus('Bitte zuerst mit der Maus einen Rahmen ziehen.','warn');return}
+    if(field==='server'){manual.value='3';setStatus('Nur das angeforderte Feld wird gelesen: Server = 3.','good');return}
+    if(!selection||selection.w<6||selection.h<6){setStatus('Bitte zuerst nur den benötigten Bereich markieren.','warn');return}
     if(!window.Tesseract){setStatus('OCR-Bibliothek konnte nicht geladen werden.','warn');return}
-    setStatus('OCR läuft…');
+    const cfg=fieldConfig();setStatus(`${cfg.label}: nur diese Auswahl wird analysiert…`);
+    let canvases=[];
     try{
       const sx=selection.x/overlay.clientWidth*video.videoWidth, sy=selection.y/overlay.clientHeight*video.videoHeight, sw=selection.w/overlay.clientWidth*video.videoWidth, sh=selection.h/overlay.clientHeight*video.videoHeight;
-      const out=document.createElement('canvas');out.width=Math.max(10,Math.round(sw*3));out.height=Math.max(10,Math.round(sh*3));
-      const octx=out.getContext('2d');octx.imageSmoothingEnabled=true;octx.filter='contrast(1.25) saturate(0.9)';octx.drawImage(video,sx,sy,sw,sh,0,0,out.width,out.height);
-      const res=await Tesseract.recognize(out,'eng',{logger:m=>{if(m.status&&m.progress)setStatus(`${Math.round(m.progress*100)}% · ${m.status}`)}});
-      let txt=(res.data.text||'').trim();
-      const lower=txt.toLowerCase();
-      if(field==='sc'){const ipLike=txt.match(/(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{0,4}/ig)||[];const normalized=normalizeHexLoose(txt);const candidates=normalized.match(/[0-9a-f]{40}/g)||[];if(candidates.length)txt=candidates[0];else if(ipLike.length&&normalized.length>=40)txt=normalized.slice(normalized.indexOf(normalizeHexLoose(ipLike[ipLike.length-1]))+normalizeHexLoose(ipLike[ipLike.length-1]).length).slice(0,40);}
-      if(field==='reason'){const r=reasonFromText(txt);if(r)txt=r;}
-      if(field==='date'){txt=extractDate(txt)||txt}
-      if(field==='targetId'){const m=txt.match(/\d{1,6}/);txt=m?m[0]:txt}
-      if(field==='server'){txt='3'}
-      manual.value=txt;setStatus('OCR fertig. Ergebnis prüfen und dann „Text / Wert übernehmen“ drücken.','good');
-    }catch(err){setStatus('OCR-Fehler: '+err.message,'warn')}
+      const base=document.createElement('canvas');base.width=Math.max(20,Math.min(5000,Math.round(sw*4)));base.height=Math.max(20,Math.min(5000,Math.round(sh*4)));const octx=base.getContext('2d');octx.imageSmoothingEnabled=true;octx.filter='contrast(1.35) saturate(.9)';octx.drawImage(video,sx,sy,sw,sh,0,0,base.width,base.height);canvases.push(base);
+      const variants=[base,gray(base),thresh(base,135),thresh(base,175)];canvases.push(...variants.slice(1));
+      const texts=[];
+      for(const img of variants){for(const psm of cfg.psm){
+        try{const res=await Tesseract.recognize(img,'eng',{config:{tessedit_pageseg_mode:String(psm),tessedit_char_whitelist:cfg.whitelist,preserve_interword_spaces:'1'},logger:m=>{if(m.status&&m.progress)setStatus(`${cfg.label}: ${Math.round(m.progress*100)}% · ${m.status}`)}});const t=(res.data.text||'').trim();if(t)texts.push(t);}catch{}
+      }}
+      const joined=[...new Set(texts)].join('\n');
+      let value='';
+      if(field==='targetId'){
+        // Only accept an ID from the ban structure; never take the admin ID that appears before "hat".
+        value=extractTargetFromBanner(joined)||numericIdVotes(texts);
+      }else if(field==='reason'){
+        const r=reasonFromText(joined);value=r||'';
+      }else if(field==='sc'){
+        const ipLike=joined.match(/(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{0,4}/ig)||[];const normalized=String(joined||'').toUpperCase().replace(/[OoQq]/g,'0').replace(/[IiLl|!]/g,'1').replace(/[Ss$]/g,'5').replace(/[Gg]/g,'6').replace(/[Zz]/g,'2').replace(/[Tt]/g,'7').replace(/[^0-9A-F]/g,'').toLowerCase();const candidates=normalized.match(/[0-9a-f]{40}/g)||[];value=candidates[0]||'';if(!value&&ipLike.length){const ip=ipLike[ipLike.length-1].toUpperCase().replace(/[^0-9A-F]/g,'');const pos=normalized.indexOf(ip);if(pos>=0)value=normalized.slice(pos+ip.length,pos+ip.length+40);}}
+      else if(field==='date'){const m=joined.match(/\b(0?[1-9]|[12]\d|3[01])[\/\.\-](0?[1-9]|1[0-2])[\/\.\-](20\d{2})\b/);value=m?`${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`:''}
+      else if(field==='discordId'){const ids=(joined.match(/\b\d{15,22}\b/g)||[]);value=ids.sort((a,b)=>b.length-a.length)[0]||'';}
+      manual.value=value;
+      setStatus(value?`${cfg.label}: nur der benötigte Wert wurde übernommen. Bitte prüfen.`:`${cfg.label}: kein eindeutiger Wert gefunden. Markiere den Bereich enger.` ,value?'good':'warn');
+    }catch(err){setStatus('OCR-Fehler: '+err.message,'warn')}finally{for(const c of canvases)clear(c)}
   }
   $('#ocr').onclick=runOcr;
-  $('#use').onclick=()=>{let v=manual.value.trim();if(field==='server')v=(v.match(/[1-4]/)||['3'])[0];if(field==='sc')v=normalizeHexLoose(v);if(field==='date')v=extractDate(v)||v;if(field==='targetId'){const m=v.match(/\d{1,6}/);v=m?m[0]:'';}if(field==='reason'){v=reasonFromText(v)||v;}if(!v&&field!=='server'){setStatus('Kein Wert vorhanden.','warn');return}if(field==='sc'&&v.length!==40){setStatus('SC muss nach der Bereinigung 40 Zeichen haben.','warn');return}if(field==='targetId'&&!(Number(v)>=0&&Number(v)<=999999)){setStatus('Ziel-ID darf höchstens 6 Ziffern haben.','warn');return}if(window.opener&&!window.opener.closed){window.opener.postMessage({type:'grandrp-manual-field',field,value:v,time:Number(video.currentTime)||0},location.origin);setStatus('Übernommen. Du kannst diesen Tab schließen.','good')}else{setStatus('Ursprungsfenster nicht mehr geöffnet.','warn')}};
+  $('#use').onclick=()=>{let v=manual.value.trim();if(field==='server')v=(v.match(/[1-4]/)||['3'])[0];if(field==='sc')v=normalizeHexLoose(v);if(field==='date')v=extractDate(v)||v;if(field==='targetId'){v=normId(v);}if(field==='reason'){v=reasonFromText(v)||v;}if(!v&&field!=='server'){setStatus('Kein Wert vorhanden.','warn');return}if(field==='sc'&&v.length!==40){setStatus('SC muss nach der Bereinigung 40 Zeichen haben.','warn');return}if(field==='targetId'&&!(Number(v)>=0&&Number(v)<=999999)){setStatus('Ziel-ID darf höchstens 6 Ziffern haben.','warn');return}if(window.opener&&!window.opener.closed){window.opener.postMessage({type:'grandrp-manual-field',field,value:v,time:Number(video.currentTime)||0},location.origin);setStatus('Übernommen. Du kannst diesen Tab schließen.','good')}else{setStatus('Ursprungsfenster nicht mehr geöffnet.','warn')}};
   $('#serverButtons').classList.toggle('hidden',field!=='server'); fieldTitle.textContent=`Feld: ${fieldLabel()}`; document.title=`Grand RP · ${fieldLabel()}`;
   (async()=>{if(!job){setStatus('Keine POV-ID angegeben.','warn');return;}try{file=await getVideo(job);if(!file){setStatus('POV-Datei nicht gefunden. Bitte zuerst im Hauptfenster neu hochladen.','warn');return;}video.src=URL.createObjectURL(file);$('#meta').textContent=`${file.name} · ${formatSize(file.size)} · Original unverändert`;if(field==='server'){serverButtons.classList.remove('hidden');manual.value='3';setStatus('Server 3 ist voreingestellt. Bei Bedarf einen anderen Wert wählen.','good');}}catch(err){setStatus('POV konnte nicht geladen werden: '+err.message,'warn')}})();
 })();

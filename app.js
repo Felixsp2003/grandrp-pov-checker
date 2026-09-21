@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V46
+/* Grand RP DC Checker V57
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,10 +10,12 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V55';
+  const BUILD='V57';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
+  const BAN_ADMIN_NAME='Adam Byers';
+  const BAN_ADMIN_ID='15340';
 
   const ALLOWED_REASONS=[
     'PC Check Positiv',
@@ -102,74 +104,58 @@
     }
     return bestScore>=0.76?{value:best,score:bestScore}:null;
   }
-  function parseTargetId(text){
+  function fuzzyWordMatch(word,target){
+    const a=compact(word), b=compact(target);
+    if(!a||!b)return false;
+    if(a===b)return true;
+    return similarity(a,b)>=0.72;
+  }
+  function hasAdamByersAnchor(before){
+    const raw=cleanText(before);
+    const words=raw.split(/\s+/).map(x=>x.replace(/[^A-Za-z]/g,'')).filter(Boolean);
+    for(let i=0;i<words.length-1;i++){
+      if(fuzzyWordMatch(words[i],'Adam') && fuzzyWordMatch(words[i+1],'Byers')) return true;
+    }
+    const c=compact(raw);
+    return c.includes(compact(BAN_ADMIN_NAME)) || /ad[a4]m.{0,3}by[e3]rs/i.test(c);
+  }
+  function extractBanEvent(text){
     const t=cleanText(text);
+    if(!t)return null;
     const lines=t.split('\n');
     const joined=[];
-    for(let i=0;i<lines.length;i++) joined.push(lines.slice(i, i+4).join(' '));
-
-    // Primary Grand-RP pattern: target ID is AFTER "hat" and BEFORE the ban-duration phrase.
-    // We intentionally ignore the administrator ID that appears before "hat".
-    const beforeDuration=/\b(?:für|fur|fiir|fuer|for|fur)\b\s*\d{1,3}\s*(?:tage|days|tag|day)\b/i;
-    // OCR-tolerant variants for the literal "hat": hât/ha1/haI/ha7 and split spacing.
-    const hatWord='(?:h\\s*a\\s*[t7l1i]|ha[t7l1i])';
-    const bracketAfterHat=new RegExp('\\b'+hatWord+'\\b[\\s\\S]{0,220}?\\[\\s*([0-9A-Za-z]{1,10})\\s*\\][\\s\\S]{0,100}?\\b(?:für|fur|fiir|fuer|for)\\b','i');
-    const plainAfterHat=new RegExp('\\b'+hatWord+'\\b([\\s\\S]{0,220})','i');
+    for(let i=0;i<lines.length;i++)joined.push(lines.slice(i,i+4).join(' '));
+    let best=null;
     for(const j of joined){
-      let m=j.match(bracketAfterHat);
-      if(m){const id=normalizeIdToken(m[1]); if(/^\d{1,6}$/.test(id)) return id;}
-      const pm=j.match(plainAfterHat);
-      if(pm){
-        const afterHat=pm[1];
-        // Prefer the LAST short numeric token immediately before the duration phrase.
-        const dm=afterHat.match(new RegExp('([0-9A-Za-z\\[\\] ]{1,160})\\b(?:für|fur|fiir|fuer|for)\\b\\s*\\d{1,3}\\s*(?:tage|days|tag|day)\\b','i'));
-        if(dm){
-          const nums=[...dm[1].matchAll(/(?:\[\s*)?([0-9]{1,6})(?:\s*\])?(?!\d)/g)].map(x=>x[1]);
-          if(nums.length){const id=normalizeIdToken(nums[nums.length-1]);if(/^\d{1,6}$/.test(id))return id;}
-        }
+      if(!/\b(?:hat|ha[t7l1i])\b/i.test(j))continue;
+      const hat=j.search(/\b(?:hat|ha[t7l1i])\b/i);if(hat<0)continue;
+      const before=j.slice(0,hat),after=j.slice(hat+3);
+      const adminIds=[...before.matchAll(/\[\s*([0-9]{1,6})\s*\]/g)].map(m=>m[1]);
+      if(!adminIds.includes(BAN_ADMIN_ID))continue;
+      const adminName=hasAdamByersAnchor(before);
+      const dur=after.match(/\b(?:für|fur|fiir|fuer|for)\b\s*[0-9]{1,3}\s*(?:tage|days|tag|day)\b/i);
+      if(!dur||!/\b(?:gebannt|banned|ban)\b/i.test(j))continue;
+      const pre=after.slice(0,dur.index);
+      const targetIds=[...pre.matchAll(/\[\s*([0-9]{1,6})\s*\]/g)].map(m=>m[1]);
+      if(!targetIds.length){
+        const nums=[...pre.matchAll(/(?:\bspieler\b|\bplayer\b|\buser\b)[^0-9]{0,50}\b([0-9]{1,6})\b/ig)].map(m=>m[1]);
+        if(nums.length)targetIds.push(nums[nums.length-1]);
       }
+      if(!targetIds.length)continue;
+      const target=normalizeIdToken(targetIds[targetIds.length-1]);
+      const reasonMatch=j.match(/\bGrund\s*[:.\-]?\s*(.+)$/i);
+      const reason=reasonMatch?parseReason(reasonMatch[1]):parseReason(j);
+      let score=65;if(adminName)score+=25;if(/\bGrund\b/i.test(j))score+=6;if(reason)score+=18;if(target===BAN_ADMIN_ID)score-=1000;
+      const candidate={targetId:target,adminId:BAN_ADMIN_ID,adminNameMatched:adminName,reason:reason?.value||'',reasonScore:reason?.score||0,score,text:j};
+      if(/^\d{1,6}$/.test(candidate.targetId)&&candidate.targetId!==BAN_ADMIN_ID&&(!best||candidate.score>best.score))best=candidate;
     }
-    // Fallback: any bracketed/standalone 1..6 digit target directly after "hat".
-    for(const line of lines){
-      const m=line.match(/\bhat\b([^\n]*)/i); if(!m)continue;
-      const tail=m[1];
-      const bracketNums=[...tail.matchAll(/\[\s*([0-9]{1,6})\s*\]/g)].map(x=>x[1]);
-      if(bracketNums.length){const id=normalizeIdToken(bracketNums[bracketNums.length-1]);if(/^\d{1,6}$/.test(id))return id;}
-      const duration=tail.search(/\b(?:für|fur|fiir|fuer|for)\b/i);
-      const pre=duration>=0?tail.slice(0,duration):tail;
-      const nums=[...pre.matchAll(/\b([0-9]{1,6})\b/g)].map(x=>x[1]);
-      if(nums.length){const id=normalizeIdToken(nums[nums.length-1]);if(/^\d{1,6}$/.test(id))return id;}
-    }
-    // Numeric-only recovery: when full OCR mangles the surrounding words, inspect
-    // short windows containing common OCR variants of "hat" and the duration phrase.
-    for(const line of lines){
-      const low=compact(line);
-      if(!/(hat|ha1|hal|hai|ha7)/.test(low)) continue;
-      const nums=[...line.matchAll(/(?:\[\s*)?([0-9A-Za-z]{1,6})(?:\s*\])?/g)]
-        .map(m=>normalizeIdToken(m[1])).filter(x=>/^\d{1,6}$/.test(x));
-      if(nums.length){
-        // Prefer a number close to a duration marker; otherwise use the last short token.
-        const dur=line.match(/(?:für|fur|fiir|fuer|for|tage|days|tag|day)/i);
-        if(dur){
-          const before=line.slice(0,dur.index);
-          const near=[...before.matchAll(/(?:\[\s*)?([0-9A-Za-z]{1,6})(?:\s*\])?/g)]
-            .map(m=>normalizeIdToken(m[1])).filter(x=>/^\d{1,6}$/.test(x));
-          if(near.length)return near[near.length-1];
-        }
-        return nums[nums.length-1];
-      }
-    }
-
-    // Last resort: preserve the original strict administrator-ban pattern.
-    for(const line of lines){
-      if(!/(administrator|adminstrator|admin)\b/i.test(line) || !/\bhat\b/i.test(line) || !/(gebannt|banned|\bfür\b|\bfur\b|\bfiir\b|\bfuer\b|\bfor\b)/i.test(line)) continue;
-      const beforeHat=line.split(/\bhat\b/i)[0]||'';
-      const afterHat=line.split(/\bhat\b/i)[1]||'';
-      const adminIds=[...beforeHat.matchAll(/\[\s*([0-9]{1,6})\s*\]/g)].map(m=>m[1]);
-      const targetMatch=afterHat.match(/\[\s*([0-9]{1,6})\s*\]/);
-      if(adminIds.length===1 && targetMatch){const id=normalizeIdToken(targetMatch[1]); if(/^\d{1,6}$/.test(id)) return id;}
-    }
-    return '';
+    return best;
+  }
+  function parseTargetId(text){
+    // Strict parser: a target ID is valid only when the actual ban event is
+    // anchored to Adam Byers / administrator ID 15340. No generic numeric fallback.
+    const ban=extractBanEvent(text);
+    return ban?.targetId&&/^\d{1,6}$/.test(ban.targetId)?ban.targetId:'';
   }
   function classifyReasonStrong(text){
     const c=compact(String(text||''));
@@ -478,8 +464,7 @@
       media=await openLocalVideo(file,`POV ${file.name}`,stored&&stored!==file?stored:null);
       item.result=await analyzeVideo(media.video,p=>{item.progress=60+Math.round(p*.40);item.status=`OCR ${p}% · erneuter Versuch`;renderQueue();});
       item.result.originalName=file.name;item.result.sourceSize=sourceSize;item.result.remoteSize=Number(item.result.remoteSize||item.youtube?.remoteSize||0);item.result.sourceType=file.type||'video/mp4';item.result.types=[];item.result.proof=item.youtube?.url||item.result.proof||'';item.result.youtube=item.youtube||item.result.youtube;
-      item.status=item.result.complete?`OCR fertig · Quelle ${formatSize(sourceSize)} · Prüfung offen`:'OCR unvollständig · Prüfung nötig';item.progress=100;renderQueue();openEditor(item);
-      await new Promise(resolve=>{const timer=setInterval(()=>{if(!state.editing){clearInterval(timer);resolve();}},150);});
+      item.status=item.result.complete?`OCR fertig · Prüfung offen`:'OCR unvollständig · Prüfung nötig';item.progress=100;renderQueue();if(!state.editing)openEditor(item);else{item.status+=' · Prüfung wartet';renderQueue();}
     }catch(err){item.status='Fehler: '+(err?.message||err);item.progress=0;renderQueue();}finally{closeLocalVideo(media);item.processing=false;renderQueue();}
   }
   async function loadVideoElement(v,label='POV'){
@@ -704,62 +689,43 @@
     const raw=lines.filter(l=>(l.bbox?.y1||0)>=y0 && (l.bbox?.y0||0)<=y1).map(l=>l.text||'').join('\n');
     return {canvas:c,y:y0,raw,online:true};
   }
+  const BAN_ROI={x:0,y:.005,w:.84,h:.34};
+  async function readBanOnly(worker,video){
+    const chat=makeCrop(video,BAN_ROI.x,BAN_ROI.y,BAN_ROI.w,BAN_ROI.h,3.8);
+    const texts=[];
+    const variants=[[grayCanvas(chat),6],[enhancedCanvas(chat,1.60,1.03),6],[threshold(chat,145),11],[threshold(chat,185),11],[grayCanvas(chat),11]];
+    try{const nimg=enhancedCanvas(chat,1.75,1.03);const r=await ocr(worker,nimg,{psm:11,whitelist:'0123456789[]',numeric:true,nodict:true});if(r?.text)texts.push(cleanText(r.text));clearCanvas(nimg);}catch{}
+    for(const [img,psm] of variants){try{const r=await ocr(worker,img,{psm,nodict:true});if(r?.text)texts.push(cleanText(r.text));}catch{}finally{clearCanvas(img);}}
+    const merged=[...new Set(texts.filter(Boolean))].join('\n');clearCanvas(chat);return {text:merged};
+  }
   async function analyzeVideo(video,onProgress){
-    const worker=await ensureWorker();const duration=video.duration;const start=Math.max(0,duration-40);const settings=state.settings;
+    const worker=await ensureWorker();const duration=video.duration;const start=Math.max(0,duration-45);const settings=state.settings;
     if(!Number.isFinite(duration)||duration<=0)throw new Error('Videodauer konnte nicht bestimmt werden.');
-    const baseCount=Math.max(22,Math.min(34,Number(settings.frames)||28));const coarse=[];let seekFailures=0;
+    const baseCount=Math.max(26,Math.min(40,Number(settings.frames)||30));const coarse=[];
     for(let i=0;i<baseCount;i++){
-      const t=duration<=40?(duration*(i/Math.max(1,baseCount-1))):start+((duration-start-.5)*i/Math.max(1,baseCount-1));
-      if(!(await safeSeek(video,t,3))){seekFailures++;onProgress?.(8+Math.round(i/baseCount*38),`Frame ${i+1}/${baseCount} übersprungen · Decoder wartet`);continue;}
-      try{
-        const chat=makeCrop(video,0,.005,.98,.50,2.8);const read=await readChat(worker,chat);const text=read.text;const id=parseTargetId(text),reason=parseReason(text),scInfo=extractScOrdered(text,id,reason);const sharp=sharpness(chat);clearCanvas(chat);
-        coarse.push({time:t,text,id,reason,sc:scInfo.candidate,online:scInfo.online,score:(id?16:0)+(reason?16:0)+(scInfo.candidate?10:0)+(scInfo.online?3:0)+(/administrator|admin/i.test(text)?2:0)+(/grund/i.test(text)?3:0),sharp});
-      }catch(err){onProgress?.(8+Math.round(i/baseCount*38),`Frame ${i+1}/${baseCount} · OCR-Fehler übersprungen`);}
-      onProgress?.(8+Math.round((i+1)/baseCount*38),`Schnellscan ${i+1}/${baseCount}`);
+      const t=duration<=45?duration*(i/Math.max(1,baseCount-1)):start+((duration-start-.35)*i/Math.max(1,baseCount-1));
+      if(!(await safeSeek(video,t,3)))continue;
+      try{const read=await readBanOnly(worker,video);const ban=extractBanEvent(read.text);coarse.push({time:t,text:read.text,ban,sharp:ban?sharpness(makeCrop(video,BAN_ROI.x,BAN_ROI.y,BAN_ROI.w,BAN_ROI.h,2.2)):0});}catch(err){console.debug('Ban OCR skipped',err);}
+      onProgress?.(8+Math.round((i+1)/baseCount*40),`Bann-Scan ${i+1}/${baseCount}`);
     }
-    if(!coarse.length)throw new Error(`Keine verwertbaren Frames gelesen (${seekFailures} Suchfehler).`);
-    const grouped=new Map();for(const f of coarse){if(f.id||f.reason){const k=`${f.id||'?'}|${f.reason||'?'}`;(grouped.get(k)||grouped.set(k,[]).get(k)).push(f);}}
-    let group=[...grouped.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.score,0)-a.reduce((s,x)=>s+x.score,0))[0]||[];if(!group.length)group=coarse.sort((a,b)=>b.score-a.score||b.sharp-a.sharp).slice(0,8);
-    const seeds=group.slice().sort((a,b)=>b.score-a.score||b.sharp-a.sharp).slice(0,4);
-    const refineTimes=new Set();const win=Math.max(3,Math.min(8,Number(settings.window)||5));const rstep=Math.max(.35,Math.min(1.0,Number(settings.step)||.45));
-    for(const seed of seeds){for(let t=Math.max(start,seed.time-win/2);t<=Math.min(duration-.05,seed.time+win/2);t+=rstep)refineTimes.add(Math.round(t*20)/20);}
-    const refined=[];let n=0;const times=[...refineTimes].sort((a,b)=>a-b);
-    for(const t of times){
-      if(!(await safeSeek(video,t,2))){continue;}
-      try{const chat=makeCrop(video,0,.005,.98,.54,3.1);const read=await readChat(worker,chat);const text=read.text;const id=parseTargetId(text),reason=parseReason(text),scInfo=extractScOrdered(text,id,reason);const sharp=sharpness(chat);clearCanvas(chat);refined.push({time:t,text,id,reason,sc:scInfo.candidate,online:scInfo.online,score:(id?16:0)+(reason?16:0)+(scInfo.candidate?10:0)+(scInfo.online?3:0),sharp});}catch{}
-      n++;onProgress?.(46+Math.round(n/Math.max(1,times.length)*31),`Präzisionsscan ${n}/${times.length}`);
-    }
-    const all=[...coarse,...refined];const coherent=all.filter(f=>f.id&&f.reason);const blockMap=new Map();for(const f of coherent){const k=`${f.id}|${f.reason}`;(blockMap.get(k)||blockMap.set(k,[]).get(k)).push(f);}
-    const bannerFrames=[...([...blockMap.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.score,0)-a.reduce((s,x)=>s+x.score,0))[0]||[])].sort((a,b)=>b.score-a.score||b.sharp-a.sharp);const fallback=all.filter(f=>f.id||f.reason).sort((a,b)=>b.score-a.score||b.sharp-a.sharp).slice(0,12);const frames=bannerFrames.length?bannerFrames:fallback;
-    const idV=uniqueVote(frames.map(f=>f.id));const reasonV=uniqueVote(frames.map(f=>f.reason));const bannerTime=frames[0]?.time??start;const timestamps={banner:bannerTime};if(idV?.value)timestamps.targetId=frames.find(f=>f.id===idV.value)?.time??bannerTime;if(reasonV?.value)timestamps.reason=frames.find(f=>f.reason===reasonV.value)?.time??bannerTime;
-    const onlineSeen=frames.some(f=>f.online);const scCandidates=[];const specialWorker=await ensureSpecialWorker();
-    for(const f of frames.slice(0,10)){
-      if(!(await safeSeek(video,f.time,2)))continue;
-      let chat=null;try{
-        chat=makeCrop(video,0,.005,.98,.54,3.2);const read=await readChat(worker,chat);const textCandidates=[f.text||'',read.text||''];
-        const precise=extractScFromData(read.data,chat);
-        if(precise.canvas){
-          const forms=[
-            [precise.canvas,7],
-            [threshold(precise.canvas,125),7],
-            [threshold(precise.canvas,150),7],
-            [threshold(precise.canvas,180),7],
-            [enhancedCanvas(precise.canvas,1.8,1.02),7]
-          ];
-          for(const [img,psm] of forms){try{const r=await ocr(specialWorker,img,{psm,whitelist:'0123456789ABCDEFabcdef',nodict:true});const c=extractHexCandidateAnyText(r.text||'');if(c)scCandidates.push(c);}finally{if(img!==precise.canvas)clearCanvas(img);}}
-          textCandidates.push(precise.raw||'');clearCanvas(precise.canvas);
-        }
-        for(const tx of textCandidates){const r=extractScOrdered(tx,f.id,f.reason);if(r.candidate)scCandidates.push(r.candidate);}const any=extractHexCandidateAnyText(textCandidates.join('\n'));if(any)scCandidates.push(any);
-      }catch(err){console.debug('SC precision OCR',err);}finally{clearCanvas(chat);}
-    }
-    const sc=onlineSeen?consensusHex(scCandidates):'';if(sc)timestamps.sc=frames.find(f=>f.sc)?.time??bannerTime;
-    const server='3';timestamps.server=bannerTime;
-    const serverTimes=new Set();for(let dt=-1.5;dt<=1.51;dt+=.5)serverTimes.add(Math.max(0,Math.min(duration-.05,bannerTime+dt)));const dateVotes=[];let dc=0;
-    for(const t of serverTimes){if(dc++>=10)break;if(!(await safeSeek(video,t,2)))continue;try{const crop=makeCrop(video,.76,.74,.24,.26,3.6);const d1=await ocr(specialWorker,crop,{psm:6,whitelist:'0123456789./-'});const d2=await ocr(specialWorker,threshold(crop,145),{psm:11,whitelist:'0123456789./-'});for(const tx of [d1.text||'',d2.text||'']){const dv=extractDate(tx);if(dv)dateVotes.push(dv);}clearCanvas(crop);}catch{}}
-    const date=dateVote(dateVotes);if(date)timestamps.date=bannerTime;
-    const missing=[];if(!idV?.value)missing.push('Ziel-ID');if(!reasonV?.value)missing.push('Grund');if(!server)missing.push('Server');if(!date)missing.push('Datum');if(onlineSeen&&!sc)missing.push('SC');
-    if(!idV?.value&&!reasonV?.value)onProgress?.(100,'Analyse beendet · Banner nicht zuverlässig gefunden');else onProgress?.(100,'Analyse abgeschlossen');
-    return {targetId:/^\d{1,6}$/.test(idV?.value||'')?(idV.value||''):'',reason:reasonV?.value||'',sc:onlineSeen?(sc||''):'',server,date,offline:!onlineSeen,missing,complete:missing.length===0,timestamps,confidence:{id:idV?idV.votes/Math.max(1,frames.length):0,reason:reasonV?reasonV.votes/Math.max(1,frames.length):0,sc:sc?1:0,server:1,date:date?1:0}};
+    const strictCoarse=coarse.filter(f=>f.ban&&f.ban.adminId===BAN_ADMIN_ID&&f.ban.targetId&&f.ban.reason);
+    if(!strictCoarse.length){onProgress?.(100,`Kein eindeutiger Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}]`);return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,missing:['Ziel-ID','Grund','Datum'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
+    const grouped=new Map();for(const f of strictCoarse){const k=`${f.ban.targetId}|${f.ban.reason}`;(grouped.get(k)||grouped.set(k,[]).get(k)).push(f);}
+    const group=[...grouped.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.ban.score,0)-a.reduce((s,x)=>s+x.ban.score,0))[0]||[];
+    const seeds=group.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp).slice(0,6);const refineTimes=new Set();const win=Math.max(3,Math.min(9,Number(settings.window)||5));const rstep=Math.max(.30,Math.min(.8,Number(settings.step)||.4));
+    for(const seed of seeds)for(let t=Math.max(start,seed.time-win/2);t<=Math.min(duration-.05,seed.time+win/2);t+=rstep)refineTimes.add(Math.round(t*20)/20);
+    const refined=[];const times=[...refineTimes].sort((a,b)=>a-b);let n=0;
+    for(const t of times){if(!(await safeSeek(video,t,2)))continue;try{const read=await readBanOnly(worker,video);const ban=extractBanEvent(read.text);if(ban)refined.push({time:t,text:read.text,ban,sharp:0});}catch{}n++;onProgress?.(48+Math.round(n/Math.max(1,times.length)*28),`Ban-Präzisionsscan ${n}/${times.length}`);}
+    const all=[...strictCoarse,...refined].filter(f=>f.ban&&f.ban.adminId===BAN_ADMIN_ID&&f.ban.targetId&&f.ban.reason);const map=new Map();for(const f of all){const k=`${f.ban.targetId}|${f.ban.reason}`;(map.get(k)||map.set(k,[]).get(k)).push(f);}
+    const frames=[...(( [...map.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.ban.score,0)-a.reduce((s,x)=>s+x.ban.score,0))[0] )||[])];
+    if(!frames.length){onProgress?.(100,'Ban-Anker nicht stabil genug');return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,missing:['Ziel-ID','Grund','Datum'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
+    const idV=uniqueVote(frames.map(f=>f.ban.targetId));const reasonV=uniqueVote(frames.map(f=>f.ban.reason));const anchor=frames.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0];const bannerTime=anchor.time;const timestamps={banner:bannerTime,targetId:bannerTime,reason:bannerTime,server:bannerTime};
+    const specialWorker=await ensureSpecialWorker();const scCandidates=[];
+    for(const f of frames.slice(0,12)){if(!(await safeSeek(video,f.time,2)))continue;let chat=null;try{chat=makeCrop(video,0,.005,.82,.40,3.6);const read=await readChat(worker,chat);const precise=extractScFromData(read.data,chat);if(precise.canvas){for(const [img,psm] of [[precise.canvas,7],[threshold(precise.canvas,125),7],[threshold(precise.canvas,150),7],[enhancedCanvas(precise.canvas,1.8,1.02),7]]){try{const r=await ocr(specialWorker,img,{psm,whitelist:'0123456789ABCDEFabcdef',nodict:true});const c=extractHexCandidateAnyText(r.text||'');if(c)scCandidates.push(c);}finally{if(img!==precise.canvas)clearCanvas(img);}}clearCanvas(precise.canvas);}}catch(err){console.debug('SC precision OCR',err);}finally{clearCanvas(chat);}}
+    const online=frames.some(f=>/\bIP\b/i.test(f.text||''));const sc=online?consensusHex(scCandidates):'';if(sc)timestamps.sc=anchor.time;const server='3';const dateVotes=[];
+    for(let dt=-1.5;dt<=1.51;dt+=.5){const t=Math.max(0,Math.min(duration-.05,bannerTime+dt));if(!(await safeSeek(video,t,2)))continue;try{const crop=makeCrop(video,.76,.74,.24,.26,3.6);const d1=await ocr(specialWorker,crop,{psm:6,whitelist:'0123456789./-'});const d2=await ocr(specialWorker,threshold(crop,145),{psm:11,whitelist:'0123456789./-'});for(const tx of [d1.text||'',d2.text||'']){const dv=extractDate(tx);if(dv)dateVotes.push(dv);}clearCanvas(crop);}catch{}}
+    const date=dateVote(dateVotes);if(date)timestamps.date=bannerTime;const missing=[];if(!idV?.value)missing.push('Ziel-ID');if(!reasonV?.value)missing.push('Grund');if(!server)missing.push('Server');if(!date)missing.push('Datum');if(online&&!sc)missing.push('SC');onProgress?.(100,idV?.value&&reasonV?.value?`Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}] erkannt`:'Ban erkannt, Angaben fehlen');
+    return {targetId:/^\d{1,6}$/.test(idV?.value||'')?idV.value:'',reason:reasonV?.value||'',sc:online?(sc||''):'',server,date,offline:!online,missing,complete:missing.length===0,timestamps,confidence:{id:idV?idV.votes/Math.max(1,frames.length):0,reason:reasonV?reasonV.votes/Math.max(1,frames.length):0,sc:sc?1:0,server:1,date:date?1:0,ban:anchor.ban.score||0,admin:1}};
   }
   async function openManualPicker(entry, field){
     if(!entry)return;
@@ -953,8 +919,7 @@
         const media=await openLocalVideo(item.file,`POV ${item.file.name}`,storedCopy);item.progress=62;renderQueue();
         try{
           item.result=await analyzeVideo(media.video,p=>{item.progress=62+Math.round(p*.38);renderQueue();});
-          item.result.originalName=item.file.name;item.result.sourceSize=sourceSize;item.result.remoteSize=remoteSize||0;item.result.sourceType=item.file.type||'video/mp4';item.result.types=[];item.result.proof=item.youtube.url;item.result.youtube=item.youtube;item.status=item.result.complete?`OCR fertig · Quelle ${formatSize(sourceSize)} · Prüfung offen`:'OCR unvollständig · Prüfung nötig';renderQueue();openEditor(item);
-          await new Promise(resolve=>{const timer=setInterval(()=>{if(!state.editing){clearInterval(timer);resolve();}},150);});
+          item.result.originalName=item.file.name;item.result.sourceSize=sourceSize;item.result.remoteSize=remoteSize||0;item.result.sourceType=item.file.type||'video/mp4';item.result.types=[];item.result.proof=item.youtube.url;item.result.youtube=item.youtube;item.status=item.result.complete?`OCR fertig · Prüfung offen`:'OCR unvollständig · Prüfung nötig';renderQueue();if(!state.editing){openEditor(item);}else{item.status+=' · Nächste POV wird hochgeladen';renderQueue();}
         }finally{closeLocalVideo(media);}
       }catch(err){console.error(err);item.status='Fehler: '+(err?.message||err);item.progress=0;renderQueue();}
       finally{item.processing=false;}
