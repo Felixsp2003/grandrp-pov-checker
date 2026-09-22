@@ -10,10 +10,12 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V60';
+  const BUILD='V61';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
+  const META_STORE='archive_meta';
+  const DB_VERSION=2;
   const BAN_ADMIN_NAME='Adam Byers';
   const BAN_ADMIN_ID='15340';
 
@@ -376,16 +378,33 @@
     return actual;
   }
   function formatDateDE(v){if(!v)return '';const m=String(v).match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}.${m[2]}.${m[1]}`:v;}
-  async function loadMeta(){
+  function archiveSnapshot(){return state.entries.map(e=>({...e,file:undefined,videoUrl:undefined}));}
+  async function saveMeta(){
+    const snapshot=archiveSnapshot();
     try{
-      let raw=localStorage.getItem(META_KEY);
-      if(!raw) raw=localStorage.getItem('grandrp_pov_meta_v27')||localStorage.getItem('grandrp_pov_meta_v26')||localStorage.getItem('grandrp_pov_meta_v25')||'[]';
-      state.entries=JSON.parse(raw)||[];
-    }catch{state.entries=[];}
+      const db=await openDB();
+      await new Promise((res,rej)=>{const tx=db.transaction(META_STORE,'readwrite');tx.objectStore(META_STORE).put(snapshot,'entries');tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});
+    }catch(err){console.warn('Archiv-Metadaten konnten nicht in IndexedDB gespeichert werden',err);}
+    try{localStorage.setItem(META_KEY,JSON.stringify(snapshot));}catch(err){console.warn('LocalStorage-Archivspeicher voll',err);}
+  }
+  async function loadMeta(){
+    let loaded=null;
+    try{
+      const db=await openDB();
+      loaded=await new Promise((res,rej)=>{const r=db.transaction(META_STORE,'readonly').objectStore(META_STORE).get('entries');r.onsuccess=()=>res(r.result||null);r.onerror=()=>rej(r.error);});
+    }catch(err){console.warn('IndexedDB-Archiv konnte nicht gelesen werden',err);}
+    if(Array.isArray(loaded)){
+      state.entries=loaded;
+    }else{
+      try{
+        let raw=localStorage.getItem(META_KEY);
+        if(!raw) raw=localStorage.getItem('grandrp_pov_meta_v27')||localStorage.getItem('grandrp_pov_meta_v26')||localStorage.getItem('grandrp_pov_meta_v25')||'[]';
+        state.entries=JSON.parse(raw)||[];
+      }catch{state.entries=[];}
+      await saveMeta();
+    }
     state.clientId=localStorage.getItem('yt_client_id')||'';$('#clientId').value=state.clientId;
     // Repair legacy archive size metadata from the actual IndexedDB blob.
-    // This fixes old cards that displayed a stale/wrong sourceSize even though
-    // the stored POV file itself had the correct byte size.
     try{
       let changed=false;
       for(const e of state.entries){
@@ -394,18 +413,29 @@
         if(!stored)continue;
         if(Number(e.sourceSize)!==Number(stored.size)){e.sourceSize=stored.size; changed=true;}
       }
-      if(changed)saveMeta();
+      if(changed)await saveMeta();
     }catch(err){console.warn('Archivgrößen konnten nicht synchronisiert werden',err);}
+    await requestPersistentStorage();
   }
-  function saveMeta(){localStorage.setItem(META_KEY,JSON.stringify(state.entries.map(e=>({...e,file:undefined,videoUrl:undefined}))));}
-  async function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+  async function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,DB_VERSION);r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE);if(!db.objectStoreNames.contains(META_STORE))db.createObjectStore(META_STORE);};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+  async function requestPersistentStorage(){
+    const el=$('#storageStatus');
+    try{
+      if(!navigator.storage?.persist){if(el)el.textContent='Speicher-Schutz: Browser unterstützt keine permanente Speicherung';return false;}
+      const already=await navigator.storage.persisted();
+      if(already){if(el)el.textContent='Speicher-Schutz: dauerhaft gesichert';return true;}
+      const granted=await navigator.storage.persist();
+      if(el)el.textContent=granted?'Speicher-Schutz: dauerhaft gesichert':'Speicher-Schutz: Browser hat dauerhafte Speicherung nicht freigegeben';
+      return granted;
+    }catch(err){if(el)el.textContent='Speicher-Schutz: konnte nicht aktiviert werden';console.warn('Persistenter Speicher',err);return false;}
+  }
   async function putVideo(id,file){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(file,id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
   async function getVideo(id){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const r=tx.objectStore(STORE).get(id);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
   async function delVideo(id){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
   async function clearDB(){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
   function showView(v){$$('.view').forEach(x=>x.classList.remove('active'));$('#view-'+v).classList.add('active');$$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));$('#pageTitle').textContent=views[v][0];$('#pageSubtitle').textContent=views[v][1];if(v==='archive')renderArchive();if(v==='cases')renderCases();if(v==='csv')renderCsv();}
   function updateCounts(){const all=state.entries;const count=k=>all.filter(e=>e.types?.includes(k)).length;$('#countAll').textContent=all.length;$('#countBan').textContent=all.filter(e=>!e.notBanned).length;$('#countPc').textContent=count('pccheck');$('#countSoc').textContent=count('socban');$('#countHard').textContent=count('hardban');$('#countCheat').textContent=count('cheater');$('#countNeg').textContent=count('negativ');$('#countNoVideo').textContent=all.filter(e=>!e.videoStored).length;}
-  function renderArchive(){updateCounts();const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;const list=state.entries.filter(e=>{if(filter==='ban'&&e.notBanned)return false;if(filter!=='all'&&filter!=='ban'&&!e.types?.includes(filter))return false;if(filter==='novideo'&&e.videoStored)return false;if(!q)return true;return [e.targetId,e.sc,e.reason,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));});$('#archiveGrid').innerHTML=list.map(e=>`<article class="card"><div class="thumb">${e.videoStored?'POV':'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(e.id.slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span></div><div class="card-body"><div class="card-title">${esc(e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div class="rid-cell"><span>SC / RID</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(formatDateDE(e.date)||'')}</div>${e.sourceSize?`<div><span>Dateigröße</span>${esc(formatSize(e.sourceSize))}<small class="size-bytes">${esc(formatBytesExact(e.sourceSize))}</small></div>`:''}</div></div><div class="card-actions"><button class="mini" data-open="${e.id}">Prüfen</button>${e.youtube?.url||e.proof?`<button class="mini primary" data-youtube="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}<button class="mini danger" data-delete="${e.id}">Löschen</button></div></article>`).join('');$('#emptyState').classList.toggle('hidden',list.length>0);$$('[data-open]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.open);if(e)openEditorFromEntry(e);});$$('[data-youtube]').forEach(b=>b.onclick=()=>{const url=b.dataset.youtube;if(url)window.open(url,'_blank','noopener,noreferrer');});$$('[data-delete]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.delete);if(!e)return;if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?\n\nDas YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.entries=state.entries.filter(x=>x.id!==e.id);saveMeta();renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}});}
+  function renderArchive(){updateCounts();const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;const list=state.entries.filter(e=>{if(filter==='ban'&&e.notBanned)return false;if(filter!=='all'&&filter!=='ban'&&!e.types?.includes(filter))return false;if(filter==='novideo'&&e.videoStored)return false;if(!q)return true;return [e.targetId,e.sc,e.reason,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));});$('#archiveGrid').innerHTML=list.map(e=>`<article class="card"><div class="thumb">${e.videoStored?'POV':'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(e.id.slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span></div><div class="card-body"><div class="card-title">${esc(e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div class="rid-cell"><span>SC / RID</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(formatDateDE(e.date)||'')}</div>${e.sourceSize?`<div><span>Dateigröße</span>${esc(formatSize(e.sourceSize))}<small class="size-bytes">${esc(formatBytesExact(e.sourceSize))}</small></div>`:''}</div></div><div class="card-actions"><button class="mini" data-open="${e.id}">Prüfen</button>${e.youtube?.url||e.proof?`<button class="mini primary" data-youtube="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}<button class="mini danger" data-delete="${e.id}">Löschen</button></div></article>`).join('');$('#emptyState').classList.toggle('hidden',list.length>0);$$('[data-open]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.open);if(e)openEditorFromEntry(e);});$$('[data-youtube]').forEach(b=>b.onclick=()=>{const url=b.dataset.youtube;if(url)window.open(url,'_blank','noopener,noreferrer');});$$('[data-delete]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.delete);if(!e)return;if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?\n\nDas YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.entries=state.entries.filter(x=>x.id!==e.id);await saveMeta();renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}});}
   function renderCases(){const cases=state.entries.filter(e=>!e.complete);$('#casesList').innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button class="mini" data-case="${e.id}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';$$('[data-case]').forEach(b=>b.onclick=()=>{const e=state.entries.find(x=>x.id===b.dataset.case);if(e)openEditorFromEntry(e);});}
   function csvRowsBase(){return state.entries.filter(e=>e.saved).map(e=>({Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:'',RID:e.sc||'',DiscordID:e.discordId||'',Familie:'',Grund:e.reason||''}));}
   function csvRows(){
@@ -1473,7 +1503,26 @@
     $('#clientId').addEventListener('change',e=>{state.clientId=String(e.target.value||'').trim();localStorage.setItem('yt_client_id',state.clientId);});
     // YouTube buttons use the inline full-page redirect in index.html, so OAuth never depends on app.js loading.
     if($('#disconnectYoutube')) $('#disconnectYoutube').addEventListener('click',()=>{if(window.grandrpDisconnectYouTube)window.grandrpDisconnectYouTube();else{clearYoutubeToken();}});
-    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen?'))return;state.entries=[];state.queue=[];saveMeta();await clearDB();renderArchive();renderCases();renderCsv();renderQueue();toast('Lokale Daten gelöscht.');};
+    $('#persistStorageBtn')?.addEventListener('click',async()=>{const ok=await requestPersistentStorage();toast(ok?'Archiv-Speicher ist dauerhaft gesichert.':'Der Browser hat dauerhafte Speicherung nicht freigegeben. Bitte Browser-Speicher nicht manuell löschen.');});
+    $('#backupArchiveBtn')?.addEventListener('click',()=>{
+      const payload={version:1,createdAt:new Date().toISOString(),entries:archiveSnapshot()};
+      const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+      const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`grandrp-archiv-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast('Archiv-Sicherung heruntergeladen.');
+    });
+    $('#restoreArchiveInput')?.addEventListener('change',async e=>{
+      const f=e.target.files?.[0];if(!f)return;
+      try{const data=JSON.parse(await f.text());const incoming=Array.isArray(data)?data:data.entries;if(!Array.isArray(incoming))throw new Error('Keine Archiv-Einträge gefunden.');
+        const map=new Map(state.entries.map(x=>[x.id,x]));for(const item of incoming){if(item?.id)map.set(item.id,{...item,file:undefined,videoUrl:undefined});}
+        state.entries=[...map.values()];await saveMeta();renderArchive();renderCases();renderCsv();toast(`${incoming.length} Archiv-Einträge importiert.`);
+      }catch(err){toast('Archiv-Sicherung konnte nicht importiert werden: '+(err?.message||err));}
+      e.target.value='';
+    });
+    $('#clearLocal').onclick=async()=>{
+      if(!confirm('Das löscht ALLE lokalen Archiv-Einträge und alle lokal gespeicherten POV-Dateien. YouTube bleibt bestehen. Weiter?'))return;
+      const phrase=prompt('Zum endgültigen Löschen bitte LÖSCHEN eingeben:');
+      if(phrase!=='LÖSCHEN'){toast('Löschen abgebrochen.');return;}
+      state.entries=[];state.queue=[];await saveMeta();await clearDB();renderArchive();renderCases();renderCsv();renderQueue();toast('Lokales Archiv vollständig gelöscht.');
+    };
     updateYtStatus();
   }
 

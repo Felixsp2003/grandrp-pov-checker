@@ -104,3 +104,12 @@ Nach dem vollständigen resumable YouTube-Upload startet die lokale OCR sofort i
 
 ## V59 Queue-/OCR-Fix
 Uploads und OCR sind jetzt vollständig getrennt. Nach dem vollständigen Upload einer POV wird OCR nur als Hintergrundjob gestartet; der Upload-Pump wartet nicht auf OCR, Review oder YouTube-Verarbeitung und beginnt sofort mit der nächsten wartenden POV. Ein „OCR wartet“-Status blockiert den Upload-Pump nicht. Der automatische Bannanker akzeptiert nur einen Bannblock, in dem **Adam Byers** und **[15340]** vor „hat“ gemeinsam erkannt werden. Der Zeitstempel stammt ausschließlich aus dem verifizierten Bannblock. Manuelle OCR wertet beim Zielfeld ausschließlich das angeforderte Feld aus; die Ziel-ID hat keinen generischen Zahlen-Fallback mehr.
+
+
+## Permanenter lokaler Archivspeicher
+- Archiv-Metadaten werden zusätzlich in IndexedDB gespeichert und beim Start aus IndexedDB wiederhergestellt.
+- Beim Start wird `navigator.storage.persist()` angefragt, damit der Browser die Daten nicht einfach als ungenutzten Speicher bereinigt.
+- In den Einstellungen kann der permanente Speicher erneut angefordert werden.
+- Das Archiv kann als JSON-Sicherung exportiert und wieder importiert werden.
+- Das vollständige Löschen verlangt eine zusätzliche Eingabe von `LÖSCHEN`.
+- Eine echte Unzerstörbarkeit kann ein Browser nicht garantieren: manuelles Löschen der Website-Daten, ein gelöschtes Browserprofil oder ein Geräteverlust entfernt lokale Daten. Für dauerhafte Aufbewahrung deshalb die Archiv-Sicherung verwenden.

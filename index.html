@@ -95,7 +95,7 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V60</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V61</span></div>
           <p class="hint">Die Software nutzt einen Schnellscan über die letzten 40 Sekunden und priorisiert für das Info-Foto die letzten 10 Sekunden. Wenn dort kein verifizierter Bann gefunden wird, wird zusätzlich der 30-Sekunden-Bereich geprüft; danach startet bei Treffern ein dichter Präzisionsscan. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
@@ -109,8 +109,11 @@
           <div class="settings-actions"><a class="pink yt-link" id="connectYoutube" href="#" onclick="return grandrpPrepareYouTubeAuth(false)">Mit YouTube verbinden</a><a class="ghost yt-link" id="reauthorizeYoutube" href="#" onclick="return grandrpPrepareYouTubeAuth(true)">Berechtigung erneut</a><button type="button" class="ghost" id="disconnectYoutube" onclick="grandrpDisconnectYouTube()">Verbindung entfernen</button></div><div id="ytConnectHelp" class="hint" style="margin-top:10px"></div><div class="setting-note" style="margin-top:10px"><b>OAuth-Weiterleitung:</b> <code id="ytRedirectUriText"></code><br><span>Diese URL einmal in Google Cloud unter „Autorisierte Weiterleitungs-URIs“ eintragen.</span></div>
         </div>
         <div class="settings-card">
-          <div class="card-title">Lokale Daten</div>
-          <p class="hint">Archiv und POV-Dateien liegen lokal in diesem Browser. Ein Löschen entfernt sie aus diesem Browser.</p>
+          <div class="card-title">Lokales Archiv · dauerhaft</div>
+          <p class="hint">Das Archiv wird dauerhaft im lokalen IndexedDB-Speicher geführt. Beim Start wird der Browser um <b>persistenten Speicher</b> gebeten, damit der Browser die Daten nicht automatisch als Speicherbereinigung entfernt.</p>
+          <div class="setting-note" id="storageStatus">Speicher-Schutz: wird geprüft …</div>
+          <div class="settings-actions" style="margin-top:10px"><button class="ghost" id="persistStorageBtn">Speicher dauerhaft sichern</button><button class="ghost" id="backupArchiveBtn">Archiv sichern</button><label class="ghost" style="cursor:pointer;display:inline-flex;align-items:center">Archiv importieren<input id="restoreArchiveInput" type="file" accept="application/json,.json" hidden></label></div>
+          <p class="hint" style="margin-top:10px">Die Sicherungsdatei enthält die Archiv-Daten. YouTube-Videos bleiben unabhängig davon auf YouTube erhalten.</p>
           <button class="ghost danger" id="clearLocal">Lokales Archiv komplett löschen</button>
         </div>
       </div>
