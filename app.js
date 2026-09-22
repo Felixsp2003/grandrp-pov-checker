@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V65
+/* Grand RP DC Checker V71
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V70';
+  const BUILD='V71';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -474,20 +474,17 @@
   function updateCounts(){const all=state.entries;const count=k=>all.filter(e=>e.types?.includes(k)).length;$('#countAll').textContent=all.length;$('#countBan').textContent=all.filter(e=>!e.notBanned).length;$('#countPc').textContent=count('pccheck');$('#countSoc').textContent=count('socban');$('#countHard').textContent=count('hardban');$('#countCheat').textContent=count('cheater');$('#countNeg').textContent=count('negativ');$('#countNoVideo').textContent=all.filter(e=>!e.videoStored).length;}
   function renderArchive(){updateCounts();const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;const list=state.entries.filter(e=>{if(filter==='ban'&&e.notBanned)return false;if(filter!=='all'&&filter!=='ban'&&!e.types?.includes(filter))return false;if(filter==='novideo'&&e.videoStored)return false;if(!q)return true;return [e.targetId,e.sc,e.reason,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));});$('#archiveGrid').innerHTML=list.map(e=>`<article class="card"><div class="thumb">${e.videoStored?'POV':'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(e.id.slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span>${e.permaArchive?'<span class="pill perma-tag">PERMA</span>':''}</div><div class="card-body"><div class="card-title">${esc(e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div class="rid-cell"><span>SOC</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(formatDateDE(e.date)||'')}</div>${e.sourceSize?`<div><span>Dateigröße</span>${esc(formatSize(e.sourceSize))}<small class="size-bytes">${esc(formatBytesExact(e.sourceSize))}</small></div>`:''}</div></div><div class="card-actions"><button class="mini" data-open="${e.id}">Prüfen</button>${e.youtube?.url||e.proof?`<button class="mini primary" data-youtube="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}<button class="mini danger" data-delete="${e.id}">Löschen</button></div></article>`).join('');$('#emptyState').classList.toggle('hidden',list.length>0);$$('[data-open]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.open);if(e)openEditorFromEntry(e);});$$('[data-youtube]').forEach(b=>b.onclick=()=>{const url=b.dataset.youtube;if(url)window.open(url,'_blank','noopener,noreferrer');});$$('[data-delete]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.delete);if(!e)return;if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?\n\nDas YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.entries=state.entries.filter(x=>x.id!==e.id);saveMeta();renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}});}
   function renderCases(){const cases=state.entries.filter(e=>!e.complete);$('#casesList').innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button class="mini" data-case="${e.id}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';$$('[data-case]').forEach(b=>b.onclick=()=>{const e=state.entries.find(x=>x.id===b.dataset.case);if(e)openEditorFromEntry(e);});}
-  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved).map(e=>({Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:e.discordId||'',Familie:'',Grund:e.reason||''}));}
+  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved).map(e=>({Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Grund:e.reason||''}));}
   function csvRowsPermaBase(){return csvRowsBase(state.entries.filter(e=>e.permaArchive));}
   function csvRows(){
     const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();
     const reason=($('#csvFilterReason')?.value)||'all';
     const sc=($('#csvFilterSc')?.value)||'all';
-    const discord=($('#csvFilterDiscord')?.value)||'all';
     return csvRowsBase().filter(r=>{
       if(reason!=='all' && r.Grund!==reason)return false;
       if(sc==='present' && !r.SOC)return false;
       if(sc==='empty' && r.SOC)return false;
-      if(discord==='present' && !r.DiscordID)return false;
-      if(discord==='empty' && r.DiscordID)return false;
-      if(q && ![r.Proof,r.Datum,r.ID,r.SOC,r.DiscordID,r.Grund].some(v=>String(v||'').toLowerCase().includes(q)))return false;
+      if(q && ![r.Proof,r.Datum,r.ID,r.SOC,r.Grund].some(v=>String(v||'').toLowerCase().includes(q)))return false;
       return true;
     });
   }
@@ -503,7 +500,7 @@
   async function copyCsv(){try{await navigator.clipboard.writeText(csvText());toast('CSV in die Zwischenablage kopiert.');}catch{toast('Kopieren nicht verfügbar. CSV herunterladen.');}}
 
   function setupNav(){
-    $$('.nav-item').forEach(b=>b.onclick=()=>showView(b.dataset.view));$('#headerUploadBtn').onclick=()=>showView('upload');$('#emptyUploadBtn').onclick=()=>showView('upload');$('#headerCsvBtn').onclick=()=>showView('csv');$('#reloadBtn').onclick=()=>renderArchive();$('#casesRefresh').onclick=renderCases;$('#search').oninput=renderArchive;$('#refreshCsvBtn').onclick=renderCsv;$('#downloadCsvBtn').onclick=downloadCsv;$('#downloadPermaCsvBtn')?.addEventListener('click',downloadPermaCsv);$('#copyCsvBtn').onclick=copyCsv;['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterDiscord'].forEach(s=>$(s)?.addEventListener($(s)?.tagName==='SELECT'?'change':'input',renderCsv));$('#csvFilterClear')?.addEventListener('click',()=>{if($('#csvFilterSearch'))$('#csvFilterSearch').value='';if($('#csvFilterReason'))$('#csvFilterReason').value='all';if($('#csvFilterSc'))$('#csvFilterSc').value='all';if($('#csvFilterDiscord'))$('#csvFilterDiscord').value='all';renderCsv();});
+    $$('.nav-item').forEach(b=>b.onclick=()=>showView(b.dataset.view));$('#headerUploadBtn').onclick=()=>showView('upload');$('#emptyUploadBtn').onclick=()=>showView('upload');$('#headerCsvBtn').onclick=()=>showView('csv');$('#reloadBtn').onclick=()=>renderArchive();$('#casesRefresh').onclick=renderCases;$('#search').oninput=renderArchive;$('#refreshCsvBtn').onclick=renderCsv;$('#downloadCsvBtn').onclick=downloadCsv;$('#downloadPermaCsvBtn')?.addEventListener('click',downloadPermaCsv);$('#copyCsvBtn').onclick=copyCsv;['#csvFilterSearch','#csvFilterReason','#csvFilterSc'].forEach(s=>$(s)?.addEventListener($(s)?.tagName==='SELECT'?'change':'input',renderCsv));$('#csvFilterClear')?.addEventListener('click',()=>{if($('#csvFilterSearch'))$('#csvFilterSearch').value='';if($('#csvFilterReason'))$('#csvFilterReason').value='all';if($('#csvFilterSc'))$('#csvFilterSc').value='all';if($('#csvFilterDiscord'))$('#csvFilterDiscord').value='all';renderCsv();});
     $$('.filter').forEach(b=>b.onclick=()=>{state.filter=b.dataset.filter;$$('.filter').forEach(x=>x.classList.toggle('active',x===b));renderArchive();});
   }
 
@@ -830,7 +827,10 @@
     return {text:merged};
   }
   function dateFromFilename(name){
-    const m=String(name||'').match(/(?:^|\D)(20\d{2})[-_.](0[1-9]|1[0-2])[-_.](0[1-9]|[12]\d|3[01])(?:\D|$)/);
+    const raw=String(name||'').split(/[\\/]/).pop()||'';
+    const exact=raw.match(/(?:^|\b)(20\d{2})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])(?:\s|_|-|\.)/);
+    if(exact)return `${exact[1]}-${exact[2]}-${exact[3]}`;
+    const m=raw.match(/(?:^|\D)(20\d{2})[-_.](0[1-9]|1[0-2])[-_.](0[1-9]|[12]\d|3[01])(?:\D|$)/);
     return m?`${m[1]}-${m[2]}-${m[3]}`:'';
   }
     async function analyzeVideo(video,onProgress,originalName=''){
@@ -952,16 +952,19 @@
     }
     const bannerTime=anchor.time;
     // Keep all info photos on the same verified ban frame so fields never point to unrelated OCR hits.
-    const timestamps={banner:bannerTime,targetId:bannerTime,reason:bannerTime,server:bannerTime};
-    // SC/RID is intentionally NOT read from the POV anymore.
-    // The authoritative Social Club value is fetched from the Grand RP Admin Panel
-    // through the companion Chrome extension and written into SOC.
+    const timestamps={banner:bannerTime,targetId:bannerTime,reason:bannerTime};
+    // SC/RID is intentionally NOT read from the POV anymore. The authoritative
+    // Social Club value comes from the Grand RP Admin Panel and is written into SOC.
     const sc='';
+    // Server is fixed: Grand RP DE03 => internal value 3. Never OCR this field.
     const server='3';
-    // Date comes from the POV filename, never from OCR. Example:
-    // 2026-09-07 00-53-42.mp4 -> 2026-09-07.
-    const filenameDate=dateFromFilename(originalName||video.currentSrc||'');
-    const date=filenameDate;if(date)timestamps.date=bannerTime;const missing=[];if(!idV?.value)missing.push('Ziel-ID');if(!reasonV?.value)missing.push('Grund');if(!server)missing.push('Server');if(!date)missing.push('Datum');if(!sc)missing.push('SC / ACP');onProgress?.(100,idV?.value&&reasonV?.value?`Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}] erkannt`:'Ban erkannt, Angaben fehlen');
+    // Date is always derived from the original filename, never OCR-scanned.
+    const date=dateFromFilename(originalName||video.currentSrc||'');
+    const missing=[];
+    if(!idV?.value)missing.push('Ziel-ID');
+    if(!reasonV?.value)missing.push('Grund');
+    if(!sc)missing.push('SC / ACP');
+    onProgress?.(100,idV?.value&&reasonV?.value?`Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}] erkannt`:'Ban erkannt, Angaben fehlen');
     return {targetId:/^\d{1,6}$/.test(idV?.value||'')?idV.value:'',reason:reasonV?.value||'',sc:'',server,date,offline:false,missing,complete:missing.length===0,timestamps,confidence:{id:idV?idV.votes/Math.max(1,frames.length):0,reason:reasonV?reasonV.votes/Math.max(1,frames.length):0,sc:0,server:1,date:date?1:0,ban:anchor.ban.score||0,admin:1}};
   }
   async function openManualPicker(entry, field, secondsOverride){
@@ -989,7 +992,7 @@
     else if(field==='sc'){v=normalizeHexLoose(v);if(v.length!==40)v='';}
     else if(field==='server'){const m=v.match(/[1-4]/);v=m?m[0]:'3';}
     else if(field==='date'){v=extractDate(v)||v;}
-    else if(field==='discordId'){v=v.replace(/[^0-9]/g,'');}
+    else if(field==='discordId'){return;}
     if(ctx.item){ctx.item.result={...ctx.item.result,[field]:v};ctx.item.result.timestamps={...(ctx.item.result.timestamps||{}),[field]:Number(time)||ctx.item.result.timestamps?.banner||0};if(field==='sc'&&v)ctx.item.result.offline=false;renderQueue();setEditorValues({...ctx.item.result,proof:ctx.item.youtube?.url||ctx.item.result.proof||''});setFieldStatus(ctx.item);}
     if(ctx.entry){ctx.entry[field]=v;ctx.entry.result={...(ctx.entry.result||{}),[field]:v};ctx.entry.timestamps={...(ctx.entry.timestamps||{}),[field]:Number(time)||ctx.entry.timestamps?.banner||0};if(field==='sc'&&v){ctx.entry.offline=false;ctx.entry.result.offline=false;}setEditorValues(ctx.entry);setFieldStatus({result:ctx.entry});}
     if(field==='reason'||field==='targetId'||field==='date')renderTitlePreview();
@@ -1004,14 +1007,14 @@
       const w=window.open(target.href,'_blank','noopener'); if(!w)toast('Pop-up blockiert. Bitte Pop-ups für die Website erlauben.');
     }catch(err){console.error(err);toast('POV konnte nicht geöffnet werden: '+err.message);}
   }
-  const PHOTO_ROIS={banner:[0,0,.94,.74],targetId:[0,0,.94,.74],reason:[0,0,.94,.74],sc:[0,0,.94,.74],server:[.78,0,.22,.22],date:[0,0,.94,.74],discordId:[0,0,.94,.74]};
+  const PHOTO_ROIS={banner:[0,0,.94,.74],targetId:[0,0,.94,.74],reason:[0,0,.94,.74],sc:[0,0,.94,.74]};
   async function showInfoPhoto(field='banner'){
     const panel=$('#infoPhotoPanel'),canvas=$('#infoPhotoCanvas'),label=$('#infoPhotoLabel'),meta=$('#infoPhotoMeta');if(!panel||!canvas)return;
     const ctx=state.editing;const entry=ctx?.item||ctx?.entry;if(!entry)return;
     let file=entry.file||null;if(!file){try{file=await getVideo(entry.id);if(file)entry.file=file;}catch{}}
     if(!file){panel.classList.add('hidden');return;}
     const r=entry.result||entry;let t=Number(r.timestamps?.[field]??r.timestamps?.banner??r.bannerTime??r.banTimestamp??NaN);if(!Number.isFinite(t)||t<0)t=0;
-    panel.classList.remove('hidden');label.textContent=`Info-Foto · ${field==='targetId'?'Ziel-ID':field==='reason'?'Grund':field==='sc'?'SC / RID':field==='server'?'Server':field==='date'?'Datum':field==='discordId'?'Discord ID':'Bannblock'}`;meta.textContent=`Zeitpunkt ${t.toFixed(2)} s · Originalauflösung`;
+    panel.classList.remove('hidden');label.textContent=`Info-Foto · ${field==='targetId'?'Ziel-ID':field==='reason'?'Grund':field==='sc'?'SC / RID':'Bannblock'}`;meta.textContent=`Zeitpunkt ${t.toFixed(2)} s · Originalauflösung`;
     for(const b of $$('.photo-field'))b.classList.toggle('active',b.dataset.field===field);
     let media=null;
     try{
@@ -1019,11 +1022,11 @@
       const tt=Math.max(0,Math.min(t,Math.max(0,media.video.duration-.05)));
       if(!(await safeSeek(media.video,tt,3)))throw new Error('Zeitpunkt konnte nicht geladen werden.');
       const video=media.video;
-      const crop=(field==='banner'||field==='targetId'||field==='reason'||field==='discordId'||field==='sc')?PHOTO_ROIS.banner:PHOTO_ROIS[field]||PHOTO_ROIS.banner;
+      const crop=(field==='banner'||field==='targetId'||field==='reason'||field==='sc')?PHOTO_ROIS.banner:PHOTO_ROIS[field]||PHOTO_ROIS.banner;
       const sx=Math.round(video.videoWidth*crop[0]),sy=Math.round(video.videoHeight*crop[1]),sw=Math.max(1,Math.round(video.videoWidth*crop[2])),sh=Math.max(1,Math.round(video.videoHeight*crop[3]));
       const maxW=1500,maxH=900,scale=Math.min(1,maxW/sw,maxH/sh);canvas.width=Math.max(1,Math.round(sw*scale));canvas.height=Math.max(1,Math.round(sh*scale));
       const c=canvas.getContext('2d');c.imageSmoothingEnabled=true;c.drawImage(video,sx,sy,sw,sh,0,0,canvas.width,canvas.height);
-      if(field==='targetId'||field==='reason'||field==='discordId'){const guide=field==='targetId'?[0,.03,.92,.18]:field==='reason'?[0,.16,.92,.24]:[0,.02,.92,.28];c.save();c.fillStyle='rgba(255,47,139,.10)';c.strokeStyle='#ff2f8b';c.lineWidth=Math.max(2,canvas.width/700);c.fillRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.strokeRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.restore();}
+      if(field==='targetId'||field==='reason'){const guide=field==='targetId'?[0,.03,.92,.18]:field==='reason'?[0,.16,.92,.24]:[0,.02,.92,.28];c.save();c.fillStyle='rgba(255,47,139,.10)';c.strokeStyle='#ff2f8b';c.lineWidth=Math.max(2,canvas.width/700);c.fillRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.strokeRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.restore();}
     }catch(err){canvas.width=1;canvas.height=1;meta.textContent=`Foto konnte nicht geladen werden: ${err.message}`;}finally{closeLocalVideo(media);}
   }
   function revokeEditorPreview(){if(state.editorVideoUrl){try{URL.revokeObjectURL(state.editorVideoUrl);}catch{}state.editorVideoUrl=null;}const v=$('#editorVideoPreview');if(v){try{v.pause();}catch{}v.removeAttribute('src');v.load();}}
@@ -1034,9 +1037,10 @@
     $('#targetId').value=val(r.targetId);
     $('#reason').value=ALLOWED_REASONS.includes(val(r.reason))?val(r.reason):'';
     $('#sc').value=val(r.sc);
-    $('#server').value=/^[1-4]$/.test(val(r.server))?val(r.server):'3';
-    $('#date').value=validDate(r.date)?val(r.date):'';
-    $('#discordId').value=val(r.discordId);
+    $('#server').value='3';
+    const derivedDate=validDate(r.date)?val(r.date):dateFromFilename(r.originalName||r.file?.name||state.editing?.item?.file?.name||state.editing?.entry?.file?.name||'');
+    $('#date').value=validDate(derivedDate)?derivedDate:'';
+    const discordEl=$('#discordId'); if(discordEl)discordEl.value='';
     $('#proof').value=val(r.proof);
     $('#perma').checked=!!r.perma;
     $('#permaArchive').checked=!!r.permaArchive;
@@ -1052,9 +1056,7 @@
     const statuses=[
       ['ID','Ziel-ID',!!r.targetId&&!missing.has('Ziel-ID')],
       ['Grund','Grund',!!r.reason&&!missing.has('Grund')],
-      ['SC','SOC / SC',!!r.sc&&!missing.has('SC')&&!missing.has('SC / ACP')],
-      ['Server','Server',/^[1-4]$/.test(String(r.server||''))&&!missing.has('Server')],
-      ['Datum','Datum',!!r.date&&!missing.has('Datum')]
+      ['SC','SOC / SC',!!r.sc&&!missing.has('SC')&&!missing.has('SC / ACP')]
     ];
     const box=$('#fieldStatus');
     if(box) box.innerHTML=statuses.map(([short,label,ok])=>`<div class="status-chip ${ok?'ok':'warn'}">${ok?'✓':'⚠'} ${esc(label)}</div>`).join('');
@@ -1063,10 +1065,8 @@
     $$('.jump').forEach(btn=>{
       const field=btn.dataset.field;
       let show=!result?.[field];
-      // Always provide manual correction for SC and Discord ID. These fields
-      // are commonly misread by OCR and must be manually selectable even
-      // when an automatic value already exists. Server is also always selectable.
-      if(field==='sc' || field==='discordId' || field==='server') show=true;
+      // SC is ACP-driven and stays manually selectable; server/date are deterministic.
+      if(field==='sc') show=true;
       btn.classList.toggle('hidden',!show);
     });
     const warning=$('#ocrWarning');
@@ -1082,7 +1082,7 @@
     const date=formatDateDE($('#date').value);
     $('#titlePreview').value=(id&&reason&&date)?`${id}, ${reason}, ${date}.mp4`:'';
   }
-  function openEditor(item){state.editing={item};$('#modalFile').textContent=item.finalName||item.file.name;setEditorValues({...item.result,discordId:item.result?.discordId||'',proof:item.result?.proof||'',perma:!!item.result?.perma,permaArchive:!!item.result?.permaArchive,notBanned:!!item.result?.notBanned});state.selectedTypes=new Set(item.result?.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus(item);$('#editorModal').classList.remove('hidden');loadEditorPreview(item.file,item.result?.timestamps?.banner||0);showInfoPhoto('banner');renderAcpStatus(item.result?.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',item.result?.sc?'ok':'warn');if(!item.result?.sc&&/^\d{1,6}$/.test(item.result?.targetId||'')){setTimeout(()=>{try{openAcpForCurrentId();}catch{}},350);}}
+  function openEditor(item){state.editing={item};$('#modalFile').textContent=item.finalName||item.file.name;setEditorValues({...item.result,proof:item.result?.proof||'',perma:!!item.result?.perma,permaArchive:!!item.result?.permaArchive,notBanned:!!item.result?.notBanned});state.selectedTypes=new Set(item.result?.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus(item);$('#editorModal').classList.remove('hidden');loadEditorPreview(item.file,item.result?.timestamps?.banner||0);showInfoPhoto('banner');renderAcpStatus(item.result?.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',item.result?.sc?'ok':'warn');if(!item.result?.sc&&/^\d{1,6}$/.test(item.result?.targetId||'')){setTimeout(()=>{try{openAcpForCurrentId();}catch{}},350);}}
   async function openEditorFromEntry(entry){const file=entry.file||await getVideo(entry.id);if(file)entry.file=file;state.editing={entry};$('#modalFile').textContent=entry.finalName||entry.originalName;setEditorValues(entry);state.selectedTypes=new Set(entry.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus({result:entry});$('#editorModal').classList.remove('hidden');loadEditorPreview(entry.file,entry.timestamps?.banner||0);showInfoPhoto('banner');renderAcpStatus(entry.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',entry.sc?'ok':'warn');}
   function closeEditor(){revokeEditorPreview();state.editing=null;$('#editorModal').classList.add('hidden');}
   async function saveEditor(e){
@@ -1097,7 +1097,7 @@
     const finalName=`${targetId}, ${reason}, ${formatDateDE(date)}.mp4`;
     const namedFile=new File([base.file],finalName,{type:base.file.type||'video/mp4',lastModified:base.file.lastModified||Date.now()}); if(namedFile.size!==base.file.size)throw new Error('Die Dateigröße hat sich beim Umbenennen verändert. Speicherung abgebrochen.');
     const yt=base.youtube||ctx.item?.youtube||ctx.entry?.youtube||null;
-    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,sc:offline?'':sc,server,date,rid:'',types:finalTypes,perma:$('#perma').checked,permaArchive:$('#permaArchive').checked,notBanned:$('#notBanned').checked,documentStatus:$('#documentStatus').value==='eingetragen'?'eingetragen':'nicht eingetragen',pcCheckers:getPcCheckers(),pcCheckerManual:[...pcCheckerCustom],discordId:$('#discordId').value.trim(),proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',timestamps:base.result?.timestamps||base.timestamps||{},infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
+    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,sc:offline?'':sc,server,date,rid:'',types:finalTypes,perma:$('#perma').checked,permaArchive:$('#permaArchive').checked,notBanned:$('#notBanned').checked,documentStatus:$('#documentStatus').value==='eingetragen'?'eingetragen':'nicht eingetragen',pcCheckers:getPcCheckers(),pcCheckerManual:[...pcCheckerCustom],discordId:'',proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',timestamps:base.result?.timestamps||base.timestamps||{},infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
     await putVideo(record.id,namedFile);
     // YouTube must receive the exact final filename (including .mp4). The title update
     // is completed and verified before the saved POV is finalized in the UI.
@@ -1207,7 +1207,7 @@
     $('#previewJumpBack')?.addEventListener('click',()=>{const v=$('#editorVideoPreview');if(v)v.currentTime=Math.max(0,v.currentTime-5);});
     $('#previewJumpForward')?.addEventListener('click',()=>{const v=$('#editorVideoPreview');if(v)v.currentTime=Math.min(v.duration||0,v.currentTime+5);});
 
-    $$('#targetId,#reason,#sc,#server,#date,#discordId').forEach(el=>el.addEventListener('focus',()=>showInfoPhoto(el.id==='targetId'?'targetId':el.id)));
+    $$('#targetId,#reason,#sc').forEach(el=>el.addEventListener('focus',()=>showInfoPhoto(el.id==='targetId'?'targetId':el.id)));
     $('#reanalyzeBtn')?.addEventListener('click',async()=>{const x=state.editing?.item;if(x){closeEditor();await retryLocalOCR(x);}});
     $('#fetchAcpSc')?.addEventListener('click',openAcpForCurrentId);
     $('#openDatePicker')?.addEventListener('click',()=>{const el=$('#date');try{el.showPicker?.();}catch{el.focus();el.click();}});

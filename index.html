@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=70">
+<link rel="stylesheet" href="styles.css?v=71">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -37,7 +37,7 @@
     <header class="topbar">
       <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V70</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V71</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -79,7 +79,7 @@
         <aside class="side-info">
           <div class="info-card"><span class="info-icon">40s</span><div><strong>Kurze POVs komplett</strong><p>Bis 60 Sekunden wird die komplette POV dicht gescannt. Längere Videos werden adaptiv mit Schwerpunkt auf relevanten Bereichen geprüft.</p></div></div>
           <div class="info-card"><span class="info-icon">ROIs</span><div><strong>Erkennung nach Bereich</strong><p>Links oben wird der komplette Bannbereich aus der Originalauflösung gezeigt. Ziel-ID, Bannblock und Grund stammen aus demselben verifizierten Frame.</p></div></div>
-          <div class="info-card"><span class="info-icon">CSV</span><div><strong>CSV direkt erstellen</strong><p>Proof, Datum, ID, SOC = SC aus ACP, RID bleibt leer, Discord ID optional, Familie leer, Grund.</p></div></div>
+          <div class="info-card"><span class="info-icon">CSV</span><div><strong>CSV direkt erstellen</strong><p>Proof, Datum, ID, SOC = SC aus ACP, RID bleibt leer, Discord ID bleibt leer, Familie leer, Grund.</p></div></div>
         </aside>
       </div>
     </section>
@@ -87,12 +87,11 @@
     <section id="view-csv" class="view">
       <div class="panel-head"><div><h2>CSV erstellen</h2><p>SOC wird mit dem SC aus dem Adminpanel gefüllt. RID bleibt immer leer. Familie bleibt leer.</p></div><div class="top-actions"><button class="ghost" id="refreshCsvBtn">Aktualisieren</button><button class="ghost" id="copyCsvBtn">CSV kopieren</button><button class="pink" id="downloadCsvBtn">CSV herunterladen</button><button class="ghost perma-csv" id="downloadPermaCsvBtn">Perma-CSV herunterladen</button></div></div>
       <div class="csv-filters">
-        <input id="csvFilterSearch" class="csv-filter-input" placeholder="CSV durchsuchen: ID, SOC/SC, Discord, Grund …" autocomplete="off">
+        <input id="csvFilterSearch" class="csv-filter-input" placeholder="CSV durchsuchen: ID, SOC/SC oder Grund …" autocomplete="off">
         <select id="csvFilterReason" class="csv-filter-select"><option value="all">Alle Gründe</option>
           <option>PC Check Positiv</option><option>PC Check Verweigert</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv (Banevading)</option><option>PC Check Positiv (Cleaning)</option><option>PC Check Trolling</option><option>Cheating</option><option>Acc 1.1</option><option>Acc 1.4</option><option>ACC 1.4 (Twink)</option><option>Event 1.7</option>
         </select>
         <select id="csvFilterSc" class="csv-filter-select"><option value="all">SOC / SC: Alle</option><option value="present">SC vorhanden</option><option value="empty">SC leer</option></select>
-        <select id="csvFilterDiscord" class="csv-filter-select"><option value="all">Discord: Alle</option><option value="present">Discord ID vorhanden</option><option value="empty">Discord ID leer</option></select>
         <button class="ghost" id="csvFilterClear">Filter zurücksetzen</button>
       </div>
       <div class="csv-summary" id="csvSummary"></div>
@@ -103,12 +102,12 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V70</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V71</span></div>
           <p class="hint">POVs bis 2 Minuten werden vollständig in 250-ms-Schritten durchsucht. Längere Videos werden adaptiv gescannt und bei Treffern verdichtet. Das Info-Foto kommt aus einem verifizierten Bann-Cluster; fehlt dort ein Treffer, wird zusätzlich der Bereich um Sekunde 30 geprüft. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
           <label>Präzisionsschritt (Sekunden)<input id="refineStep" type="number" min="0.4" max="1" step="0.1" value="0.5"></label>
-          <div class="setting-note">V70: adaptive Kurz-POV-Prüfung bis 180 Sekunden mit dichtem Start-bis-Ende-Scan, schneller Kurz-POV-Scan mit paralleler OCR, verifizierter Bannblock-Anker, Datum direkt aus dem POV-Dateinamen, ACP-SC in Chrome mit automatischem Schließen und dauerhafter Browser-Speicheranforderung. Ziel-ID, Bannblock und Grund werden am selben verifizierten Frame angezeigt; das Datum wird nicht mehr per OCR gescannt. Server ist im aktuellen Workflow fest <b>3</b>. Der SC wird nicht mehr aus dem Video ermittelt, sondern ausschließlich über das Grand-RP-Adminpanel in Chrome übernommen.</div>
+          <div class="setting-note">V71: adaptive Kurz-POV-Prüfung bis 180 Sekunden mit dichtem Start-bis-Ende-Scan, schneller Kurz-POV-Scan mit paralleler OCR, verifizierter Bannblock-Anker, Datum direkt aus dem POV-Dateinamen, ACP-SC in Chrome mit automatischem Schließen und dauerhafter Browser-Speicheranforderung. Ziel-ID, Bannblock und Grund werden am selben verifizierten Frame angezeigt; das Datum wird nicht mehr per OCR gescannt. Server ist im aktuellen Workflow fest <b>3</b>. Der SC wird nicht mehr aus dem Video ermittelt, sondern ausschließlich über das Grand-RP-Adminpanel in Chrome übernommen.</div>
         </div>
         <div class="settings-card">
           <div class="card-title">YouTube-Verbindung <span id="ytStatus" class="connection">● Nicht verbunden</span></div>
@@ -150,9 +149,6 @@
       <button type="button" class="photo-field" data-field="targetId">Ziel-ID</button>
       <button type="button" class="photo-field" data-field="reason">Grund</button>
       <button type="button" class="photo-field" data-field="sc">SC / RID</button>
-      <button type="button" class="photo-field" data-field="server">Server</button>
-      <button type="button" class="photo-field" data-field="date">Datum</button>
-      <button type="button" class="photo-field" data-field="discordId">Discord ID</button>
     </div>
   </div>
   <form id="entryForm">
@@ -160,9 +156,8 @@
       <div class="field"><label>Ziel-ID</label><input id="targetId" inputmode="numeric" maxlength="6" placeholder="max. 6 Ziffern"><button type="button" class="jump hidden" data-field="targetId">POV hier öffnen</button></div>
       <div class="field"><label>Grund</label><select id="reason"><option value="">Bitte wählen</option><option>PC Check Positiv</option><option>PC Check Verweigert</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv (Banevading)</option><option>PC Check Positiv (Cleaning)</option><option>PC Check Trolling</option><option>Cheating</option><option>Acc 1.1</option><option>Acc 1.4</option><option>ACC 1.4 (Twink)</option><option>Event 1.7</option></select><button type="button" class="jump hidden" data-field="reason">Manuell auswählen</button></div>
       <div class="field"><label>SOC / SC aus Adminpanel</label><input id="sc" maxlength="40" placeholder="SC wird aus dem Chrome-Adminpanel übernommen"><div class="acp-actions"><button type="button" class="pink mini" id="fetchAcpSc">SC aus ACP holen</button><button type="button" class="ghost mini" id="copyAcpSc">SC kopieren</button></div><div id="acpStatus" class="acp-status warn">SC fehlt · über ACP holen</div></div>
-      <div class="field"><label>Server</label><input id="server" maxlength="1" inputmode="numeric" placeholder="1–4"><button type="button" class="jump hidden" data-field="server">Manuell auswählen</button></div>
-      <div class="field"><label>Datum</label><div class="inline-control"><input id="date" type="date" aria-label="Datum auswählen"><button type="button" class="ghost mini" id="openDatePicker">Kalender öffnen</button></div><button type="button" class="jump hidden" data-field="date">POV hier öffnen</button></div>
-      <div class="field"><label>Discord ID</label><input id="discordId" placeholder="optional"><button type="button" class="jump hidden" data-field="discordId">Manuell auswählen</button></div>
+      <div class="field"><label>Server</label><input id="server" value="3" readonly><div class="field-note">Fest: DE03</div></div>
+      <div class="field"><label>Datum</label><div class="inline-control"><input id="date" type="date" aria-label="Datum aus Dateiname"></div><div class="field-note">Automatisch aus dem POV-Dateinamen.</div></div>
       <div class="field"><label>Proof</label><input id="proof" placeholder="optional / YouTube-Link"></div>
       <div class="field full"><label>Finaler Dateiname</label><input id="titlePreview" readonly></div>
     </div>
