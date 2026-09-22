@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V69';
+  const BUILD='V70';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -664,16 +664,23 @@
     await state.fastWorker.setParameters({preserve_interword_spaces:'1',tessedit_pageseg_mode:'6'});
     return state.fastWorker;
   }
+  const OCR_PARAM_CACHE=new WeakMap();
   async function ocr(worker,canvas,opts={}){
-    // General OCR and restricted numeric/hex OCR use separate workers. This is deliberate:
-    // Tesseract.js persists tessedit_char_whitelist on a worker, and clearing it with an
-    // empty string is not reliable across all builds. A restricted pass can therefore never
-    // poison the general pass used for Ziel-ID and Grund on the next frame/video.
+    // Keep Tesseract settings cached per worker. setParameters() is expensive and was
+    // previously executed for every single frame, which caused OCR throughput to collapse
+    // as a short POV progressed.
     const p={tessedit_pageseg_mode:String(opts.psm||6)};
     if(opts.whitelist) p.tessedit_char_whitelist=String(opts.whitelist);
+    else p.tessedit_char_whitelist='';
     if(opts.numeric) p.classify_bln_numeric_mode='1';
+    else p.classify_bln_numeric_mode='0';
     if(opts.nodict) {p.load_system_dawg='0';p.load_freq_dawg='0';p.tessedit_enable_dict_correction='0';}
-    await worker.setParameters(p);
+    else {p.load_system_dawg='1';p.load_freq_dawg='1';p.tessedit_enable_dict_correction='1';}
+    const key=JSON.stringify(p);
+    if(OCR_PARAM_CACHE.get(worker)!==key){
+      await worker.setParameters(p);
+      OCR_PARAM_CACHE.set(worker,key);
+    }
     const r=await worker.recognize(canvas);
     return r.data;
   }
@@ -768,7 +775,7 @@
     return {canvas:c,y:y0,raw,online:true};
   }
   const BAN_ROI={x:0,y:0,w:.94,h:.74};
-  const FAST_BAN_ROI={x:0,y:0,w:.94,h:.70};
+  const FAST_BAN_ROI={x:0,y:0,w:.92,h:.58};
   async function readBanFast(worker,video){
     // Fast path for short POVs: only OCR the relevant upper-left ban area once,
     // then run one fallback threshold pass when the strict ban anchor is missing.
@@ -791,7 +798,9 @@
   }
   async function readBanProbeCanvas(worker,chat){
     try{
-      const img=grayCanvas(chat);
+      // One very cheap pass for the candidate scan. The precision OCR only starts after
+      // a real signal is found. Avoid grayscale allocation here to keep memory churn low.
+      const img=enhancedCanvas(chat,1.25,1.01);
       const r=await ocr(worker,img,{psm:6,nodict:true});
       const text=cleanText(r?.text||'');
       clearCanvas(img);
@@ -807,16 +816,18 @@
     return readBanProbeCanvas(worker,chat);
   }
   async function fastSeek(v,t){
-    try{await seek(v,t,3800);return true;}catch{try{v.pause();}catch{}return false;}
+    try{await seek(v,t,2600);return true;}catch{try{v.pause();}catch{}try{await seek(v,t,3200);return true;}catch{return false;}}
   }
 
   async function readBanOnly(worker,video){
-    const chat=makeCrop(video,BAN_ROI.x,BAN_ROI.y,BAN_ROI.w,BAN_ROI.h,3.8);
+    const chat=makeCrop(video,BAN_ROI.x,BAN_ROI.y,BAN_ROI.w,BAN_ROI.h,2.55);
     const texts=[];
-    const variants=[[grayCanvas(chat),6],[enhancedCanvas(chat,1.60,1.03),6],[threshold(chat,145),11],[threshold(chat,185),11],[grayCanvas(chat),11]];
-    try{const nimg=enhancedCanvas(chat,1.75,1.03);const r=await ocr(worker,nimg,{psm:11,whitelist:'0123456789[]',numeric:true,nodict:true});if(r?.text)texts.push(cleanText(r.text));clearCanvas(nimg);}catch{}
+    // Precision stage: keep only the variants that materially improve the ban parser.
+    const variants=[[grayCanvas(chat),6],[enhancedCanvas(chat,1.65,1.03),11],[threshold(chat,155),11]];
     for(const [img,psm] of variants){try{const r=await ocr(worker,img,{psm,nodict:true});if(r?.text)texts.push(cleanText(r.text));}catch{}finally{clearCanvas(img);}}
-    const merged=[...new Set(texts.filter(Boolean))].join('\n');clearCanvas(chat);return {text:merged};
+    const merged=[...new Set(texts.filter(Boolean))].join('\n');
+    clearCanvas(chat);
+    return {text:merged};
   }
   function dateFromFilename(name){
     const m=String(name||'').match(/(?:^|\D)(20\d{2})[-_.](0[1-9]|1[0-2])[-_.](0[1-9]|[12]\d|3[01])(?:\D|$)/);
@@ -829,10 +840,11 @@
     let scanTimes=[];
     const ultraShort=duration<=180;
     if(ultraShort){
-      // V69 fast path: one lightweight OCR every ~1.25s on a small crop.
-      // Two Tesseract workers process alternating frames in parallel. Once a
-      // candidate is found, the normal precision pipeline takes over.
-      const step=1.25;
+      // V70: adaptive short-POV scan. Start at 2.2s spacing instead of OCR'ing every
+      // second. Once two nearby signals form a candidate cluster we stop the coarse scan
+      // and spend the saved time on precision OCR around that cluster. This keeps short
+      // videos responsive without sacrificing the final strict verification.
+      const step=2.2;
       for(let t=0;t<=duration-.05;t+=step)scanTimes.push(t);
       scanTimes.push(Math.max(0,duration-.05));
     }else if(duration<=300){
@@ -849,15 +861,34 @@
     const baseCount=scanTimes.length;
     if(ultraShort){
       const fastWorker=await ensureFastWorker();
+      let signalHits=[];
       for(let i=0;i<baseCount;i+=2){
         const batch=[];
         for(let j=i;j<Math.min(i+2,baseCount);j++){
           const t=scanTimes[j];
-          if(await fastSeek(video,t)) batch.push({t,chat:makeCrop(video,FAST_BAN_ROI.x,FAST_BAN_ROI.y,FAST_BAN_ROI.w,FAST_BAN_ROI.h,.62),idx:j});
+          if(await fastSeek(video,t)) batch.push({t,chat:makeCrop(video,FAST_BAN_ROI.x,FAST_BAN_ROI.y,FAST_BAN_ROI.w,FAST_BAN_ROI.h,.45),idx:j});
         }
         const reads=await Promise.all(batch.map((b,k)=>readBanProbeCanvas(k%2===0?worker:fastWorker,b.chat)));
-        for(let k=0;k<batch.length;k++){const b=batch[k],read=reads[k];const ban=read.ban||extractBanEvent(read.text);coarse.push({time:b.t,text:read.text,ban,signal:!!read.signal,sharp:0});}
+        for(let k=0;k<batch.length;k++){
+          const b=batch[k],read=reads[k];
+          const ban=read.ban||extractBanEvent(read.text);
+          const row={time:b.t,text:read.text,ban,signal:!!read.signal,sharp:0};
+          coarse.push(row);
+          if(row.signal||row.ban){
+            const prev=signalHits[signalHits.length-1];
+            if(!prev || Math.abs(prev.time-b.t)>2.8) signalHits.push(row);
+            else signalHits.push(row);
+          }
+        }
         onProgress?.(8+Math.round(Math.min(40,(Math.min(i+2,baseCount)/baseCount)*40)),`Schnellscan ${Math.min(i+2,baseCount)}/${baseCount}`);
+        // Two nearby signal frames are enough to trigger strict precision OCR.
+        // Do not waste the remaining video on coarse OCR once a real ban area is found.
+        if(signalHits.length>=2){
+          const last=signalHits[signalHits.length-1],prev=signalHits[signalHits.length-2];
+          if(Math.abs(last.time-prev.time)<=3.2){
+            break;
+          }
+        }
       }
     }else{
       for(let i=0;i<baseCount;i++){
@@ -885,7 +916,7 @@
     if(!strictCoarse.length){onProgress?.(100,`Kein eindeutiger Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}]`);return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,missing:['Ziel-ID','Grund'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
     const grouped=new Map();for(const f of strictCoarse){const k=`${f.ban.targetId}|${f.ban.reason}`;(grouped.get(k)||grouped.set(k,[]).get(k)).push(f);}
     const group=[...grouped.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.ban.score,0)-a.reduce((s,x)=>s+x.ban.score,0))[0]||[];
-    const seeds=group.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp).slice(0,duration<=180?4:6);const refineTimes=new Set();const win=Math.max(2.5,Math.min(7,duration<=180?4:(Number(settings.window)||5)));const rstep=Math.max(.45,Math.min(.8,duration<=180?.55:(Number(settings.step)||.4)));
+    const seeds=group.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp).slice(0,duration<=180?3:5);const refineTimes=new Set();const win=Math.max(2.2,Math.min(5.5,duration<=180?3.4:(Number(settings.window)||5)));const rstep=Math.max(.6,Math.min(.9,duration<=180?.7:(Number(settings.step)||.4)));
     for(const seed of seeds)for(let t=Math.max(start,seed.time-win/2);t<=Math.min(duration-.05,seed.time+win/2);t+=rstep)refineTimes.add(Math.round(t*20)/20);
     const refined=[];const times=[...refineTimes].sort((a,b)=>a-b);let n=0;
     for(const t of times){if(!(await safeSeek(video,t,2)))continue;try{const read=await readBanOnly(worker,video);const ban=read.ban||extractBanEvent(read.text);if(ban)refined.push({time:t,text:read.text,ban,sharp:0});}catch{}n++;onProgress?.(48+Math.round(n/Math.max(1,times.length)*28),`Ban-Präzisionsscan ${n}/${times.length}`);}
