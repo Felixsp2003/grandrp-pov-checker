@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V73
+/* Grand RP DC Checker V76
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V74';
+  const BUILD='V76';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -125,37 +125,66 @@
     return c.includes(compact(BAN_ADMIN_NAME)) || /ad[a4]m.{0,3}by[e3]rs/i.test(c);
   }
   function extractBanEvent(text){
-    const t=cleanText(text);
-    if(!t)return null;
-    const lines=t.split('\n');
-    const joined=[];
-    for(let i=0;i<lines.length;i++)joined.push(lines.slice(i,i+4).join(' '));
-    let best=null;
-    for(const j of joined){
-      if(!/\b(?:hat|ha[t7l1i])\b/i.test(j))continue;
-      const hat=j.search(/\b(?:hat|ha[t7l1i])\b/i);if(hat<0)continue;
-      const before=j.slice(0,hat),after=j.slice(hat+3);
-      const adminIds=[...before.matchAll(/\[\s*([0-9]{1,6})\s*\]/g)].map(m=>m[1]);
-      if(!adminIds.includes(BAN_ADMIN_ID))continue;
-      const adminName=hasAdamByersAnchor(before);
-      if(!adminName)continue;
-      const dur=after.match(/\b(?:für|fur|fiir|fuer|for)\b\s*[0-9]{1,3}\s*(?:tage|days|tag|day)\b/i);
-      if(!dur||!/\b(?:gebannt|banned|ban)\b/i.test(j))continue;
-      const pre=after.slice(0,dur.index);
-      const targetIds=[...pre.matchAll(/\[\s*([0-9]{1,6})\s*\]/g)].map(m=>m[1]);
-      if(!targetIds.length){
-        const nums=[...pre.matchAll(/(?:\bspieler\b|\bplayer\b|\buser\b)[^0-9]{0,50}\b([0-9]{1,6})\b/ig)].map(m=>m[1]);
-        if(nums.length)targetIds.push(nums[nums.length-1]);
-      }
-      if(!targetIds.length)continue;
-      const target=normalizeIdToken(targetIds[targetIds.length-1]);
-      const reasonMatch=j.match(/\bGrund\s*[:.\-]?\s*(.+)$/i);
-      const reason=reasonMatch?parseReason(reasonMatch[1]):parseReason(j);
-      let score=65;if(adminName)score+=25;if(/\bGrund\b/i.test(j))score+=6;if(reason)score+=18;if(target===BAN_ADMIN_ID)score-=1000;
-      const candidate={targetId:target,adminId:BAN_ADMIN_ID,adminNameMatched:adminName,reason:reason?.value||'',reasonScore:reason?.score||0,score,text:j};
-      if(/^\d{1,6}$/.test(candidate.targetId)&&candidate.targetId!==BAN_ADMIN_ID&&(!best||candidate.score>best.score))best=candidate;
-    }
-    return best;
+    const raw=cleanText(text);
+    if(!raw)return null;
+    const flat=raw.replace(/\s+/g,' ').trim();
+    const norm=flat
+      .replace(/[\u2500-\u257f]/g,' ')
+      .replace(/[„“”]/g,'"').replace(/[’]/g,"'");
+
+    // We do not parse arbitrary numbers. First find the real admin anchor and only
+    // then inspect the short text segment after it. This prevents HUD/player IDs from
+    // being selected as the banned player's ID.
+    const adminIdRe=/\[\s*15340\s*\]/i;
+    const adminIdPos=norm.search(adminIdRe);
+    if(adminIdPos<0)return null;
+    const beforeAdmin=norm.slice(Math.max(0,adminIdPos-120),adminIdPos+120);
+    if(!hasAdamByersAnchor(beforeAdmin))return null;
+
+    const adminTail=norm.slice(adminIdPos); const adminMatch=adminTail.match(adminIdRe); const adminLen=adminMatch?adminMatch[0].length:7; const afterAdmin=norm.slice(adminIdPos+adminLen, adminIdPos+700);
+    const fullSegment=(beforeAdmin+' '+afterAdmin).trim();
+
+    // OCR frequently turns "hat" into h at / ha1 / ha7 / haI. Accept these only
+    // in the short admin->ban segment.
+    const hatMatch=afterAdmin.match(/\b(?:hat|ha[dt7l1i]|h[a4][t7]|ha\s*t)\b/i);
+    if(!hatMatch)return null;
+    const afterHat=afterAdmin.slice(hatMatch.index+hatMatch[0].length);
+
+    // The target ID is the last short bracketed numeric token before the duration.
+    const dur=afterHat.match(/\b(?:für|fur|fiir|fuer|f[uü]r|for|fuer)\s*[0-9OQILSZGBT]{1,3}\s*(?:tage|tagen|tag|days|day)\b/i)
+      || afterHat.match(/\b[0-9OQILSZGBT]{1,3}\s*(?:tage|tagen|tag|days|day)\b/i);
+    if(!dur)return null;
+    const pre=afterHat.slice(0,dur.index);
+    const bracketed=[...pre.matchAll(/\[\s*([0-9A-Za-z]{1,8})\s*\]/g)]
+      .map(m=>normalizeIdToken(m[1])).filter(v=>/^\d{1,6}$/.test(v)&&v!==BAN_ADMIN_ID);
+    const speakerTarget=[...pre.matchAll(/(?:spieler|player|user|an|auf)\s*[^\d]{0,40}([0-9A-Za-z]{1,8})/ig)]
+      .map(m=>normalizeIdToken(m[1])).filter(v=>/^\d{1,6}$/.test(v)&&v!==BAN_ADMIN_ID);
+    let target=bracketed.at(-1)||speakerTarget.at(-1)||'';
+    if(!target)return null;
+
+    const tail=afterHat.slice(dur.index, Math.min(afterHat.length, dur.index+420));
+    const banWord=/\b(?:gebannt|gebanntt|gebant|banned|bannt|bann(?:ed)?)\b/i.test(tail);
+    if(!banWord)return null;
+
+    // Reason is best read from the explicit Grund segment, otherwise from the ban sentence.
+    const reasonMatch=norm.match(/\bgrund\s*[:.\-]?\s*([^\n]{0,100})/i);
+    const reason=parseReason(reasonMatch?.[1]||tail)||parseReason(norm.slice(0, Math.min(norm.length, 900)));
+    if(!reason)return null;
+
+    let score=90;
+    if(/administrator/i.test(fullSegment))score+=3;
+    if(/adam\s*[_-]?\s*byers/i.test(fullSegment))score+=8;
+    if(reasonMatch)score+=8;
+    if(target!==BAN_ADMIN_ID)score+=5;
+    return {
+      targetId:target,
+      adminId:BAN_ADMIN_ID,
+      adminNameMatched:true,
+      reason:typeof reason==='string'?reason:reason.value,
+      reasonScore:(typeof reason==='object'&&reason?.score)||1,
+      score,
+      text:norm
+    };
   }
   function parseTargetId(text){
     // Strict parser: a target ID is valid only when the actual ban event is
@@ -356,7 +385,7 @@
   function clampId(s){const v=normalizeIdToken(s);return /^\d{1,6}$/.test(v)?v:'';}
   function validDate(v){return /^\d{4}-\d{2}-\d{2}$/.test(String(v||''));}
   function consensusString(values, minVotes=2){const m=uniqueVote(values.filter(Boolean));return m&&m.votes>=minVotes?m.value:'';}
-  if(isNode){module.exports={ALLOWED_REASONS,compact,similarity,normalizeHexLoose,normalizeIdToken,canonicalReason,parseTargetId,parseReason,extractScOrdered,extractScCandidatesFromString,extractHexCandidateAnyText,consensusHex,extractServerFromOcr,extractDate,serverVote,dateVote,clampId,validDate};return;}
+  if(isNode){module.exports={ALLOWED_REASONS,compact,similarity,normalizeHexLoose,normalizeIdToken,canonicalReason,parseTargetId,parseReason,extractBanEvent,extractScOrdered,extractScCandidatesFromString,extractHexCandidateAnyText,consensusHex,extractServerFromOcr,extractDate,serverVote,dateVote,clampId,validDate};return;}
 
   const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
   const state={entries:[],queue:[],filter:'all',editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:localStorage.getItem('yt_access_token')||sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,tokenExpiresAt:Number(localStorage.getItem('yt_access_expires_at_v50')||0),tokenRefreshPromise:null};
@@ -771,231 +800,175 @@
     const raw=lines.filter(l=>(l.bbox?.y1||0)>=y0 && (l.bbox?.y0||0)<=y1).map(l=>l.text||'').join('\n');
     return {canvas:c,y:y0,raw,online:true};
   }
-  const BAN_ROI={x:0,y:.012,w:.96,h:.50};
-  const FAST_BAN_ROI={x:0,y:.012,w:.92,h:.46};
+  // Unified Grand-RP chat ROI. It intentionally covers the COMPLETE upper-left
+  // chat but stops before the right HUD/player list. All automatic and manual OCR uses
+  // the same geometry so there is no mismatch between detection and the preview.
+  const CHAT_ROI={x:0.00,y:0.015,w:0.66,h:0.41};
+  const FAST_BAN_ROI=CHAT_ROI;
+  const PHOTO_ROI={x:0.00,y:0.00,w:0.70,h:0.44};
+
+  function makeOcrChatCrop(video,scale=2.6){
+    return makeCrop(video,CHAT_ROI.x,CHAT_ROI.y,CHAT_ROI.w,CHAT_ROI.h,scale);
+  }
   async function readBanFast(worker,video){
-    // Fast path for short POVs: only OCR the relevant upper-left ban area once,
-    // then run one fallback threshold pass when the strict ban anchor is missing.
-    // This avoids the previous 5-7 Tesseract passes for every sampled frame.
-    const chat=makeCrop(video,BAN_ROI.x,BAN_ROI.y,BAN_ROI.w,BAN_ROI.h,2.15);
-    let r=null;
+    const chat=makeOcrChatCrop(video,2.2);
     try{
-      const img=grayCanvas(chat);
-      r=await ocr(worker,img,{psm:6,nodict:true});
-      let text=cleanText(r?.text||'');
-      clearCanvas(img);
-      const ban=extractBanEvent(text);
-      if(ban){ clearCanvas(chat); return {text,ban}; }
-      const img2=threshold(chat,155);
-      r=await ocr(worker,img2,{psm:11,nodict:true});
-      text=[text,cleanText(r?.text||'')].filter(Boolean).join('\n');
-      clearCanvas(img2);
-      return {text,ban:extractBanEvent(text)};
-    }finally{ clearCanvas(chat); }
+      const variants=[
+        grayCanvas(enhancedCanvas(chat,1.50,1.03)),
+        orangeMask(chat)
+      ];
+      const texts=[];
+      for(const img of variants){
+        try{const r=await ocr(worker,img,{psm:6,nodict:true});if(r?.text)texts.push(cleanText(r.text));}
+        finally{clearCanvas(img);}
+        if(extractBanEvent(texts.join('\n')))break;
+      }
+      const merged=[...new Set(texts.filter(Boolean))].join('\n');
+      return {text:merged,ban:extractBanEvent(merged),sharp:sharpness(chat)};
+    }finally{clearCanvas(chat);}
   }
   async function readBanProbeCanvas(worker,chat){
     try{
-      // One very cheap pass for the candidate scan. The precision OCR only starts after
-      // a real signal is found. Avoid grayscale allocation here to keep memory churn low.
-      const img=enhancedCanvas(chat,1.25,1.01);
-      const r=await ocr(worker,img,{psm:6,nodict:true});
+      // Single inexpensive colored-text pass. Precision OCR only runs after a signal.
+      const mask=orangeMask(chat);
+      const r=await ocr(worker,mask,{psm:6,nodict:true});
       const text=cleanText(r?.text||'');
-      clearCanvas(img);
-      return {text,ban:extractBanEvent(text),signal:/adam|byers|15340|\bhat\b|grund|gebannt|banned|\bban\b|pc\s*-?\s*check|cheat/i.test(text)};
-    }catch{ return {text:'',ban:null,signal:false}; }
-    finally{ clearCanvas(chat); }
+      const ban=extractBanEvent(text);
+      clearCanvas(mask);
+      return {text,ban,signal:!!ban||/adam|byers|15340|administrator|\bhat\b|grund|gebannt|bann|pc[ -]?check|cheat/i.test(text),sharp:sharpness(chat)};
+    }catch{ return {text:'',ban:null,signal:false,sharp:0}; }
   }
   async function readBanProbe(worker,video){
-    // Fast candidate OCR: original video pixels are used, but the working crop is
-    // deliberately smaller because this pass only answers one question: "Could this
-    // be the Adam Byers [15340] ban block?" Precision OCR happens only after a hit.
-    const chat=makeCrop(video,FAST_BAN_ROI.x,FAST_BAN_ROI.y,FAST_BAN_ROI.w,FAST_BAN_ROI.h,.62);
-    return readBanProbeCanvas(worker,chat);
+    const chat=makeOcrChatCrop(video,1.55);
+    try{return await readBanProbeCanvas(worker,chat);}finally{clearCanvas(chat);}
+  }
+  async function readBanOnly(worker,video){
+    const chat=makeOcrChatCrop(video,3.05);
+    const texts=[];let best=null;
+    const variants=[
+      [orangeMask(chat),6],
+      [grayCanvas(enhancedCanvas(chat,1.70,1.04)),6],
+      [threshold(chat,150),11],
+      [enhancedCanvas(chat,1.90,1.06),11]
+    ];
+    for(const [img,psm] of variants){
+      try{
+        const r=await ocr(worker,img,{psm,nodict:true});
+        if(r?.text)texts.push(cleanText(r.text));
+        if(r && (!best || ocrQuality(r)>ocrQuality(best)))best=r;
+      }catch{}
+      finally{clearCanvas(img);}
+      const candidate=extractBanEvent(texts.join('\n'));
+      if(candidate)break;
+    }
+    const merged=[...new Set(texts.filter(Boolean))].join('\n');
+    const ban=extractBanEvent(merged);
+    const sharp=sharpness(chat);
+    clearCanvas(chat);
+    return {text:merged,ban,sharp,data:best||{}};
   }
   async function fastSeek(v,t){
-    try{await seek(v,t,2600);return true;}catch{try{v.pause();}catch{}try{await seek(v,t,3200);return true;}catch{return false;}}
+    try{await seek(v,t,2200);return true;}catch{try{v.pause();}catch{}try{await seek(v,t,3000);return true;}catch{return false;}}
   }
+  function uniqueTimes(times){return [...new Set(times.map(t=>Math.max(0,Number(t)||0).toFixed(2)))].map(Number).sort((a,b)=>a-b);}
 
-  async function readBanOnly(worker,video){
-    const chat=makeCrop(video,BAN_ROI.x,BAN_ROI.y,BAN_ROI.w,BAN_ROI.h,2.55);
-    const texts=[];
-    // Precision stage: keep only the variants that materially improve the ban parser.
-    const variants=[[grayCanvas(chat),6],[enhancedCanvas(chat,1.65,1.03),11],[threshold(chat,155),11]];
-    for(const [img,psm] of variants){try{const r=await ocr(worker,img,{psm,nodict:true});if(r?.text)texts.push(cleanText(r.text));}catch{}finally{clearCanvas(img);}}
-    const merged=[...new Set(texts.filter(Boolean))].join('\n');
-    clearCanvas(chat);
-    return {text:merged};
-  }
-  function dateFromFilename(name){
-    const raw=String(name||'').split(/[\\/]/).pop()||'';
-    const exact=raw.match(/(?:^|\b)(20\d{2})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])(?:\s|_|-|\.)/);
-    if(exact)return `${exact[1]}-${exact[2]}-${exact[3]}`;
-    const m=raw.match(/(?:^|\D)(20\d{2})[-_.](0[1-9]|1[0-2])[-_.](0[1-9]|[12]\d|3[01])(?:\D|$)/);
-    return m?`${m[1]}-${m[2]}-${m[3]}`:'';
-  }
+  // Highest priority: the last five seconds. The end-of-POV ban block is what the
+  // user actually wants as the verification/photo anchor. Only when that window has
+  // no verified Adam Byers [15340] ban do we fall back to the rest of the video.
   async function findVerifiedBanInLastFive(video){
     if(!video||!Number.isFinite(video.duration)||video.duration<=0)return null;
-    const end=Math.max(0,video.duration-.06), start=Math.max(0,end-5);
+    const end=Math.max(0,video.duration-.08), start=Math.max(0,end-5);
     const worker=await ensureWorker();
-    const probeTimes=[];
-    const step=Math.max(.65,(end-start)/7);
-    for(let t=start;t<=end+.001;t+=step)probeTimes.push(Math.min(end,Number(t.toFixed(2))));
-    if(!probeTimes.length)probeTimes.push(end);
+    const times=uniqueTimes(Array.from({length:11},(_,i)=>start+(end-start)*(i/10)));
     const hits=[];
-    for(const t of [...new Set(probeTimes)]){
+    for(const t of times){
       if(!(await fastSeek(video,t)))continue;
       try{
-        const chat=makeCrop(video,FAST_BAN_ROI.x,FAST_BAN_ROI.y,FAST_BAN_ROI.w,FAST_BAN_ROI.h,.42);
-        const read=await readBanProbeCanvas(worker,chat);
+        const read=await readBanFast(worker,video);
         const ban=read.ban||extractBanEvent(read.text);
-        if(ban&&ban.adminId===BAN_ADMIN_ID&&/^\d{1,6}$/.test(ban.targetId||'')&&ban.reason)hits.push({time:t,ban,text:read.text});
+        if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId&&ban.reason)hits.push({time:t,ban,text:read.text,sharp:read.sharp||0});
       }catch{}
     }
     if(!hits.length)return null;
-    const ranked=hits.sort((a,b)=>(b.ban.score||0)-(a.ban.score||0));
-    for(const h of ranked.slice(0,3)){
-      if(!(await fastSeek(video,h.time)))continue;
+    // Densify only around the best candidate: 11 cheap probes + a short, high precision
+    // local scan is much faster than rescanning the complete POV.
+    hits.sort((a,b)=>(b.ban.score-a.ban.score)||(b.sharp-a.sharp));
+    const best=hits[0];
+    const dense=uniqueTimes(Array.from({length:9},(_,i)=>Math.max(start,best.time-.8+i*.2)));
+    const verified=[...hits];
+    for(const t of dense){
+      if(!(await fastSeek(video,t)))continue;
       try{
-        const read=await readBanOnly(worker,video);
-        const ban=read.ban||extractBanEvent(read.text);
-        if(ban&&ban.adminId===BAN_ADMIN_ID&&/^\d{1,6}$/.test(ban.targetId||'')&&ban.reason)return {time:h.time,ban,text:read.text};
+        const read=await readBanOnly(worker,video);const ban=read.ban||extractBanEvent(read.text);
+        if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId&&ban.reason)verified.push({time:t,ban,text:read.text,sharp:read.sharp||0});
       }catch{}
     }
-    return ranked[0]||null;
+    verified.sort((a,b)=>(b.ban.score-a.ban.score)||(b.sharp-a.sharp));
+    return verified[0]||best;
   }
     async function analyzeVideo(video,onProgress,originalName=''){
-    const worker=await ensureWorker();const duration=video.duration;const start=Math.max(0,duration-45);const settings=state.settings;
+    const worker=await ensureWorker();
+    const duration=video.duration;
     if(!Number.isFinite(duration)||duration<=0)throw new Error('Videodauer konnte nicht bestimmt werden.');
-    const coarse=[];
-    let scanTimes=[];
-    const ultraShort=duration<=180;
-    if(ultraShort){
-      // V70: adaptive short-POV scan. Start at 2.2s spacing instead of OCR'ing every
-      // second. Once two nearby signals form a candidate cluster we stop the coarse scan
-      // and spend the saved time on precision OCR around that cluster. This keeps short
-      // videos responsive without sacrificing the final strict verification.
-      const step=2.2;
-      for(let t=0;t<=duration-.05;t+=step)scanTimes.push(t);
-      scanTimes.push(Math.max(0,duration-.05));
-    }else if(duration<=300){
-      const step=Math.max(.9,Number(settings.step)||1.0);
-      const count=Math.min(150,Math.max(55,Math.ceil(duration/step)));
-      for(let i=0;i<count;i++)scanTimes.push(duration*(i/Math.max(1,count-1)));
-    }else{
-      const count=Math.max(32,Math.min(70,Number(settings.frames)||48));
-      for(let i=0;i<count;i++)scanTimes.push(duration*(i/Math.max(1,count-1)));
-      const denseStart=Math.max(0,duration-75);
-      for(let t=denseStart;t<=duration-.05;t+=1.0)scanTimes.push(t);
-    }
-    scanTimes=[...new Set(scanTimes.map(t=>Math.round(t*100)/100))].sort((a,b)=>a-b);
-    const baseCount=scanTimes.length;
-    if(ultraShort){
-      const fastWorker=await ensureFastWorker();
-      let signalHits=[];
-      for(let i=0;i<baseCount;i+=2){
-        const batch=[];
-        for(let j=i;j<Math.min(i+2,baseCount);j++){
-          const t=scanTimes[j];
-          if(await fastSeek(video,t)) batch.push({t,chat:makeCrop(video,FAST_BAN_ROI.x,FAST_BAN_ROI.y,FAST_BAN_ROI.w,FAST_BAN_ROI.h,.45),idx:j});
-        }
-        const reads=await Promise.all(batch.map((b,k)=>readBanProbeCanvas(k%2===0?worker:fastWorker,b.chat)));
-        for(let k=0;k<batch.length;k++){
-          const b=batch[k],read=reads[k];
-          const ban=read.ban||extractBanEvent(read.text);
-          const row={time:b.t,text:read.text,ban,signal:!!read.signal,sharp:0};
-          coarse.push(row);
-          if(row.signal||row.ban){
-            const prev=signalHits[signalHits.length-1];
-            if(!prev || Math.abs(prev.time-b.t)>2.8) signalHits.push(row);
-            else signalHits.push(row);
-          }
-        }
-        onProgress?.(8+Math.round(Math.min(40,(Math.min(i+2,baseCount)/baseCount)*40)),`Schnellscan ${Math.min(i+2,baseCount)}/${baseCount}`);
-        // Two nearby signal frames are enough to trigger strict precision OCR.
-        // Do not waste the remaining video on coarse OCR once a real ban area is found.
-        if(signalHits.length>=2){
-          const last=signalHits[signalHits.length-1],prev=signalHits[signalHits.length-2];
-          if(Math.abs(last.time-prev.time)<=3.2){
-            break;
-          }
-        }
-      }
-    }else{
-      for(let i=0;i<baseCount;i++){
-        const t=scanTimes[i];
-        if(!(await safeSeek(video,t,2)))continue;
-        try{const read=await readBanOnly(worker,video);const ban=read.ban||extractBanEvent(read.text);coarse.push({time:t,text:read.text,ban,signal:!!read.signal,sharp:0});}catch(err){console.debug('Ban OCR skipped',err);}
-        if(i%4===0 || i===baseCount-1) onProgress?.(8+Math.round((i+1)/baseCount*40),`Schnellscan ${i+1}/${baseCount}`);
-      }
-    }
-    let strictCoarse=coarse.filter(f=>f.ban&&f.ban.adminId===BAN_ADMIN_ID&&f.ban.targetId&&f.ban.reason);
-    // A fast probe may see the relevant banner without parsing every token. Promote
-    // signal frames into a small precision set before declaring the scan empty.
-    if(!strictCoarse.length){
-      const probe=coarse.filter(f=>f.signal).sort((a,b)=>Number(b.signal)-Number(a.signal));
-      const picked=[];
-      for(const f of probe){ if(picked.every(p=>Math.abs(p.time-f.time)>1.4)) picked.push(f); if(picked.length>=18) break; }
-      for(const f of picked){
-        for(const dt of [-.7,0,.7]){
-          const t=Math.max(0,Math.min(duration-.05,f.time+dt));
-          if(!(await fastSeek(video,t)))continue;
-          try{const read=await readBanOnly(worker,video);const ban=read.ban||extractBanEvent(read.text);if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId&&ban.reason)strictCoarse.push({time:t,text:read.text,ban,signal:true,sharp:0});}catch{}
-        }
-      }
-    }
-    if(!strictCoarse.length){onProgress?.(100,`Kein eindeutiger Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}]`);return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,duration,missing:['Ziel-ID','Grund'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
-    const grouped=new Map();for(const f of strictCoarse){const k=`${f.ban.targetId}|${f.ban.reason}`;(grouped.get(k)||grouped.set(k,[]).get(k)).push(f);}
-    const group=[...grouped.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.ban.score,0)-a.reduce((s,x)=>s+x.ban.score,0))[0]||[];
-    const seeds=group.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp).slice(0,duration<=180?3:5);const refineTimes=new Set();const win=Math.max(2.2,Math.min(5.5,duration<=180?3.4:(Number(settings.window)||5)));const rstep=Math.max(.6,Math.min(.9,duration<=180?.7:(Number(settings.step)||.4)));
-    for(const seed of seeds)for(let t=Math.max(start,seed.time-win/2);t<=Math.min(duration-.05,seed.time+win/2);t+=rstep)refineTimes.add(Math.round(t*20)/20);
-    const refined=[];const times=[...refineTimes].sort((a,b)=>a-b);let n=0;
-    for(const t of times){if(!(await safeSeek(video,t,2)))continue;try{const read=await readBanOnly(worker,video);const ban=read.ban||extractBanEvent(read.text);if(ban)refined.push({time:t,text:read.text,ban,sharp:0});}catch{}n++;onProgress?.(48+Math.round(n/Math.max(1,times.length)*28),`Ban-Präzisionsscan ${n}/${times.length}`);}
-    const all=[...strictCoarse,...refined].filter(f=>f.ban&&f.ban.adminId===BAN_ADMIN_ID&&f.ban.targetId&&f.ban.reason);const map=new Map();for(const f of all){const k=`${f.ban.targetId}|${f.ban.reason}`;(map.get(k)||map.set(k,[]).get(k)).push(f);}
-    const frames=[...(( [...map.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.ban.score,0)-a.reduce((s,x)=>s+x.ban.score,0))[0] )||[])];
-    if(!frames.length){onProgress?.(100,'Ban-Anker nicht stabil genug');return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,duration,missing:['Ziel-ID','Grund'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
-    const idV=uniqueVote(frames.map(f=>f.ban.targetId));const reasonV=uniqueVote(frames.map(f=>f.ban.reason));
-    const rankedFrames=frames.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp);
-    const topForAnchor=rankedFrames.slice(0,Math.min(12,rankedFrames.length));
-    // Choose the Info-Foto from the densest verified ban cluster, not from an
-    // arbitrary first/last frame. A cluster requires nearby matching ban hits.
-    const clusters=[];
-    for(const f of rankedFrames){
-      let c=clusters.find(x=>Math.abs(x.last-f.time)<=1.6);
-      if(!c){c={items:[],last:f.time};clusters.push(c);}
-      c.items.push(f);c.last=f.time;
-    }
-    clusters.sort((a,b)=>b.items.length-a.items.length ||
-      Math.max(...b.items.map(x=>x.ban.score))-Math.max(...a.items.map(x=>x.ban.score)) ||
-      Math.max(...b.items.map(x=>x.sharp))-Math.max(...a.items.map(x=>x.sharp)));
-    let anchor=null;
-    // Never invent a timestamp such as 0s/15s/30s. The photo timestamp must come
-    // from an actual verified ban cluster. Prefer the strongest cluster, then the
-    // sharpest frame inside it. This avoids showing the first seconds of the POV.
-    const bestCluster=clusters.find(c=>c.items.length>=2) || clusters[0];
-    if(bestCluster){
-      const candidate=bestCluster.items.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0];
-      if(candidate && Number.isFinite(candidate.time)) anchor=candidate;
-    }
+    const date=dateFromFilename(originalName||'');
+
+    // 1) ALWAYS check the last five seconds first. This is both faster and more reliable
+    // for the final ban message used in the Info-Foto.
+    onProgress?.(3,'Prüfe die letzten 5 Sekunden…');
+    let anchor=await findVerifiedBanInLastFive(video);
+
+    // 2) If the final five seconds do not contain the ban, do a fast full-video candidate
+    // scan. For short clips we sample every ~1.5s; for long clips we use a bounded number.
     if(!anchor){
-      onProgress?.(100,'Bannblock erkannt, aber kein sicherer Timestamp gefunden');
-      return {targetId:idV?.value||'',reason:reasonV?.value||'',sc:'',server:'3',date:dateFromFilename(originalName||video.currentSrc||''),offline:false,duration,missing:['SC / ACP'],complete:false,timestamps:{pcCheck:Math.max(0,Math.min(duration/2,Math.max(0,duration-.05)))},confidence:{id:1,reason:1,sc:0,server:1,date:0,ban:0,admin:1}};
+      const times=[];
+      if(duration<=120){
+        for(let t=0;t<=duration-.05;t+=1.4)times.push(t);
+      }else if(duration<=300){
+        for(let t=0;t<=duration-.05;t+=2.0)times.push(t);
+      }else{
+        const count=Math.min(90,Math.max(36,Math.ceil(duration/6)));
+        for(let i=0;i<count;i++)times.push(duration*(i/Math.max(1,count-1)));
+      }
+      const scan=uniqueTimes(times);const hits=[];
+      for(let i=0;i<scan.length;i++){
+        const t=scan[i];
+        if(!(await fastSeek(video,t)))continue;
+        try{
+          const read=await readBanProbe(worker,video);const ban=read.ban||extractBanEvent(read.text);
+          if(read.signal||ban)hits.push({time:t,ban,signal:read.signal,sharp:read.sharp||0,text:read.text});
+        }catch{}
+        onProgress?.(5+Math.round((i+1)/scan.length*35),`Schnellscan ${i+1}/${scan.length}`);
+      }
+      // Precision only around candidate signals.
+      const candidates=hits.filter(x=>x.ban&&x.ban.adminId===BAN_ADMIN_ID&&x.ban.reason&&x.ban.targetId);
+      const probes=candidates.length?candidates: hits.filter(x=>x.signal).slice(0,12);
+      const checked=[];
+      for(const h of probes.slice(0,12)){
+        for(const t of uniqueTimes([h.time-.8,h.time-.4,h.time,h.time+.4,h.time+.8])){
+          if(!(await fastSeek(video,t)))continue;
+          try{const read=await readBanOnly(worker,video);const ban=read.ban||extractBanEvent(read.text);if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId&&ban.reason)checked.push({time:t,ban,text:read.text,sharp:read.sharp||0});}catch{}
+        }
+      }
+      const pool=checked.length?checked:candidates;
+      if(pool.length){pool.sort((a,b)=>(b.ban.score-a.ban.score)||(b.sharp-a.sharp));anchor=pool[0];}
     }
-    const bannerTime=anchor.time;
-    // Keep all info photos on the same verified ban frame so fields never point to unrelated OCR hits.
-    const timestamps={banner:bannerTime,targetId:bannerTime,reason:bannerTime,pcCheck:Math.max(0,Math.min(duration/2,Math.max(0,duration-.05)))};
-    // SC/RID is intentionally NOT read from the POV anymore. The authoritative
-    // Social Club value comes from the Grand RP Admin Panel and is written into SOC.
-    const sc='';
-    // Server is fixed: Grand RP DE03 => internal value 3. Never OCR this field.
-    const server='3';
-    // Date is always derived from the original filename, never OCR-scanned.
-    const date=dateFromFilename(originalName||video.currentSrc||'');
+
+    if(!anchor){
+      onProgress?.(100,`Kein eindeutiger Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}]`);
+      return {targetId:'',reason:'',sc:'',server:'3',date,offline:true,duration,missing:['Ziel-ID','Grund','SC / ACP'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:date?1:0,ban:0,admin:0}};
+    }
+
+    const verified=anchor.ban;
+    const bannerTime=Math.max(0,Math.min(duration-.05,anchor.time));
+    const timestamps={banner:bannerTime,targetId:bannerTime,reason:bannerTime,sc:Math.max(0,duration-5),pcCheck:Math.max(0,Math.min(duration/2,duration-.05))};
+    const targetId=/^\d{1,6}$/.test(verified.targetId||'')&&verified.targetId!==BAN_ADMIN_ID?verified.targetId:'';
+    const reason=canonicalReason(verified.reason)||verified.reason||'';
     const missing=[];
-    if(!idV?.value)missing.push('Ziel-ID');
-    if(!reasonV?.value)missing.push('Grund');
-    if(!sc)missing.push('SC / ACP');
-    onProgress?.(100,idV?.value&&reasonV?.value?`Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}] erkannt`:'Ban erkannt, Angaben fehlen');
-    return {targetId:/^\d{1,6}$/.test(idV?.value||'')?idV.value:'',reason:reasonV?.value||'',sc:'',server,date,offline:false,duration,missing,complete:missing.length===0,timestamps,confidence:{id:idV?idV.votes/Math.max(1,frames.length):0,reason:reasonV?reasonV.votes/Math.max(1,frames.length):0,sc:0,server:1,date:date?1:0,ban:anchor.ban.score||0,admin:1}};
+    if(!targetId)missing.push('Ziel-ID');
+    if(!reason)missing.push('Grund');
+    missing.push('SC / ACP');
+    onProgress?.(100,targetId&&reason?`Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}] erkannt`:'Ban erkannt, Angaben fehlen');
+    return {targetId,reason,sc:'',server:'3',date,offline:false,duration,missing,complete:false,timestamps,confidence:{id:targetId?1:0,reason:reason?1:0,sc:0,server:1,date:date?1:0,ban:verified.score||0,admin:1}};
   }
   async function openManualPicker(entry, field, secondsOverride){
     if(!entry)return;
@@ -1037,48 +1010,59 @@
       const w=window.open(target.href,'_blank','noopener'); if(!w)toast('Pop-up blockiert. Bitte Pop-ups für die Website erlauben.');
     }catch(err){console.error(err);toast('POV konnte nicht geöffnet werden: '+err.message);}
   }
-  const PHOTO_ROIS={banner:[0,.012,.96,.50],targetId:[0,.012,.72,.50],reason:[0,.045,.62,.50],sc:[0,.012,.96,.50],pcCheck:[0,.012,.88,.52]};
+  const PHOTO_ROIS={
+    banner:[0.00,0.00,0.70,0.46],
+    targetId:[0.00,0.00,0.68,0.42],
+    reason:[0.00,0.06,0.60,0.37],
+    sc:[0.00,0.00,0.70,0.46],
+    pcCheck:[0.00,0.00,0.70,0.46]
+  };
   async function showInfoPhoto(field='banner'){
     const panel=$('#infoPhotoPanel'),canvas=$('#infoPhotoCanvas'),label=$('#infoPhotoLabel'),meta=$('#infoPhotoMeta');if(!panel||!canvas)return;
     const ctx=state.editing;const entry=ctx?.item||ctx?.entry;if(!entry)return;
     let file=entry.file||null;if(!file){try{file=await getVideo(entry.id);if(file)entry.file=file;}catch{}}
     if(!file){panel.classList.add('hidden');return;}
-    const r=entry.result||entry;let t=Number(r.timestamps?.[field]??r.timestamps?.banner??r.bannerTime??r.banTimestamp??NaN);
-    panel.classList.remove('hidden');label.textContent=`Info-Foto · ${field==='targetId'?'Ziel-ID':field==='reason'?'Grund':field==='sc'?'SC / RID':field==='pcCheck'?'PC-Check':'Bannblock'}`;
-    let videoDurationHint=Number(entry.duration||r.duration||NaN);
-    if(field==='banner'||field==='targetId'||field==='reason'){
-      let probeMedia=null;
-      try{
-        probeMedia=await openLocalVideo(file,'Bannblock letzte 5 Sekunden');
-        const hit=await findVerifiedBanInLastFive(probeMedia.video);
+    const r=entry.result||entry;
+    panel.classList.remove('hidden');
+    label.textContent=`Info-Foto · ${field==='targetId'?'Ziel-ID':field==='reason'?'Grund':field==='sc'?'SC / RID':field==='pcCheck'?'PC-Check':'Bannblock'}`;
+    let media=null;
+    try{
+      media=await openLocalVideo(file,'Info-Foto');
+      const duration=Number(media.video.duration||r.duration||0)||0;
+      let t=Number(r.timestamps?.[field]??r.timestamps?.banner??NaN);
+      if(field==='banner'||field==='targetId'||field==='reason'){
+        // The automatic photo is anchored strictly to the verified last-5-second ban first.
+        const hit=await findVerifiedBanInLastFive(media.video);
         if(hit){
           t=hit.time;
           entry.result=entry.result||{};entry.result.timestamps={...(entry.result.timestamps||{}),banner:t,targetId:t,reason:t};
           entry.timestamps={...(entry.timestamps||{}),banner:t,targetId:t,reason:t};
-          if(hit.ban.targetId){entry.result.targetId=hit.ban.targetId;}
-          if(hit.ban.reason){entry.result.reason=hit.ban.reason;}
-        } else t=Number.isFinite(videoDurationHint)?Math.max(0,videoDurationHint-2.5):0;
-      }catch(err){console.debug('last5 photo scan skipped',err);t=Number.isFinite(videoDurationHint)?Math.max(0,videoDurationHint-2.5):0;}
-      finally{closeLocalVideo(probeMedia);}
-    }
-    if(field==='sc' || !Number.isFinite(t) || t<0) t=Number.isFinite(videoDurationHint)?Math.max(0,videoDurationHint-2.5):0;
-    meta.textContent=`Zeitpunkt ${t.toFixed(2)} s · Originalauflösung`;
-    for(const b of $$('.photo-field'))b.classList.toggle('active',b.dataset.field===field);
-    let media=null;
-    try{
-      media=await openLocalVideo(file,'Info-Foto');
-      if(field==='sc') t=Math.max(0,media.video.duration-5);
-      else if(field==='pcCheck' && (!Number.isFinite(t)||t<0)) t=Math.max(0,media.video.duration/2);
-      const tt=Math.max(0,Math.min(t,Math.max(0,media.video.duration-.05)));
-      meta.textContent=`Zeitpunkt ${tt.toFixed(2)} s · Originalauflösung`;
-      if(!(await safeSeek(media.video,tt,3)))throw new Error('Zeitpunkt konnte nicht geladen werden.');
+          if(hit.ban.targetId)entry.result.targetId=hit.ban.targetId;
+          if(hit.ban.reason)entry.result.reason=hit.ban.reason;
+        }else if(!Number.isFinite(t)) t=Math.max(0,duration-0.4);
+      }else if(field==='sc'){
+        t=Math.max(0,duration-0.5);
+      }else if(field==='pcCheck'){
+        t=Number.isFinite(t)?t:Math.max(0,Math.min(duration/2,duration-.05));
+      }
+      if(!Number.isFinite(t))t=Math.max(0,duration-.4);
+      const tt=Math.max(0,Math.min(t,Math.max(0,duration-.05)));
+      await safeSeek(media.video,tt,3);
+      meta.textContent=`Zeitpunkt ${tt.toFixed(2)} s · Originalauflösung · Chatbereich links oben`;
+      for(const b of $$('.photo-field'))b.classList.toggle('active',b.dataset.field===field);
+      const crop=PHOTO_ROIS[field]||PHOTO_ROIS.banner;
       const video=media.video;
-      const crop=(field==='banner'||field==='targetId'||field==='reason'||field==='sc'||field==='pcCheck')?PHOTO_ROIS[field]||PHOTO_ROIS.banner:PHOTO_ROIS.banner;
       const sx=Math.round(video.videoWidth*crop[0]),sy=Math.round(video.videoHeight*crop[1]),sw=Math.max(1,Math.round(video.videoWidth*crop[2])),sh=Math.max(1,Math.round(video.videoHeight*crop[3]));
-      const maxW=1500,maxH=900,scale=Math.min(1,maxW/sw,maxH/sh);canvas.width=Math.max(1,Math.round(sw*scale));canvas.height=Math.max(1,Math.round(sh*scale));
+      const maxW=1700,maxH=1000,scale=Math.min(1,maxW/sw,maxH/sh);
+      canvas.width=Math.max(1,Math.round(sw*scale));canvas.height=Math.max(1,Math.round(sh*scale));
       const c=canvas.getContext('2d');c.imageSmoothingEnabled=true;c.drawImage(video,sx,sy,sw,sh,0,0,canvas.width,canvas.height);
-      if(field==='targetId'||field==='reason'){const guide=field==='targetId'?[.015,.015,.93,.34]:field==='reason'?[.015,.045,.74,.43]:[.015,.015,.93,.46];c.save();c.fillStyle='rgba(255,47,139,.10)';c.strokeStyle='#ff2f8b';c.lineWidth=Math.max(2,canvas.width/700);c.fillRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.strokeRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.restore();}
-    }catch(err){canvas.width=1;canvas.height=1;meta.textContent=`Foto konnte nicht geladen werden: ${err.message}`;}finally{closeLocalVideo(media);}
+      if(field==='targetId'||field==='reason'||field==='banner'){
+        c.save();c.fillStyle='rgba(255,47,139,.10)';c.strokeStyle='#ff2f8b';c.lineWidth=Math.max(2,canvas.width/700);
+        const guide=field==='reason'?[0.00,.10,.78,.44]:[0.00,.02,.90,.82];
+        c.fillRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.strokeRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.restore();
+      }
+    }catch(err){canvas.width=1;canvas.height=1;meta.textContent=`Foto konnte nicht geladen werden: ${err.message}`;}
+    finally{closeLocalVideo(media);}
   }
   function revokeEditorPreview(){if(state.editorVideoUrl){try{URL.revokeObjectURL(state.editorVideoUrl);}catch{}state.editorVideoUrl=null;}const v=$('#editorVideoPreview');if(v){try{v.pause();}catch{}v.removeAttribute('src');v.load();}}
   function loadEditorPreview(file,t=0){const v=$('#editorVideoPreview');if(!v||!file)return;revokeEditorPreview();state.editorVideoUrl=URL.createObjectURL(file);v.src=state.editorVideoUrl;v.load();const set=()=>{try{v.currentTime=Math.max(0,Math.min(Number(t)||0,Math.max(0,v.duration-.05)));}catch{}};v.addEventListener('loadedmetadata',set,{once:true});} 
