@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V73';
+  const BUILD='V74';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -771,8 +771,8 @@
     const raw=lines.filter(l=>(l.bbox?.y1||0)>=y0 && (l.bbox?.y0||0)<=y1).map(l=>l.text||'').join('\n');
     return {canvas:c,y:y0,raw,online:true};
   }
-  const BAN_ROI={x:.02,y:.02,w:.84,h:.42};
-  const FAST_BAN_ROI={x:.02,y:.02,w:.84,h:.42};
+  const BAN_ROI={x:.015,y:.015,w:.93,h:.46};
+  const FAST_BAN_ROI={x:.015,y:.015,w:.90,h:.42};
   async function readBanFast(worker,video){
     // Fast path for short POVs: only OCR the relevant upper-left ban area once,
     // then run one fallback threshold pass when the strict ban anchor is missing.
@@ -832,6 +832,36 @@
     if(exact)return `${exact[1]}-${exact[2]}-${exact[3]}`;
     const m=raw.match(/(?:^|\D)(20\d{2})[-_.](0[1-9]|1[0-2])[-_.](0[1-9]|[12]\d|3[01])(?:\D|$)/);
     return m?`${m[1]}-${m[2]}-${m[3]}`:'';
+  }
+  async function findVerifiedBanInLastFive(video){
+    if(!video||!Number.isFinite(video.duration)||video.duration<=0)return null;
+    const end=Math.max(0,video.duration-.06), start=Math.max(0,end-5);
+    const worker=await ensureWorker();
+    const probeTimes=[];
+    const step=Math.max(.65,(end-start)/7);
+    for(let t=start;t<=end+.001;t+=step)probeTimes.push(Math.min(end,Number(t.toFixed(2))));
+    if(!probeTimes.length)probeTimes.push(end);
+    const hits=[];
+    for(const t of [...new Set(probeTimes)]){
+      if(!(await fastSeek(video,t)))continue;
+      try{
+        const chat=makeCrop(video,FAST_BAN_ROI.x,FAST_BAN_ROI.y,FAST_BAN_ROI.w,FAST_BAN_ROI.h,.42);
+        const read=await readBanProbeCanvas(worker,chat);
+        const ban=read.ban||extractBanEvent(read.text);
+        if(ban&&ban.adminId===BAN_ADMIN_ID&&/^\d{1,6}$/.test(ban.targetId||'')&&ban.reason)hits.push({time:t,ban,text:read.text});
+      }catch{}
+    }
+    if(!hits.length)return null;
+    const ranked=hits.sort((a,b)=>(b.ban.score||0)-(a.ban.score||0));
+    for(const h of ranked.slice(0,3)){
+      if(!(await fastSeek(video,h.time)))continue;
+      try{
+        const read=await readBanOnly(worker,video);
+        const ban=read.ban||extractBanEvent(read.text);
+        if(ban&&ban.adminId===BAN_ADMIN_ID&&/^\d{1,6}$/.test(ban.targetId||'')&&ban.reason)return {time:h.time,ban,text:read.text};
+      }catch{}
+    }
+    return ranked[0]||null;
   }
     async function analyzeVideo(video,onProgress,originalName=''){
     const worker=await ensureWorker();const duration=video.duration;const start=Math.max(0,duration-45);const settings=state.settings;
@@ -1007,7 +1037,7 @@
       const w=window.open(target.href,'_blank','noopener'); if(!w)toast('Pop-up blockiert. Bitte Pop-ups für die Website erlauben.');
     }catch(err){console.error(err);toast('POV konnte nicht geöffnet werden: '+err.message);}
   }
-  const PHOTO_ROIS={banner:[.02,.02,.84,.42],targetId:[.02,.02,.84,.42],reason:[.02,.08,.84,.34],sc:[.02,.02,.84,.42],pcCheck:[.02,.02,.84,.50]};
+  const PHOTO_ROIS={banner:[.015,.015,.93,.46],targetId:[.015,.015,.93,.46],reason:[.015,.045,.74,.43],sc:[.015,.015,.93,.46],pcCheck:[.015,.015,.93,.50]};
   async function showInfoPhoto(field='banner'){
     const panel=$('#infoPhotoPanel'),canvas=$('#infoPhotoCanvas'),label=$('#infoPhotoLabel'),meta=$('#infoPhotoMeta');if(!panel||!canvas)return;
     const ctx=state.editing;const entry=ctx?.item||ctx?.entry;if(!entry)return;
@@ -1015,9 +1045,23 @@
     if(!file){panel.classList.add('hidden');return;}
     const r=entry.result||entry;let t=Number(r.timestamps?.[field]??r.timestamps?.banner??r.bannerTime??r.banTimestamp??NaN);
     panel.classList.remove('hidden');label.textContent=`Info-Foto · ${field==='targetId'?'Ziel-ID':field==='reason'?'Grund':field==='sc'?'SC / RID':field==='pcCheck'?'PC-Check':'Bannblock'}`;
-    // SOC/SC does not come from the POV. Show a useful frame from the final 5 seconds instead of 0.00s.
     let videoDurationHint=Number(entry.duration||r.duration||NaN);
-    if(field==='sc' || !Number.isFinite(t) || t<0) t=Number.isFinite(videoDurationHint)?Math.max(0,videoDurationHint-5):0;
+    if(field==='banner'||field==='targetId'||field==='reason'){
+      let probeMedia=null;
+      try{
+        probeMedia=await openLocalVideo(file,'Bannblock letzte 5 Sekunden');
+        const hit=await findVerifiedBanInLastFive(probeMedia.video);
+        if(hit){
+          t=hit.time;
+          entry.result=entry.result||{};entry.result.timestamps={...(entry.result.timestamps||{}),banner:t,targetId:t,reason:t};
+          entry.timestamps={...(entry.timestamps||{}),banner:t,targetId:t,reason:t};
+          if(hit.ban.targetId){entry.result.targetId=hit.ban.targetId;}
+          if(hit.ban.reason){entry.result.reason=hit.ban.reason;}
+        } else t=Number.isFinite(videoDurationHint)?Math.max(0,videoDurationHint-2.5):0;
+      }catch(err){console.debug('last5 photo scan skipped',err);t=Number.isFinite(videoDurationHint)?Math.max(0,videoDurationHint-2.5):0;}
+      finally{closeLocalVideo(probeMedia);}
+    }
+    if(field==='sc' || !Number.isFinite(t) || t<0) t=Number.isFinite(videoDurationHint)?Math.max(0,videoDurationHint-2.5):0;
     meta.textContent=`Zeitpunkt ${t.toFixed(2)} s · Originalauflösung`;
     for(const b of $$('.photo-field'))b.classList.toggle('active',b.dataset.field===field);
     let media=null;
@@ -1033,7 +1077,7 @@
       const sx=Math.round(video.videoWidth*crop[0]),sy=Math.round(video.videoHeight*crop[1]),sw=Math.max(1,Math.round(video.videoWidth*crop[2])),sh=Math.max(1,Math.round(video.videoHeight*crop[3]));
       const maxW=1500,maxH=900,scale=Math.min(1,maxW/sw,maxH/sh);canvas.width=Math.max(1,Math.round(sw*scale));canvas.height=Math.max(1,Math.round(sh*scale));
       const c=canvas.getContext('2d');c.imageSmoothingEnabled=true;c.drawImage(video,sx,sy,sw,sh,0,0,canvas.width,canvas.height);
-      if(field==='targetId'||field==='reason'){const guide=field==='targetId'?[.02,.02,.84,.24]:field==='reason'?[.02,.08,.84,.34]:[.02,.02,.84,.42];c.save();c.fillStyle='rgba(255,47,139,.10)';c.strokeStyle='#ff2f8b';c.lineWidth=Math.max(2,canvas.width/700);c.fillRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.strokeRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.restore();}
+      if(field==='targetId'||field==='reason'){const guide=field==='targetId'?[.015,.015,.93,.34]:field==='reason'?[.015,.045,.74,.43]:[.015,.015,.93,.46];c.save();c.fillStyle='rgba(255,47,139,.10)';c.strokeStyle='#ff2f8b';c.lineWidth=Math.max(2,canvas.width/700);c.fillRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.strokeRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.restore();}
     }catch(err){canvas.width=1;canvas.height=1;meta.textContent=`Foto konnte nicht geladen werden: ${err.message}`;}finally{closeLocalVideo(media);}
   }
   function revokeEditorPreview(){if(state.editorVideoUrl){try{URL.revokeObjectURL(state.editorVideoUrl);}catch{}state.editorVideoUrl=null;}const v=$('#editorVideoPreview');if(v){try{v.pause();}catch{}v.removeAttribute('src');v.load();}}
@@ -1061,10 +1105,13 @@
   function setFieldStatus(item){
     const r=item?.result||item||{};
     const missing=new Set(Array.isArray(r.missing)?r.missing:[]);
+    const uiTarget=clampId($('#targetId')?.value||r.targetId||'');
+    const uiReason=canonicalReason($('#reason')?.value||r.reason||'')||($('#reason')?.value||r.reason||'');
+    const uiSc=normalizeHexLoose($('#sc')?.value||r.sc||'');
     const statuses=[
-      ['ID','Ziel-ID',!!r.targetId&&!missing.has('Ziel-ID')],
-      ['Grund','Grund',!!r.reason&&!missing.has('Grund')],
-      ['SC','SOC / SC',!!r.sc&&!missing.has('SC')&&!missing.has('SC / ACP')]
+      ['ID','Ziel-ID',/^\d{1,6}$/.test(uiTarget)],
+      ['Grund','Grund',ALLOWED_REASONS.includes(uiReason)],
+      ['SC','SOC / SC',uiSc.length===40]
     ];
     const box=$('#fieldStatus');
     if(box) box.innerHTML=statuses.map(([short,label,ok])=>`<div class="status-chip ${ok?'ok':'warn'}">${ok?'✓':'⚠'} ${esc(label)}</div>`).join('');
@@ -1209,7 +1256,7 @@
   }
 
   function setupEditor(){
-    $('#closeModal').onclick=closeEditor;$('#cancelBtn').onclick=closeEditor;$('#entryForm').addEventListener('submit',saveEditor);['#targetId','#date'].forEach(s=>$(s).addEventListener('input',renderTitlePreview));$('#reason').addEventListener('change',renderTitlePreview);$('#targetId').addEventListener('input',()=>{$('#targetId').value=clampId($('#targetId').value)});
+    $('#closeModal').onclick=closeEditor;$('#cancelBtn').onclick=closeEditor;$('#entryForm').addEventListener('submit',saveEditor);['#targetId','#date'].forEach(s=>$(s).addEventListener('input',renderTitlePreview));$('#reason').addEventListener('change',()=>{renderTitlePreview();setFieldStatus(state.editing?.item||state.editing?.entry||{});});$('#targetId').addEventListener('input',()=>{$('#targetId').value=clampId($('#targetId').value);setFieldStatus(state.editing?.item||state.editing?.entry||{});});$('#sc').addEventListener('input',()=>setFieldStatus(state.editing?.item||state.editing?.entry||{}));
     $$('.chip').forEach(c=>c.onclick=()=>{const v=c.dataset.value;c.classList.toggle('active');if(c.classList.contains('active'))state.selectedTypes.add(v);else state.selectedTypes.delete(v);});
     $$('.photo-field').forEach(b=>b.onclick=()=>showInfoPhoto(b.dataset.field));
     $('#photoRefresh')?.addEventListener('click',()=>{const active=$('.photo-field.active');showInfoPhoto(active?.dataset.field||'banner');});
