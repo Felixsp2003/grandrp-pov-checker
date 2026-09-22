@@ -771,8 +771,8 @@
     const raw=lines.filter(l=>(l.bbox?.y1||0)>=y0 && (l.bbox?.y0||0)<=y1).map(l=>l.text||'').join('\n');
     return {canvas:c,y:y0,raw,online:true};
   }
-  const BAN_ROI={x:.015,y:.015,w:.93,h:.46};
-  const FAST_BAN_ROI={x:.015,y:.015,w:.90,h:.42};
+  const BAN_ROI={x:0,y:.012,w:.96,h:.50};
+  const FAST_BAN_ROI={x:0,y:.012,w:.92,h:.46};
   async function readBanFast(worker,video){
     // Fast path for short POVs: only OCR the relevant upper-left ban area once,
     // then run one fallback threshold pass when the strict ban anchor is missing.
@@ -1037,7 +1037,7 @@
       const w=window.open(target.href,'_blank','noopener'); if(!w)toast('Pop-up blockiert. Bitte Pop-ups für die Website erlauben.');
     }catch(err){console.error(err);toast('POV konnte nicht geöffnet werden: '+err.message);}
   }
-  const PHOTO_ROIS={banner:[.015,.015,.93,.46],targetId:[.015,.015,.93,.46],reason:[.015,.045,.74,.43],sc:[.015,.015,.93,.46],pcCheck:[.015,.015,.93,.50]};
+  const PHOTO_ROIS={banner:[0,.012,.96,.50],targetId:[0,.012,.72,.50],reason:[0,.045,.62,.50],sc:[0,.012,.96,.50],pcCheck:[0,.012,.88,.52]};
   async function showInfoPhoto(field='banner'){
     const panel=$('#infoPhotoPanel'),canvas=$('#infoPhotoCanvas'),label=$('#infoPhotoLabel'),meta=$('#infoPhotoMeta');if(!panel||!canvas)return;
     const ctx=state.editing;const entry=ctx?.item||ctx?.entry;if(!entry)return;
