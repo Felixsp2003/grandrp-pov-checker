@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V68';
+  const BUILD='V69';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -359,7 +359,7 @@
   if(isNode){module.exports={ALLOWED_REASONS,compact,similarity,normalizeHexLoose,normalizeIdToken,canonicalReason,parseTargetId,parseReason,extractScOrdered,extractScCandidatesFromString,extractHexCandidateAnyText,consensusHex,extractServerFromOcr,extractDate,serverVote,dateVote,clampId,validDate};return;}
 
   const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-  const state={entries:[],queue:[],filter:'all',editing:null,worker:null,specialWorker:null,accessToken:localStorage.getItem('yt_access_token')||sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,tokenExpiresAt:Number(localStorage.getItem('yt_access_expires_at_v50')||0),tokenRefreshPromise:null};
+  const state={entries:[],queue:[],filter:'all',editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:localStorage.getItem('yt_access_token')||sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,tokenExpiresAt:Number(localStorage.getItem('yt_access_expires_at_v50')||0),tokenRefreshPromise:null};
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
   // Local authentication: plaintext passwords are never stored; only salted PBKDF2 hashes are persisted in this browser.
   const AUTH_USERS_KEY='grandrp_auth_users_v1';
@@ -533,7 +533,7 @@
       const sourceSize=await verifyLocalFile(file,0,'OCR-Quelle');
       if(stored && Number(stored.size)!==sourceSize)throw new Error(`OCR-Quelle beschädigt: ${formatBytesExact(sourceSize)} · Archiv ${formatBytesExact(stored.size)}.`);
       media=await openLocalVideo(file,`POV ${file.name}`,stored&&stored!==file?stored:null);
-      item.result=await analyzeVideo(media.video,p=>{item.progress=60+Math.round(p*.40);item.status=`OCR ${p}% · erneuter Versuch`;renderQueue();});
+      item.result=await analyzeVideo(media.video,p=>{item.progress=60+Math.round(p*.40);item.status=`OCR ${p}% · erneuter Versuch`;renderQueue();},file.name);
       item.result.originalName=file.name;item.result.sourceSize=sourceSize;item.result.remoteSize=Number(item.result.remoteSize||item.youtube?.remoteSize||0);item.result.sourceType=file.type||'video/mp4';item.result.types=[];item.result.proof=item.youtube?.url||item.result.proof||'';item.result.youtube=item.youtube||item.result.youtube;
       item.status=item.result.complete?`OCR fertig · Prüfung offen`:'OCR unvollständig · Prüfung nötig';item.progress=100;renderQueue();if(!state.editing)openEditor(item);else{item.status+=' · Prüfung wartet';renderQueue();}
     }catch(err){item.status='Fehler: '+(err?.message||err);item.progress=0;renderQueue();}finally{closeLocalVideo(media);item.processing=false;renderQueue();}
@@ -656,6 +656,13 @@
     state.specialWorker=await Tesseract.createWorker('eng');
     await state.specialWorker.setParameters({preserve_interword_spaces:'1'});
     return state.specialWorker;
+  }
+  async function ensureFastWorker(){
+    if(state.fastWorker)return state.fastWorker;
+    if(!window.Tesseract)throw new Error('Tesseract konnte nicht geladen werden. Bitte Internetverbindung prüfen.');
+    state.fastWorker=await Tesseract.createWorker('eng');
+    await state.fastWorker.setParameters({preserve_interword_spaces:'1',tessedit_pageseg_mode:'6'});
+    return state.fastWorker;
   }
   async function ocr(worker,canvas,opts={}){
     // General OCR and restricted numeric/hex OCR use separate workers. This is deliberate:
@@ -782,18 +789,22 @@
       return {text,ban:extractBanEvent(text)};
     }finally{ clearCanvas(chat); }
   }
-  async function readBanProbe(worker,video){
-    // Ultra-fast candidate detector used only for short/medium clips. One OCR pass
-    // on a smaller upper-left ROI. Any hit is re-read later with the full precision pipeline.
-    const chat=makeCrop(video,FAST_BAN_ROI.x,FAST_BAN_ROI.y,FAST_BAN_ROI.w,FAST_BAN_ROI.h,1.20);
+  async function readBanProbeCanvas(worker,chat){
     try{
       const img=grayCanvas(chat);
       const r=await ocr(worker,img,{psm:6,nodict:true});
       const text=cleanText(r?.text||'');
       clearCanvas(img);
-      return {text,ban:extractBanEvent(text),signal:/adam|byers|15340|\bhat\b|grund|gebannt|banned|ban|pc\s*-?\s*check|cheat/i.test(text)};
+      return {text,ban:extractBanEvent(text),signal:/adam|byers|15340|\bhat\b|grund|gebannt|banned|\bban\b|pc\s*-?\s*check|cheat/i.test(text)};
     }catch{ return {text:'',ban:null,signal:false}; }
     finally{ clearCanvas(chat); }
+  }
+  async function readBanProbe(worker,video){
+    // Fast candidate OCR: original video pixels are used, but the working crop is
+    // deliberately smaller because this pass only answers one question: "Could this
+    // be the Adam Byers [15340] ban block?" Precision OCR happens only after a hit.
+    const chat=makeCrop(video,FAST_BAN_ROI.x,FAST_BAN_ROI.y,FAST_BAN_ROI.w,FAST_BAN_ROI.h,.62);
+    return readBanProbeCanvas(worker,chat);
   }
   async function fastSeek(v,t){
     try{await seek(v,t,3800);return true;}catch{try{v.pause();}catch{}return false;}
@@ -807,17 +818,21 @@
     for(const [img,psm] of variants){try{const r=await ocr(worker,img,{psm,nodict:true});if(r?.text)texts.push(cleanText(r.text));}catch{}finally{clearCanvas(img);}}
     const merged=[...new Set(texts.filter(Boolean))].join('\n');clearCanvas(chat);return {text:merged};
   }
-  async function analyzeVideo(video,onProgress){
+  function dateFromFilename(name){
+    const m=String(name||'').match(/(?:^|\D)(20\d{2})[-_.](0[1-9]|1[0-2])[-_.](0[1-9]|[12]\d|3[01])(?:\D|$)/);
+    return m?`${m[1]}-${m[2]}-${m[3]}`:'';
+  }
+    async function analyzeVideo(video,onProgress,originalName=''){
     const worker=await ensureWorker();const duration=video.duration;const start=Math.max(0,duration-45);const settings=state.settings;
     if(!Number.isFinite(duration)||duration<=0)throw new Error('Videodauer konnte nicht bestimmt werden.');
     const coarse=[];
     let scanTimes=[];
     const ultraShort=duration<=180;
     if(ultraShort){
-      // Full-duration candidate scan for short clips, including the user's 2:22 case.
-      // The candidate pass performs exactly ONE lightweight OCR per sample; precision OCR
-      // is only started after an anchored hit, cutting hundreds of expensive recognitions.
-      const step=0.66;
+      // V69 fast path: one lightweight OCR every ~1.25s on a small crop.
+      // Two Tesseract workers process alternating frames in parallel. Once a
+      // candidate is found, the normal precision pipeline takes over.
+      const step=1.25;
       for(let t=0;t<=duration-.05;t+=step)scanTimes.push(t);
       scanTimes.push(Math.max(0,duration-.05));
     }else if(duration<=300){
@@ -832,17 +847,25 @@
     }
     scanTimes=[...new Set(scanTimes.map(t=>Math.round(t*100)/100))].sort((a,b)=>a-b);
     const baseCount=scanTimes.length;
-    for(let i=0;i<baseCount;i++){
-      const t=scanTimes[i];
-      const shortMode=duration<=180;
-      if(!((shortMode?await fastSeek(video,t):await safeSeek(video,t,2))))continue;
-      try{
-        const read=shortMode?await readBanProbe(worker,video):await readBanOnly(worker,video);
-        const ban=read.ban||extractBanEvent(read.text);
-        // Do not waste time calculating sharpness for every short-video frame.
-        coarse.push({time:t,text:read.text,ban,signal:!!read.signal,sharp:0});
-      }catch(err){console.debug('Ban OCR skipped',err);}
-      if(i%8===0 || i===baseCount-1) onProgress?.(8+Math.round((i+1)/baseCount*40),`Schnellscan ${i+1}/${baseCount}`);
+    if(ultraShort){
+      const fastWorker=await ensureFastWorker();
+      for(let i=0;i<baseCount;i+=2){
+        const batch=[];
+        for(let j=i;j<Math.min(i+2,baseCount);j++){
+          const t=scanTimes[j];
+          if(await fastSeek(video,t)) batch.push({t,chat:makeCrop(video,FAST_BAN_ROI.x,FAST_BAN_ROI.y,FAST_BAN_ROI.w,FAST_BAN_ROI.h,.62),idx:j});
+        }
+        const reads=await Promise.all(batch.map((b,k)=>readBanProbeCanvas(k%2===0?worker:fastWorker,b.chat)));
+        for(let k=0;k<batch.length;k++){const b=batch[k],read=reads[k];const ban=read.ban||extractBanEvent(read.text);coarse.push({time:b.t,text:read.text,ban,signal:!!read.signal,sharp:0});}
+        onProgress?.(8+Math.round(Math.min(40,(Math.min(i+2,baseCount)/baseCount)*40)),`Schnellscan ${Math.min(i+2,baseCount)}/${baseCount}`);
+      }
+    }else{
+      for(let i=0;i<baseCount;i++){
+        const t=scanTimes[i];
+        if(!(await safeSeek(video,t,2)))continue;
+        try{const read=await readBanOnly(worker,video);const ban=read.ban||extractBanEvent(read.text);coarse.push({time:t,text:read.text,ban,signal:!!read.signal,sharp:0});}catch(err){console.debug('Ban OCR skipped',err);}
+        if(i%4===0 || i===baseCount-1) onProgress?.(8+Math.round((i+1)/baseCount*40),`Schnellscan ${i+1}/${baseCount}`);
+      }
     }
     let strictCoarse=coarse.filter(f=>f.ban&&f.ban.adminId===BAN_ADMIN_ID&&f.ban.targetId&&f.ban.reason);
     // A fast probe may see the relevant banner without parsing every token. Promote
@@ -859,7 +882,7 @@
         }
       }
     }
-    if(!strictCoarse.length){onProgress?.(100,`Kein eindeutiger Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}]`);return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,missing:['Ziel-ID','Grund','Datum'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
+    if(!strictCoarse.length){onProgress?.(100,`Kein eindeutiger Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}]`);return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,missing:['Ziel-ID','Grund'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
     const grouped=new Map();for(const f of strictCoarse){const k=`${f.ban.targetId}|${f.ban.reason}`;(grouped.get(k)||grouped.set(k,[]).get(k)).push(f);}
     const group=[...grouped.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.ban.score,0)-a.reduce((s,x)=>s+x.ban.score,0))[0]||[];
     const seeds=group.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp).slice(0,duration<=180?4:6);const refineTimes=new Set();const win=Math.max(2.5,Math.min(7,duration<=180?4:(Number(settings.window)||5)));const rstep=Math.max(.45,Math.min(.8,duration<=180?.55:(Number(settings.step)||.4)));
@@ -868,7 +891,7 @@
     for(const t of times){if(!(await safeSeek(video,t,2)))continue;try{const read=await readBanOnly(worker,video);const ban=read.ban||extractBanEvent(read.text);if(ban)refined.push({time:t,text:read.text,ban,sharp:0});}catch{}n++;onProgress?.(48+Math.round(n/Math.max(1,times.length)*28),`Ban-Präzisionsscan ${n}/${times.length}`);}
     const all=[...strictCoarse,...refined].filter(f=>f.ban&&f.ban.adminId===BAN_ADMIN_ID&&f.ban.targetId&&f.ban.reason);const map=new Map();for(const f of all){const k=`${f.ban.targetId}|${f.ban.reason}`;(map.get(k)||map.set(k,[]).get(k)).push(f);}
     const frames=[...(( [...map.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.ban.score,0)-a.reduce((s,x)=>s+x.ban.score,0))[0] )||[])];
-    if(!frames.length){onProgress?.(100,'Ban-Anker nicht stabil genug');return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,missing:['Ziel-ID','Grund','Datum'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
+    if(!frames.length){onProgress?.(100,'Ban-Anker nicht stabil genug');return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,missing:['Ziel-ID','Grund'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
     const idV=uniqueVote(frames.map(f=>f.ban.targetId));const reasonV=uniqueVote(frames.map(f=>f.ban.reason));
     const rankedFrames=frames.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp);
     const topForAnchor=rankedFrames.slice(0,Math.min(12,rankedFrames.length));
@@ -904,24 +927,10 @@
     // through the companion Chrome extension and written into SOC.
     const sc='';
     const server='3';
-    const dateVotes=[];
-    // The date is part of the same upper-left chat/banner block in these POVs.
-    // Do not OCR a fixed bottom-right area because that can hit an unrelated UI.
-    for(const f of [...frames,...strictCoarse]){const dv=extractDate(f.text||'');if(dv)dateVotes.push(dv);}
-    for(let dt=-2;dt<=2.001;dt+=.5){
-      const t=Math.max(0,Math.min(duration-.05,bannerTime+dt));
-      if(!(await safeSeek(video,t,2)))continue;
-      try{
-        const crop=makeCrop(video,BAN_ROI.x,BAN_ROI.y,BAN_ROI.w,BAN_ROI.h,2.8);
-        const g=grayCanvas(crop);
-        const e=enhancedCanvas(crop,1.75,1.04);
-        const d1=await ocr(specialWorker,g,{psm:11,whitelist:'0123456789./-'});
-        const d2=await ocr(specialWorker,e,{psm:6,whitelist:'0123456789./-'});
-        for(const tx of [d1.text||'',d2.text||'']){const dv=extractDate(tx);if(dv)dateVotes.push(dv);}
-        clearCanvas(g);clearCanvas(e);clearCanvas(crop);
-      }catch{}
-    }
-    const date=dateVote(dateVotes);if(date)timestamps.date=bannerTime;const missing=[];if(!idV?.value)missing.push('Ziel-ID');if(!reasonV?.value)missing.push('Grund');if(!server)missing.push('Server');if(!date)missing.push('Datum');if(!sc)missing.push('SC / ACP');onProgress?.(100,idV?.value&&reasonV?.value?`Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}] erkannt`:'Ban erkannt, Angaben fehlen');
+    // Date comes from the POV filename, never from OCR. Example:
+    // 2026-09-07 00-53-42.mp4 -> 2026-09-07.
+    const filenameDate=dateFromFilename(originalName||video.currentSrc||'');
+    const date=filenameDate;if(date)timestamps.date=bannerTime;const missing=[];if(!idV?.value)missing.push('Ziel-ID');if(!reasonV?.value)missing.push('Grund');if(!server)missing.push('Server');if(!date)missing.push('Datum');if(!sc)missing.push('SC / ACP');onProgress?.(100,idV?.value&&reasonV?.value?`Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}] erkannt`:'Ban erkannt, Angaben fehlen');
     return {targetId:/^\d{1,6}$/.test(idV?.value||'')?idV.value:'',reason:reasonV?.value||'',sc:'',server,date,offline:false,missing,complete:missing.length===0,timestamps,confidence:{id:idV?idV.votes/Math.max(1,frames.length):0,reason:reasonV?reasonV.votes/Math.max(1,frames.length):0,sc:0,server:1,date:date?1:0,ban:anchor.ban.score||0,admin:1}};
   }
   async function openManualPicker(entry, field, secondsOverride){
@@ -1193,7 +1202,7 @@
       item.progress=60;renderQueue();
       media=await openLocalVideo(item.file,`POV ${item.file.name}`,storedCopy);
       item.progress=62;renderQueue();
-      item.result=await analyzeVideo(media.video,p=>{item.progress=62+Math.round(p*.38);item.status=`OCR läuft ${p}% · Upload-Warteschlange unabhängig`;renderQueue();});
+      item.result=await analyzeVideo(media.video,p=>{item.progress=62+Math.round(p*.38);item.status=`OCR läuft ${p}% · Upload-Warteschlange unabhängig`;renderQueue();},item.file.name);
       item.result.originalName=item.file.name;
       item.result.sourceSize=sourceSize;
       item.result.remoteSize=remoteSize||0;
@@ -1752,7 +1761,7 @@
     loadMeta().then(()=>{renderArchive();renderCases();renderCsv();}).catch(err=>{console.error('Archiv konnte nicht geladen werden',err);renderArchive();renderCases();renderCsv();});
     renderAuthUsers();
   }
-  window.addEventListener('beforeunload' ,()=>{try{state.worker?.terminate();}catch{};try{state.specialWorker?.terminate();}catch{}});
+  window.addEventListener('beforeunload' ,()=>{try{state.worker?.terminate();}catch{};try{state.specialWorker?.terminate();}catch{};try{state.fastWorker?.terminate();}catch{}});
   setupAuthUI();
   authResume().then(ok=>{if(ok)bootApp();});
 })();
