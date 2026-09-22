@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=67">
+<link rel="stylesheet" href="styles.css?v=68">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -37,7 +37,7 @@
     <header class="topbar">
       <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V67</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V68</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -103,12 +103,12 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V67</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V68</span></div>
           <p class="hint">POVs bis 2 Minuten werden vollständig in 250-ms-Schritten durchsucht. Längere Videos werden adaptiv gescannt und bei Treffern verdichtet. Das Info-Foto kommt aus einem verifizierten Bann-Cluster; fehlt dort ein Treffer, wird zusätzlich der Bereich um Sekunde 30 geprüft. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
           <label>Präzisionsschritt (Sekunden)<input id="refineStep" type="number" min="0.4" max="1" step="0.1" value="0.5"></label>
-          <div class="setting-note">V67: komplette Kurz-POV-Prüfung bis 120 Sekunden mit dichtem Start-bis-Ende-Scan, originalauflösungsbasiertes OCR, verifizierter Bannblock-Anker, ACP-SC in Chrome mit automatischem Schließen und dauerhafter Browser-Speicheranforderung. Ziel-ID, Bannblock und Grund werden am selben verifizierten Frame angezeigt. Server ist im aktuellen Workflow fest <b>3</b>. Der SC wird nicht mehr aus dem Video ermittelt, sondern ausschließlich über das Grand-RP-Adminpanel in Chrome übernommen.</div>
+          <div class="setting-note">V68: komplette Kurz-POV-Prüfung bis 180 Sekunden mit dichtem Start-bis-Ende-Scan, originalauflösungsbasiertes OCR, verifizierter Bannblock-Anker, ACP-SC in Chrome mit automatischem Schließen und dauerhafter Browser-Speicheranforderung. Ziel-ID, Bannblock und Grund werden am selben verifizierten Frame angezeigt. Server ist im aktuellen Workflow fest <b>3</b>. Der SC wird nicht mehr aus dem Video ermittelt, sondern ausschließlich über das Grand-RP-Adminpanel in Chrome übernommen.</div>
         </div>
         <div class="settings-card">
           <div class="card-title">YouTube-Verbindung <span id="ytStatus" class="connection">● Nicht verbunden</span></div>
@@ -138,6 +138,10 @@
 <div id="editorModal" class="modal hidden"><div class="modal-card">
   <div class="modal-head"><div><h2>POV prüfen</h2><p id="modalFile"></p></div><button class="icon-btn" id="closeModal">×</button></div>
   <div id="fieldStatus" class="field-status"></div>
+  <div class="editor-preview-panel">
+    <div class="editor-preview-head"><div><strong>POV-Vorschau</strong><span>Hier direkt abspielen, springen und die manuelle OCR-Auswahl öffnen.</span></div><div class="editor-preview-actions"><button type="button" class="ghost mini" id="previewJumpBack">−5 s</button><button type="button" class="ghost mini" id="previewJumpForward">+5 s</button><button type="button" class="pink mini" id="previewPicker">POV auswählen / OCR</button></div></div>
+    <video id="editorVideoPreview" class="editor-video-preview" controls playsinline preload="metadata"></video>
+  </div>
   <div id="infoPhotoPanel" class="info-photo-panel hidden">
     <div class="info-photo-head"><div><strong id="infoPhotoLabel">Info-Foto · Bannblock</strong><span id="infoPhotoMeta">Zeitpunkt --</span></div><button type="button" class="ghost mini" id="photoRefresh">Aktualisieren</button></div>
     <div class="info-photo-stage"><canvas id="infoPhotoCanvas"></canvas></div>
@@ -252,6 +256,6 @@
   });
 })();
 </script>
-<script src="app.js?v=67"></script>
+<script src="app.js?v=68"></script>
 </body>
 </html>

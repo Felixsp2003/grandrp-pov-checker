@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Grand RP · Videoauswahl · V56</title>
+<title>Grand RP · Videoauswahl · V68</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 :root{color-scheme:dark;--bg:#07060c;--panel:#120d19;--panel2:#17101f;--line:#30243a;--text:#f5eef8;--muted:#aaa0b0;--accent:#ff2380;--good:#69e1af;--warn:#ffbf66}
@@ -13,7 +13,7 @@
 <body>
 <div class="app">
   <div class="bar">
-    <strong id="title">Videoauswahl</strong>
+    <strong id="title">Videoauswahl · V68</strong>
     <label>Zeit <input id="time" type="number" step="0.1" min="0" value="0" style="width:100px"></label>
     <button id="seek">Springen</button>
     <button id="prev">−0,5 s</button>
@@ -89,7 +89,7 @@
   overlay.addEventListener('pointermove',e=>{if(!drawing)return;const p=pos(e);selection={x:Math.min(sx,p.x),y:Math.min(sy,p.y),w:Math.abs(sx-p.x),h:Math.abs(sy-p.y)};draw()});
   overlay.addEventListener('pointerup',()=>{drawing=false}); overlay.addEventListener('pointercancel',()=>{drawing=false});
   function seekTo(t){video.currentTime=Math.max(0,Math.min(video.duration||1e9,Number(t)||0));time.value=video.currentTime.toFixed(1)}
-  function presetRect(name){const W=overlay.width,H=overlay.height;const m={chat:[0,.02,.66,.36],sc:[0,.12,.72,.28],targetId:[0,.04,.72,.16],reason:[0,.14,.72,.14],server:[.86,.0,.14,.18],date:[.78,.80,.22,.20]}[name];if(!m)return;selection={x:W*m[0],y:H*m[1],w:W*m[2],h:H*m[3]};draw();setDrawMode(false);setStatus('Bereich vorgewählt. Du kannst sofort OCR lesen oder die Auswahl mit „Rahmen ziehen: AN“ neu ziehen.');}
+  function presetRect(name){const W=overlay.width,H=overlay.height;const m={chat:[0,0,.94,.74],sc:[0,.04,.94,.74],targetId:[0,0,.94,.74],reason:[0,0,.94,.74],server:[.86,.0,.14,.18],date:[0,0,.94,.74]}[name];if(!m)return;selection={x:W*m[0],y:H*m[1],w:W*m[2],h:H*m[3]};draw();setDrawMode(false);setStatus('Bereich vorgewählt. Du kannst sofort OCR lesen oder die Auswahl mit „Rahmen ziehen: AN“ neu ziehen.');}
   $('#seek').onclick=()=>seekTo(time.value);$('#prev').onclick=()=>seekTo(video.currentTime-.5);$('#next').onclick=()=>seekTo(video.currentTime+.5);$('#prev2').onclick=()=>seekTo(video.currentTime-5);$('#next2').onclick=()=>seekTo(video.currentTime+5);
   video.addEventListener('loadedmetadata',()=>{syncCanvas();seekTo(start);setDrawMode(false);setStatus(`POV bereit · ${video.videoWidth}×${video.videoHeight} · ${file?formatSize(file.size):''}`,'good')});video.addEventListener('timeupdate',()=>time.value=video.currentTime.toFixed(1));window.addEventListener('resize',syncCanvas);
   $('#preset').onchange=e=>{if(e.target.value)presetRect(e.target.value)};
@@ -146,7 +146,7 @@
         const r=reasonFromText(reasonText);value=r||'';
       }else if(field==='sc'){
         const ipLike=joined.match(/(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{0,4}/ig)||[];const normalized=String(joined||'').toUpperCase().replace(/[OoQq]/g,'0').replace(/[IiLl|!]/g,'1').replace(/[Ss$]/g,'5').replace(/[Gg]/g,'6').replace(/[Zz]/g,'2').replace(/[Tt]/g,'7').replace(/[^0-9A-F]/g,'').toLowerCase();const candidates=normalized.match(/[0-9a-f]{40}/g)||[];value='';if(ipLike.length){const ip=ipLike[ipLike.length-1].replace(/[^0-9A-F]/gi,'').toLowerCase();const pos=normalized.lastIndexOf(ip);if(pos>=0){const after=normalized.slice(pos+ip.length);const m=after.match(/^[0-9a-f]{40}/);value=m?m[0]:'';}}if(!value&&candidates.length===1)value=candidates[0];}
-      else if(field==='date'){const m=joined.match(/\b(0?[1-9]|[12]\d|3[01])[\/\.\-](0?[1-9]|1[0-2])[\/\.\-](20\d{2})\b/);value=m?`${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`:''}
+      else if(field==='date'){const clean=joined.replace(/[OoQq]/g,'0').replace(/[IlL|]/g,'1');const m=clean.match(/\b(0?[1-9]|[12]\d|3[01])\s*[\/\.\-]\s*(0?[1-9]|1[0-2])\s*[\/\.\-]\s*(20\d{2})\b/)||clean.match(/\b(20\d{2})\s*[\/\.\-]\s*(0?[1-9]|1[0-2])\s*[\/\.\-]\s*(0?[1-9]|[12]\d|3[01])\b/);value=m?(String(m[1]).length===4?`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`:`${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`):''}
       else if(field==='discordId'){const ids=(joined.match(/\b\d{15,22}\b/g)||[]);value=ids.sort((a,b)=>b.length-a.length)[0]||'';}
       manual.value=value;
       setStatus(value?`${cfg.label}: nur der benötigte Wert wurde übernommen. Bitte prüfen.`:`${cfg.label}: kein eindeutiger Wert gefunden. Markiere den Bereich enger.` ,value?'good':'warn');

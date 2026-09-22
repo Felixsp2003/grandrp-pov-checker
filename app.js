@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V67';
+  const BUILD='V68';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -341,7 +341,18 @@
   function uniqueVote(values){const clean=values.filter(Boolean);const m=new Map();for(const v of clean)m.set(v,(m.get(v)||0)+1);const arr=[...m.entries()].sort((a,b)=>b[1]-a[1]);return arr.length?{value:arr[0][0],votes:arr[0][1],total:clean.length}:null;}
   function serverVote(values){const v=values.filter(x=>/^[1-4]$/.test(String(x||'')));const m=uniqueVote(v);return m&&m.votes>=Math.max(2,Math.ceil(m.total*.6))?m.value:'';}
   function dateVote(values){const m=uniqueVote(values.filter(Boolean));return m&&m.votes>=Math.max(2,Math.ceil(m.total*.5))?m.value:'';}
-  function extractDate(text){const m=String(text||'').match(/\b(0?[1-9]|[12]\d|3[01])[\/\.\-](0?[1-9]|1[0-2])[\/\.\-](20\d{2})\b/);if(!m)return '';const dd=String(m[1]).padStart(2,'0'),mm=String(m[2]).padStart(2,'0'),yyyy=m[3];const d=new Date(Number(yyyy),Number(mm)-1,Number(dd));if(d.getFullYear()!==Number(yyyy)||d.getMonth()!==Number(mm)-1||d.getDate()!==Number(dd))return '';return `${yyyy}-${mm}-${dd}`;}
+  function extractDate(text){
+    let s=String(text||'').replace(/[OoQq]/g,'0').replace(/[IlL|]/g,'1').replace(/\s+/g,' ').trim();
+    let m=s.match(/\b(0?[1-9]|[12]\d|3[01])\s*[\/\.\-]\s*(0?[1-9]|1[0-2])\s*[\/\.\-]\s*(20\d{2})\b/);
+    if(!m)m=s.match(/\b(20\d{2})\s*[\/\.\-]\s*(0?[1-9]|1[0-2])\s*[\/\.\-]\s*(0?[1-9]|[12]\d|3[01])\b/);
+    if(!m)return '';
+    let yyyy,mm,dd;
+    if(String(m[1]).length===4){yyyy=m[1];mm=String(m[2]).padStart(2,'0');dd=String(m[3]).padStart(2,'0');}
+    else{dd=String(m[1]).padStart(2,'0');mm=String(m[2]).padStart(2,'0');yyyy=m[3];}
+    const d=new Date(Number(yyyy),Number(mm)-1,Number(dd));
+    if(d.getFullYear()!==Number(yyyy)||d.getMonth()!==Number(mm)-1||d.getDate()!==Number(dd))return '';
+    return `${yyyy}-${mm}-${dd}`;
+  }
   function clampId(s){const v=normalizeIdToken(s);return /^\d{1,6}$/.test(v)?v:'';}
   function validDate(v){return /^\d{4}-\d{2}-\d{2}$/.test(String(v||''));}
   function consensusString(values, minVotes=2){const m=uniqueVote(values.filter(Boolean));return m&&m.votes>=minVotes?m.value:'';}
@@ -749,8 +760,8 @@
     const raw=lines.filter(l=>(l.bbox?.y1||0)>=y0 && (l.bbox?.y0||0)<=y1).map(l=>l.text||'').join('\n');
     return {canvas:c,y:y0,raw,online:true};
   }
-  const BAN_ROI={x:0,y:0,w:.78,h:.62};
-  const FAST_BAN_ROI={x:0,y:0,w:.78,h:.58};
+  const BAN_ROI={x:0,y:0,w:.94,h:.74};
+  const FAST_BAN_ROI={x:0,y:0,w:.94,h:.70};
   async function readBanFast(worker,video){
     // Fast path for short POVs: only OCR the relevant upper-left ban area once,
     // then run one fallback threshold pass when the strict ban anchor is missing.
@@ -785,7 +796,7 @@
     finally{ clearCanvas(chat); }
   }
   async function fastSeek(v,t){
-    try{await seek(v,t,6500);return true;}catch{try{v.pause();}catch{}return false;}
+    try{await seek(v,t,3800);return true;}catch{try{v.pause();}catch{}return false;}
   }
 
   async function readBanOnly(worker,video){
@@ -806,7 +817,7 @@
       // Full-duration candidate scan for short clips, including the user's 2:22 case.
       // The candidate pass performs exactly ONE lightweight OCR per sample; precision OCR
       // is only started after an anchored hit, cutting hundreds of expensive recognitions.
-      const step=0.72;
+      const step=0.66;
       for(let t=0;t<=duration-.05;t+=step)scanTimes.push(t);
       scanTimes.push(Math.max(0,duration-.05));
     }else if(duration<=300){
@@ -829,11 +840,25 @@
         const read=shortMode?await readBanProbe(worker,video):await readBanOnly(worker,video);
         const ban=read.ban||extractBanEvent(read.text);
         // Do not waste time calculating sharpness for every short-video frame.
-        coarse.push({time:t,text:read.text,ban,sharp:0});
+        coarse.push({time:t,text:read.text,ban,signal:!!read.signal,sharp:0});
       }catch(err){console.debug('Ban OCR skipped',err);}
       if(i%8===0 || i===baseCount-1) onProgress?.(8+Math.round((i+1)/baseCount*40),`Schnellscan ${i+1}/${baseCount}`);
     }
-    const strictCoarse=coarse.filter(f=>f.ban&&f.ban.adminId===BAN_ADMIN_ID&&f.ban.targetId&&f.ban.reason);
+    let strictCoarse=coarse.filter(f=>f.ban&&f.ban.adminId===BAN_ADMIN_ID&&f.ban.targetId&&f.ban.reason);
+    // A fast probe may see the relevant banner without parsing every token. Promote
+    // signal frames into a small precision set before declaring the scan empty.
+    if(!strictCoarse.length){
+      const probe=coarse.filter(f=>f.signal).sort((a,b)=>Number(b.signal)-Number(a.signal));
+      const picked=[];
+      for(const f of probe){ if(picked.every(p=>Math.abs(p.time-f.time)>1.4)) picked.push(f); if(picked.length>=18) break; }
+      for(const f of picked){
+        for(const dt of [-.7,0,.7]){
+          const t=Math.max(0,Math.min(duration-.05,f.time+dt));
+          if(!(await fastSeek(video,t)))continue;
+          try{const read=await readBanOnly(worker,video);const ban=read.ban||extractBanEvent(read.text);if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId&&ban.reason)strictCoarse.push({time:t,text:read.text,ban,signal:true,sharp:0});}catch{}
+        }
+      }
+    }
     if(!strictCoarse.length){onProgress?.(100,`Kein eindeutiger Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}]`);return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,missing:['Ziel-ID','Grund','Datum'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
     const grouped=new Map();for(const f of strictCoarse){const k=`${f.ban.targetId}|${f.ban.reason}`;(grouped.get(k)||grouped.set(k,[]).get(k)).push(f);}
     const group=[...grouped.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.ban.score,0)-a.reduce((s,x)=>s+x.ban.score,0))[0]||[];
@@ -859,25 +884,18 @@
       Math.max(...b.items.map(x=>x.ban.score))-Math.max(...a.items.map(x=>x.ban.score)) ||
       Math.max(...b.items.map(x=>x.sharp))-Math.max(...a.items.map(x=>x.sharp)));
     let anchor=null;
-    const recentCluster=clusters.find(c=>c.items.length>=2 && c.items.some(x=>x.time>=Math.max(0,duration-10)));
-    if(recentCluster) anchor=recentCluster.items.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0];
-    if(!anchor){
-      const fallbackCenter=Math.min(30,Math.max(0,duration-.5));
-      const fallbackTimes=new Set();
-      for(let dt=-6;dt<=6.001;dt+=.5)fallbackTimes.add(Math.max(0,Math.min(duration-.05,fallbackCenter+dt)));
-      const fallbackFrames=[];
-      for(const t of [...fallbackTimes].sort((a,b)=>a-b)){
-        if(!(await safeSeek(video,t,2)))continue;
-        try{const read=await readBanOnly(worker,video);const ban=extractBanEvent(read.text);if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId===idV?.value&&ban.reason===reasonV?.value)fallbackFrames.push({time:t,text:read.text,ban,sharp:0});}catch{}
-      }
-      if(fallbackFrames.length){
-        const fb=[];
-        for(const f of fallbackFrames){let c=fb.find(x=>Math.abs(x.last-f.time)<=1.6);if(!c){c={items:[],last:f.time};fb.push(c);}c.items.push(f);c.last=f.time;}
-        fb.sort((a,b)=>b.items.length-a.items.length||Math.max(...b.items.map(x=>x.ban.score))-Math.max(...a.items.map(x=>x.ban.score)));
-        anchor=fb[0].items.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0];
-      }
+    // Never invent a timestamp such as 0s/15s/30s. The photo timestamp must come
+    // from an actual verified ban cluster. Prefer the strongest cluster, then the
+    // sharpest frame inside it. This avoids showing the first seconds of the POV.
+    const bestCluster=clusters.find(c=>c.items.length>=2) || clusters[0];
+    if(bestCluster){
+      const candidate=bestCluster.items.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0];
+      if(candidate && Number.isFinite(candidate.time)) anchor=candidate;
     }
-    if(!anchor) anchor=clusters[0]?.items.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0]||rankedFrames[0];
+    if(!anchor){
+      onProgress?.(100,'Bannblock erkannt, aber kein sicherer Timestamp gefunden');
+      return {targetId:idV?.value||'',reason:reasonV?.value||'',sc:'',server:'3',date:'',offline:false,missing:['Datum','SC / ACP'],complete:false,timestamps:{},confidence:{id:1,reason:1,sc:0,server:1,date:0,ban:0,admin:1}};
+    }
     const bannerTime=anchor.time;
     // Keep all info photos on the same verified ban frame so fields never point to unrelated OCR hits.
     const timestamps={banner:bannerTime,targetId:bannerTime,reason:bannerTime,server:bannerTime};
@@ -885,19 +903,35 @@
     // The authoritative Social Club value is fetched from the Grand RP Admin Panel
     // through the companion Chrome extension and written into SOC.
     const sc='';
-    const server='3';const dateVotes=[];
-    for(let dt=-1.5;dt<=1.51;dt+=.5){const t=Math.max(0,Math.min(duration-.05,bannerTime+dt));if(!(await safeSeek(video,t,2)))continue;try{const crop=makeCrop(video,.76,.74,.24,.26,3.6);const d1=await ocr(specialWorker,crop,{psm:6,whitelist:'0123456789./-'});const d2=await ocr(specialWorker,threshold(crop,145),{psm:11,whitelist:'0123456789./-'});for(const tx of [d1.text||'',d2.text||'']){const dv=extractDate(tx);if(dv)dateVotes.push(dv);}clearCanvas(crop);}catch{}}
+    const server='3';
+    const dateVotes=[];
+    // The date is part of the same upper-left chat/banner block in these POVs.
+    // Do not OCR a fixed bottom-right area because that can hit an unrelated UI.
+    for(const f of [...frames,...strictCoarse]){const dv=extractDate(f.text||'');if(dv)dateVotes.push(dv);}
+    for(let dt=-2;dt<=2.001;dt+=.5){
+      const t=Math.max(0,Math.min(duration-.05,bannerTime+dt));
+      if(!(await safeSeek(video,t,2)))continue;
+      try{
+        const crop=makeCrop(video,BAN_ROI.x,BAN_ROI.y,BAN_ROI.w,BAN_ROI.h,2.8);
+        const g=grayCanvas(crop);
+        const e=enhancedCanvas(crop,1.75,1.04);
+        const d1=await ocr(specialWorker,g,{psm:11,whitelist:'0123456789./-'});
+        const d2=await ocr(specialWorker,e,{psm:6,whitelist:'0123456789./-'});
+        for(const tx of [d1.text||'',d2.text||'']){const dv=extractDate(tx);if(dv)dateVotes.push(dv);}
+        clearCanvas(g);clearCanvas(e);clearCanvas(crop);
+      }catch{}
+    }
     const date=dateVote(dateVotes);if(date)timestamps.date=bannerTime;const missing=[];if(!idV?.value)missing.push('Ziel-ID');if(!reasonV?.value)missing.push('Grund');if(!server)missing.push('Server');if(!date)missing.push('Datum');if(!sc)missing.push('SC / ACP');onProgress?.(100,idV?.value&&reasonV?.value?`Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}] erkannt`:'Ban erkannt, Angaben fehlen');
     return {targetId:/^\d{1,6}$/.test(idV?.value||'')?idV.value:'',reason:reasonV?.value||'',sc:'',server,date,offline:false,missing,complete:missing.length===0,timestamps,confidence:{id:idV?idV.votes/Math.max(1,frames.length):0,reason:reasonV?reasonV.votes/Math.max(1,frames.length):0,sc:0,server:1,date:date?1:0,ban:anchor.ban.score||0,admin:1}};
   }
-  async function openManualPicker(entry, field){
+  async function openManualPicker(entry, field, secondsOverride){
     if(!entry)return;
     try{
       const id=entry.id;
       const file=entry.file||await getVideo(id);
       if(!file){toast('POV-Datei ist nicht verfügbar.');return;}
       await putVideo(id,file);
-      const t=Number(entry.result?.timestamps?.[field]||entry.result?.timestamps?.banner||0)||0;
+      const t=Number(secondsOverride??entry.result?.timestamps?.[field]??entry.result?.timestamps?.banner??0)||0;
       const target=new URL('manual.html',location.href);
       target.searchParams.set('job',id);
       target.searchParams.set('field',field);
@@ -930,13 +964,13 @@
       const w=window.open(target.href,'_blank','noopener'); if(!w)toast('Pop-up blockiert. Bitte Pop-ups für die Website erlauben.');
     }catch(err){console.error(err);toast('POV konnte nicht geöffnet werden: '+err.message);}
   }
-  const PHOTO_ROIS={banner:[0,0,.78,.62],targetId:[0,0,.88,.76],reason:[0,0,.88,.76],sc:[0,0,.88,.76],server:[.78,0,.22,.22],date:[.70,.68,.30,.32],discordId:[0,0,.88,.76]};
+  const PHOTO_ROIS={banner:[0,0,.94,.74],targetId:[0,0,.94,.74],reason:[0,0,.94,.74],sc:[0,0,.94,.74],server:[.78,0,.22,.22],date:[0,0,.94,.74],discordId:[0,0,.94,.74]};
   async function showInfoPhoto(field='banner'){
     const panel=$('#infoPhotoPanel'),canvas=$('#infoPhotoCanvas'),label=$('#infoPhotoLabel'),meta=$('#infoPhotoMeta');if(!panel||!canvas)return;
     const ctx=state.editing;const entry=ctx?.item||ctx?.entry;if(!entry)return;
     let file=entry.file||null;if(!file){try{file=await getVideo(entry.id);if(file)entry.file=file;}catch{}}
     if(!file){panel.classList.add('hidden');return;}
-    const r=entry.result||entry;let t=Number(r.timestamps?.[field]??r.timestamps?.banner??r.bannerTime??r.banTimestamp??0)||0;if(t<=0 && Number(entry.file?.duration||0)>3 && r.targetId&&r.reason)t=Math.min(30,Math.max(0,(entry.file?.duration||30)/2));
+    const r=entry.result||entry;let t=Number(r.timestamps?.[field]??r.timestamps?.banner??r.bannerTime??r.banTimestamp??NaN);if(!Number.isFinite(t)||t<0)t=0;
     panel.classList.remove('hidden');label.textContent=`Info-Foto · ${field==='targetId'?'Ziel-ID':field==='reason'?'Grund':field==='sc'?'SC / RID':field==='server'?'Server':field==='date'?'Datum':field==='discordId'?'Discord ID':'Bannblock'}`;meta.textContent=`Zeitpunkt ${t.toFixed(2)} s · Originalauflösung`;
     for(const b of $$('.photo-field'))b.classList.toggle('active',b.dataset.field===field);
     let media=null;
@@ -952,6 +986,8 @@
       if(field==='targetId'||field==='reason'||field==='discordId'){const guide=field==='targetId'?[0,.03,.92,.18]:field==='reason'?[0,.16,.92,.24]:[0,.02,.92,.28];c.save();c.fillStyle='rgba(255,47,139,.10)';c.strokeStyle='#ff2f8b';c.lineWidth=Math.max(2,canvas.width/700);c.fillRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.strokeRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.restore();}
     }catch(err){canvas.width=1;canvas.height=1;meta.textContent=`Foto konnte nicht geladen werden: ${err.message}`;}finally{closeLocalVideo(media);}
   }
+  function revokeEditorPreview(){if(state.editorVideoUrl){try{URL.revokeObjectURL(state.editorVideoUrl);}catch{}state.editorVideoUrl=null;}const v=$('#editorVideoPreview');if(v){try{v.pause();}catch{}v.removeAttribute('src');v.load();}}
+  function loadEditorPreview(file,t=0){const v=$('#editorVideoPreview');if(!v||!file)return;revokeEditorPreview();state.editorVideoUrl=URL.createObjectURL(file);v.src=state.editorVideoUrl;v.load();const set=()=>{try{v.currentTime=Math.max(0,Math.min(Number(t)||0,Math.max(0,v.duration-.05)));}catch{}};v.addEventListener('loadedmetadata',set,{once:true});} 
   function setEditorValues(v={}){
     const r=v?.result||v||{};
     const val=(x)=>x==null?'':String(x);
@@ -1006,9 +1042,9 @@
     const date=formatDateDE($('#date').value);
     $('#titlePreview').value=(id&&reason&&date)?`${id}, ${reason}, ${date}.mp4`:'';
   }
-  function openEditor(item){state.editing={item};$('#modalFile').textContent=item.finalName||item.file.name;setEditorValues({...item.result,discordId:item.result?.discordId||'',proof:item.result?.proof||'',perma:!!item.result?.perma,permaArchive:!!item.result?.permaArchive,notBanned:!!item.result?.notBanned});state.selectedTypes=new Set(item.result?.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus(item);$('#editorModal').classList.remove('hidden');showInfoPhoto('banner');renderAcpStatus(item.result?.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',item.result?.sc?'ok':'warn');if(!item.result?.sc&&/^\d{1,6}$/.test(item.result?.targetId||'')){setTimeout(()=>{try{openAcpForCurrentId();}catch{}},350);}}
-  async function openEditorFromEntry(entry){const file=entry.file||await getVideo(entry.id);if(file)entry.file=file;state.editing={entry};$('#modalFile').textContent=entry.finalName||entry.originalName;setEditorValues(entry);state.selectedTypes=new Set(entry.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus({result:entry});$('#editorModal').classList.remove('hidden');showInfoPhoto('banner');renderAcpStatus(entry.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',entry.sc?'ok':'warn');}
-  function closeEditor(){state.editing=null;$('#editorModal').classList.add('hidden');}
+  function openEditor(item){state.editing={item};$('#modalFile').textContent=item.finalName||item.file.name;setEditorValues({...item.result,discordId:item.result?.discordId||'',proof:item.result?.proof||'',perma:!!item.result?.perma,permaArchive:!!item.result?.permaArchive,notBanned:!!item.result?.notBanned});state.selectedTypes=new Set(item.result?.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus(item);$('#editorModal').classList.remove('hidden');loadEditorPreview(item.file,item.result?.timestamps?.banner||0);showInfoPhoto('banner');renderAcpStatus(item.result?.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',item.result?.sc?'ok':'warn');if(!item.result?.sc&&/^\d{1,6}$/.test(item.result?.targetId||'')){setTimeout(()=>{try{openAcpForCurrentId();}catch{}},350);}}
+  async function openEditorFromEntry(entry){const file=entry.file||await getVideo(entry.id);if(file)entry.file=file;state.editing={entry};$('#modalFile').textContent=entry.finalName||entry.originalName;setEditorValues(entry);state.selectedTypes=new Set(entry.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus({result:entry});$('#editorModal').classList.remove('hidden');loadEditorPreview(entry.file,entry.timestamps?.banner||0);showInfoPhoto('banner');renderAcpStatus(entry.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',entry.sc?'ok':'warn');}
+  function closeEditor(){revokeEditorPreview();state.editing=null;$('#editorModal').classList.add('hidden');}
   async function saveEditor(e){
     e.preventDefault(); const ctx=state.editing; if(!ctx)return;
     const targetId=clampId($('#targetId').value), reason=$('#reason').value, sc=normalizeHexLoose($('#sc').value), server=$('#server').value||'3', date=$('#date').value;
@@ -1127,6 +1163,10 @@
     $$('.chip').forEach(c=>c.onclick=()=>{const v=c.dataset.value;c.classList.toggle('active');if(c.classList.contains('active'))state.selectedTypes.add(v);else state.selectedTypes.delete(v);});
     $$('.photo-field').forEach(b=>b.onclick=()=>showInfoPhoto(b.dataset.field));
     $('#photoRefresh')?.addEventListener('click',()=>{const active=$('.photo-field.active');showInfoPhoto(active?.dataset.field||'banner');});
+    $('#previewPicker')?.addEventListener('click',async()=>{const ctx=state.editing;if(!ctx)return;const entry=ctx.item||ctx.entry;if(entry)await openManualPicker({...entry,file:entry.file},'view',Number($('#editorVideoPreview')?.currentTime||0));});
+    $('#previewJumpBack')?.addEventListener('click',()=>{const v=$('#editorVideoPreview');if(v)v.currentTime=Math.max(0,v.currentTime-5);});
+    $('#previewJumpForward')?.addEventListener('click',()=>{const v=$('#editorVideoPreview');if(v)v.currentTime=Math.min(v.duration||0,v.currentTime+5);});
+
     $$('#targetId,#reason,#sc,#server,#date,#discordId').forEach(el=>el.addEventListener('focus',()=>showInfoPhoto(el.id==='targetId'?'targetId':el.id)));
     $('#reanalyzeBtn')?.addEventListener('click',async()=>{const x=state.editing?.item;if(x){closeEditor();await retryLocalOCR(x);}});
     $('#fetchAcpSc')?.addEventListener('click',openAcpForCurrentId);
