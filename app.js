@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V78';
+  const BUILD='V79';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -167,11 +167,10 @@
     if(!banWord)return null;
 
     // Reason is best read from the explicit Grund segment, otherwise from the ban sentence.
-    const reasonMatch=norm.match(/\bgrund\s*[:.\-]?\s*([^\n]{0,100})/i);
-    const reason=parseReason(reasonMatch?.[1]||tail)||parseReason(norm.slice(0, Math.min(norm.length, 900)));
-    if(!reason)return null;
+    const reasonMatch=norm.match(/\bgrund\s*[:.\-]?\s*([^\n]{0,120})/i);
+    const reason=extractReasonStrict(reasonMatch?.[1]||norm)||parseReason(reasonMatch?.[1]||tail)||parseReason(norm.slice(0, Math.min(norm.length, 1200)))||'';
 
-    let score=90;
+    let score=reason?90:72;
     if(/administrator/i.test(fullSegment))score+=3;
     if(/adam\s*[_-]?\s*byers/i.test(fullSegment))score+=8;
     if(reasonMatch)score+=8;
@@ -200,7 +199,9 @@
     if(/acc14twink|acc1.4twink|acc14twnk|acc14twing|acc14twinck|acc14twinkk/.test(c)) return 'ACC 1.4 (Twink)';
     if(/acc14/.test(c)) return 'Acc 1.4';
     if(/cheat|cheats|cheating/.test(c)) return 'Cheating';
+    if(/pccheckverweig|pccheckverweigert|pccheckverweigerung|pccheckrwelg|pccheckrweig|pccheckwelig/.test(c)) return 'PC Check Verweigert';
     if(/pc/.test(c)){
+      if(/verweig|rwelg|rweig|welig|weiger|refus|reject/.test(c) && /troll|trol|trowl|troling|trolling/.test(c)) return 'PC Check Trolling';
       if(/troll|trol|trowl|troling|trolling/.test(c)) return 'PC Check Trolling';
       if(/banevad|banvad|banevad/.test(c)) return 'PC-Check Positiv (Banevading)';
       if(/clean|cleaning|cleann/.test(c)) return 'PC Check Positiv (Cleaning)';
@@ -210,6 +211,39 @@
       if(/posit|posiv|p0sit|p0si|posi/.test(c)) return 'PC Check Positiv';
       // Typical OCR corruption observed in the Grand-RP banner: "PC-Che K rwelg Nn".
       if(/pcche/.test(c) && /rwel|welg|weig|nn/.test(c)) return 'PC Check Verweigert';
+    }
+    return '';
+  }
+  function extractReasonStrict(text){
+    const raw=cleanText(text);
+    if(!raw)return '';
+    const flat=raw.replace(/\s+/g,' ');
+    const reasonWindows=[];
+    // Explicit Grund: line is authoritative when present.
+    const gm=flat.match(/grund\s*[:.\-]?\s*([^\n]{0,120})/i);
+    if(gm)reasonWindows.push(gm[1]);
+    // Also inspect nearby fragments because OCR may miss the word "Grund" or
+    // place it on a separate line.
+    for(const line of raw.split('\n')){
+      if(/pc\s*-?\s*che|cheat|acc\s*1|event\s*1|grund|verweig|troll|banevad|cleaning|redux|discord/i.test(line)) reasonWindows.push(line);
+    }
+    reasonWindows.push(flat.slice(Math.max(0,flat.search(/gebannt|gebant|banned/i)), Math.min(flat.length, flat.search(/gebannt|gebant|banned/i)+220)));
+    const normalized=[];
+    for(const w of reasonWindows){
+      if(!w)continue;
+      // Do NOT globally map I/l/1/O/0 here: doing that damages real words such as
+      // "Cleaning" and "Positiv". Reason recognition is word-based/fuzzy instead.
+      const x=String(w).replace(/[|¦]/g,' ').replace(/\s+/g,' ').trim();
+      normalized.push(x);
+      normalized.push(x
+        .replace(/pc\s*[-_]?\s*che\s*k?/ig,'PC Check')
+        .replace(/verweiger(?:ung|n|t|rung)/ig,'Verweigert'));
+    }
+    for(const w of [...normalized,...reasonWindows]){
+      const strong=classifyReasonStrong(w);
+      if(strong)return strong;
+      const can=canonicalReason(w);
+      if(can?.value)return can.value;
     }
     return '';
   }
@@ -552,7 +586,7 @@
     ['dragleave','drop'].forEach(ev=>dropzone.addEventListener(ev,e=>{e.preventDefault();dropzone.classList.remove('drag');}));
     dropzone.addEventListener('drop',e=>addFiles([...e.dataTransfer.files].filter(f=>f.type.startsWith('video/')||/\.(mp4|mov|webm|mkv)$/i.test(f.name))));
   }
-  function addFiles(files){for(const file of files){state.queue.push({id:crypto.randomUUID(),file,status:'Upload wartet',progress:0,result:null,processing:false,uploading:false,ocrProcessing:false,editingDone:false,youtube:null,uploadStarted:false,uploadFailed:false});}renderQueue();pumpUploads();}
+  function addFiles(files){for(const file of files){state.queue.push({id:crypto.randomUUID(),file,status:'Upload wartet',progress:0,result:null,processing:false,uploading:false,ocrProcessing:false,editingDone:false,youtube:null,uploadStarted:false,uploadFailed:false,cancelled:false});}renderQueue();pumpUploads();}
   function isYoutubeUploadLimitError(err){
     const m=String(err?.message||err||'').toLowerCase();
     return /uploadlimitexceeded|exceeded the number of videos they may upload|number of videos they may upload/.test(m);
@@ -575,10 +609,10 @@
       if(!storedCopy)throw new Error('Lokale Kopie der POV konnte nicht gespeichert werden.');
       if(Number(storedCopy.size)!==sourceSize)throw new Error(`Lokale Speicherung beschädigt: Quelle ${formatBytesExact(sourceSize)} · Archiv ${formatBytesExact(storedCopy.size)}.`);
       media=await openLocalVideo(item.file,`POV ${item.file.name}`,storedCopy);
-      item.result=await analyzeVideo(media.video,p=>{item.progress=5+Math.round(p*.95);item.status=`YouTube-Limit · lokale OCR ${p}%`;renderQueue();},item.file.name);
+      item.result=await analyzeVideo(media.video,p=>{item.progress=5+Math.round(p*.95);item.status=`YouTube-Limit · lokale OCR ${p}%`;renderQueue();},item.file.name,()=>item.cancelled);
       item.result.originalName=item.file.name;item.result.sourceSize=sourceSize;item.result.remoteSize=0;item.result.sourceType=item.file.type||'video/mp4';item.result.types=[];item.result.proof='';item.result.youtube=null;
       item.youtube=null;item.uploadFailed=true;item.uploadStarted=true;item.status=item.result.complete?'YouTube-Limit · OCR fertig · YouTube später erneut':'YouTube-Limit · OCR unvollständig · Prüfung nötig';item.progress=100;renderQueue();
-      if(!state.editing)openEditor(item);
+      if(isQueueItemAlive(item)&&!state.editing)openEditor(item);
     }catch(err){
       item.status='Fehler: '+(err?.message||err);item.progress=0;item.uploadFailed=true;item.uploadStarted=true;renderQueue();
     }finally{
@@ -600,9 +634,9 @@
       renderQueue();
     }
   }
-  function renderQueue(){const q=$('#uploadQueue');$('#queueCount').textContent=`${state.queue.length} ${state.queue.length===1?'Datei':'Dateien'}`;q.innerHTML=state.queue.map(item=>{const hasError=/^Fehler:/i.test(item.status||'');const retry=(!item.uploading&&!item.ocrProcessing&&((!!item.youtube&&!item.result)||hasError));const label=item.youtube?'OCR erneut':'Erneut hochladen';return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(item.finalName||item.file.name)}</strong><small>${formatSize(item.file.size)} · ${esc(item.status)}</small><div class="progress"><i style="width:${item.progress}%"></i></div></div><div class="queue-actions">${item.result?`<button class="mini" data-check="${item.id}">Prüfen</button>`:''}${retry?`<button class="mini primary" data-retry="${item.id}">${label}</button>`:''}<button class="mini" data-remove="${item.id}">×</button></div></div>`}).join('');$$('[data-check]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.check);if(x?.result)openEditor(x);});$$('[data-retry]').forEach(b=>b.onclick=async()=>{const x=state.queue.find(i=>i.id===b.dataset.retry);if(x)await retryQueueItem(x);});$$('[data-remove]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.remove);if(x?.uploading){toast('YouTube-Upload läuft noch.');return;}state.queue=state.queue.filter(i=>i.id!==b.dataset.remove);renderQueue();});}
+  function renderQueue(){const q=$('#uploadQueue');$('#queueCount').textContent=`${state.queue.length} ${state.queue.length===1?'Datei':'Dateien'}`;q.innerHTML=state.queue.map(item=>{const hasError=/^Fehler:/i.test(item.status||'');const retry=(!item.uploading&&!item.ocrProcessing&&((!!item.youtube&&!item.result)||hasError));const label=item.youtube?'OCR erneut':'Erneut hochladen';return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(item.finalName||item.file.name)}</strong><small>${formatSize(item.file.size)} · ${esc(item.status)}</small><div class="progress"><i style="width:${item.progress}%"></i></div></div><div class="queue-actions">${item.result?`<button class="mini" data-check="${item.id}">Prüfen</button>`:''}${retry?`<button class="mini primary" data-retry="${item.id}">${label}</button>`:''}<button class="mini" data-remove="${item.id}">×</button></div></div>`}).join('');$$('[data-check]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.check);if(x?.result)openEditor(x);});$$('[data-retry]').forEach(b=>b.onclick=async()=>{const x=state.queue.find(i=>i.id===b.dataset.retry);if(x)await retryQueueItem(x);});$$('[data-remove]').forEach(b=>b.onclick=async()=>{const x=state.queue.find(i=>i.id===b.dataset.remove);if(!x)return;if(x.uploading){toast('YouTube-Upload läuft noch.');return;}x.cancelled=true;x.editingDone=true;x.ocrProcessing=false;x.processing=false;try{await delVideo(x.id);}catch{}state.queue=state.queue.filter(i=>i.id!==b.dataset.remove);renderQueue();toast('POV aus der Warteschlange entfernt. OCR wurde gestoppt.');});}
   async function retryLocalOCR(item){
-    if(item.processing)return;
+    if(item.processing||item.cancelled)return;
     item.processing=true;item.status='OCR wird erneut gestartet…';item.progress=60;renderQueue();
     let media=null;
     try{
@@ -613,10 +647,10 @@
       const sourceSize=await verifyLocalFile(file,0,'OCR-Quelle');
       if(stored && Number(stored.size)!==sourceSize)throw new Error(`OCR-Quelle beschädigt: ${formatBytesExact(sourceSize)} · Archiv ${formatBytesExact(stored.size)}.`);
       media=await openLocalVideo(file,`POV ${file.name}`,stored&&stored!==file?stored:null);
-      item.result=await analyzeVideo(media.video,p=>{item.progress=60+Math.round(p*.40);item.status=`OCR ${p}% · erneuter Versuch`;renderQueue();},file.name);
+      item.result=await analyzeVideo(media.video,p=>{item.progress=60+Math.round(p*.40);item.status=`OCR ${p}% · erneuter Versuch`;renderQueue();},file.name,()=>item.cancelled);
       item.result.originalName=file.name;item.result.sourceSize=sourceSize;item.result.remoteSize=Number(item.result.remoteSize||item.youtube?.remoteSize||0);item.result.sourceType=file.type||'video/mp4';item.result.types=[];item.result.proof=item.youtube?.url||item.result.proof||'';item.result.youtube=item.youtube||item.result.youtube;
-      item.status=item.result.complete?`OCR fertig · Prüfung offen`:'OCR unvollständig · Prüfung nötig';item.progress=100;renderQueue();if(!state.editing)openEditor(item);else{item.status+=' · Prüfung wartet';renderQueue();}
-    }catch(err){item.status='Fehler: '+(err?.message||err);item.progress=0;renderQueue();}finally{closeLocalVideo(media);item.processing=false;renderQueue();}
+      item.status=item.result.complete?`OCR fertig · Prüfung offen`:'OCR unvollständig · Prüfung nötig';item.progress=100;renderQueue();if(isQueueItemAlive(item)){if(!state.editing)openEditor(item);else{item.status+=' · Prüfung wartet';renderQueue();}}
+    }catch(err){item.status=item.cancelled?'Aus Warteschlange entfernt':'Fehler: '+(err?.message||err);item.progress=0;renderQueue();}finally{closeLocalVideo(media);item.processing=false;renderQueue();}
   }
   async function loadVideoElement(v,label='POV'){
     return await new Promise((res,rej)=>{
@@ -896,6 +930,29 @@
     const chat=makeOcrChatCrop(video,1.55);
     try{return await readBanProbeCanvas(worker,chat);}finally{clearCanvas(chat);}
   }
+  const REASON_ROI={x:0.00,y:0.12,w:0.70,h:0.56};
+  async function readReasonDirect(worker,video){
+    const crop=makeCrop(video,REASON_ROI.x,REASON_ROI.y,REASON_ROI.w,REASON_ROI.h,3.25);
+    const texts=[];let best='';
+    try{
+      const imgs=[
+        [orangeMask(crop),6],[grayCanvas(enhancedCanvas(crop,1.60,1.04)),6],
+        [grayCanvas(enhancedCanvas(crop,1.90,1.05)),11],[threshold(crop,150),11],
+        [threshold(crop,175),12]
+      ];
+      for(const [img,psm] of imgs){
+        try{
+          const r=await ocr(worker,img,{psm,nodict:true});
+          const txt=cleanText(r?.text||'');
+          if(txt)texts.push(txt);
+          const rr=extractReasonStrict(txt)||parseReason(txt);
+          if(rr){best=rr;break;}
+        }catch{} finally{clearCanvas(img);}
+      }
+      const merged=[...new Set(texts)].join('\n');
+      return {reason:best||extractReasonStrict(merged)||parseReason(merged),text:merged};
+    }finally{clearCanvas(crop);}
+  }
   async function readBanOnly(worker,video){
     const chat=makeOcrChatCrop(video,3.05);
     const texts=[];let best=null;
@@ -915,8 +972,11 @@
       const candidate=extractBanEvent(texts.join('\n'));
       if(candidate)break;
     }
-    const merged=[...new Set(texts.filter(Boolean))].join('\n');
-    const ban=extractBanEvent(merged);
+    let merged=[...new Set(texts.filter(Boolean))].join('\n');
+    let ban=extractBanEvent(merged);
+    if(ban&&!ban.reason){
+      try{const rr=await readReasonDirect(worker,video);if(rr.reason){ban.reason=rr.reason;ban.score=(ban.score||72)+12;merged += `\nGrund: ${rr.reason}`;}}catch{}
+    }
     const sharp=sharpness(chat);
     clearCanvas(chat);
     return {text:merged,ban,sharp,data:best||{}};
@@ -936,11 +996,12 @@
     const times=uniqueTimes(Array.from({length:11},(_,i)=>start+(end-start)*(i/10)));
     const hits=[];
     for(const t of times){
+      if(cancelCheck())throw new Error('OCR abgebrochen: Fall wurde aus der Warteschlange entfernt.');
       if(!(await fastSeek(video,t)))continue;
       try{
         const read=await readBanFast(worker,video);
         const ban=read.ban||extractBanEvent(read.text);
-        if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId&&ban.reason)hits.push({time:t,ban,text:read.text,sharp:read.sharp||0});
+        if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId)hits.push({time:t,ban,text:read.text,sharp:read.sharp||0});
       }catch{}
     }
     if(!hits.length)return null;
@@ -954,14 +1015,24 @@
       if(!(await fastSeek(video,t)))continue;
       try{
         const read=await readBanOnly(worker,video);const ban=read.ban||extractBanEvent(read.text);
-        if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId&&ban.reason)verified.push({time:t,ban,text:read.text,sharp:read.sharp||0});
+        if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId)verified.push({time:t,ban,text:read.text,sharp:read.sharp||0});
       }catch{}
     }
-    verified.sort((a,b)=>(b.ban.score-a.ban.score)||(b.sharp-a.sharp));
+    verified.sort((a,b)=>(Number(!!b.ban.reason)-Number(!!a.ban.reason))||(b.ban.score-a.ban.score)||(b.sharp-a.sharp));
+    for(const candidate of verified.slice(0,6)){
+      if(candidate.ban.reason)continue;
+      if(!(await fastSeek(video,candidate.time)))continue;
+      try{
+        const rr=await readReasonDirect(worker,video);
+        if(rr.reason){candidate.ban.reason=rr.reason;candidate.ban.score+=12;candidate.text=(candidate.text||'')+'\nGrund: '+rr.reason;}
+      }catch{}
+    }
+    verified.sort((a,b)=>(Number(!!b.ban.reason)-Number(!!a.ban.reason))||(b.ban.score-a.ban.score)||(b.sharp-a.sharp));
     return verified[0]||best;
   }
-    async function analyzeVideo(video,onProgress,originalName=''){
+    async function analyzeVideo(video,onProgress,originalName='',cancelCheck=()=>false){
     const worker=await ensureWorker();
+    if(cancelCheck())throw new Error('OCR abgebrochen: Fall wurde aus der Warteschlange entfernt.');
     const duration=video.duration;
     if(!Number.isFinite(duration)||duration<=0)throw new Error('Videodauer konnte nicht bestimmt werden.');
     const date=dateFromFilename(originalName||'');
@@ -984,7 +1055,8 @@
         for(let i=0;i<count;i++)times.push(duration*(i/Math.max(1,count-1)));
       }
       const scan=uniqueTimes(times);const hits=[];
-      for(let i=0;i<scan.length;i++){
+        for(let i=0;i<scan.length;i++){
+        if(cancelCheck())throw new Error('OCR abgebrochen: Fall wurde aus der Warteschlange entfernt.');
         const t=scan[i];
         if(!(await fastSeek(video,t)))continue;
         try{
@@ -994,17 +1066,28 @@
         onProgress?.(5+Math.round((i+1)/scan.length*35),`Schnellscan ${i+1}/${scan.length}`);
       }
       // Precision only around candidate signals.
-      const candidates=hits.filter(x=>x.ban&&x.ban.adminId===BAN_ADMIN_ID&&x.ban.reason&&x.ban.targetId);
+      const candidates=hits.filter(x=>x.ban&&x.ban.adminId===BAN_ADMIN_ID&&x.ban.targetId);
       const probes=candidates.length?candidates: hits.filter(x=>x.signal).slice(0,12);
       const checked=[];
       for(const h of probes.slice(0,12)){
+        if(cancelCheck())throw new Error('OCR abgebrochen: Fall wurde aus der Warteschlange entfernt.');
         for(const t of uniqueTimes([h.time-.8,h.time-.4,h.time,h.time+.4,h.time+.8])){
+          if(cancelCheck())throw new Error('OCR abgebrochen: Fall wurde aus der Warteschlange entfernt.');
           if(!(await fastSeek(video,t)))continue;
-          try{const read=await readBanOnly(worker,video);const ban=read.ban||extractBanEvent(read.text);if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId&&ban.reason)checked.push({time:t,ban,text:read.text,sharp:read.sharp||0});}catch{}
+          try{const read=await readBanOnly(worker,video);const ban=read.ban||extractBanEvent(read.text);if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId)checked.push({time:t,ban,text:read.text,sharp:read.sharp||0});}catch{}
         }
       }
       const pool=checked.length?checked:candidates;
-      if(pool.length){pool.sort((a,b)=>(b.ban.score-a.ban.score)||(b.sharp-a.sharp));anchor=pool[0];}
+      if(pool.length){
+        pool.sort((a,b)=>(Number(!!b.ban.reason)-Number(!!a.ban.reason))||(b.ban.score-a.ban.score)||(b.sharp-a.sharp));
+        for(const candidate of pool.slice(0,8)){
+          if(candidate.ban.reason)continue;
+          if(!(await fastSeek(video,candidate.time)))continue;
+          try{const rr=await readReasonDirect(worker,video);if(rr.reason){candidate.ban.reason=rr.reason;candidate.ban.score+=12;candidate.text=(candidate.text||'')+'\nGrund: '+rr.reason;}}catch{}
+        }
+        pool.sort((a,b)=>(Number(!!b.ban.reason)-Number(!!a.ban.reason))||(b.ban.score-a.ban.score)||(b.sharp-a.sharp));
+        anchor=pool[0];
+      }
     }
 
     if(!anchor){
@@ -1014,6 +1097,13 @@
 
     const verified=anchor.ban;
     const bannerTime=Math.max(0,Math.min(duration-.05,anchor.time));
+    if(!verified.reason){
+      const retryTimes=uniqueTimes([bannerTime-.45,bannerTime,bannerTime+.45]);
+      for(const t of retryTimes){
+        if(!(await fastSeek(video,t)))continue;
+        try{const rr=await readReasonDirect(worker,video);if(rr.reason){verified.reason=rr.reason;break;}}catch{}
+      }
+    }
     const timestamps={banner:bannerTime,targetId:bannerTime,reason:bannerTime,sc:Math.max(0,duration-5),pcCheck:Math.max(0,Math.min(duration/2,duration-.05))};
     const targetId=/^\d{1,6}$/.test(verified.targetId||'')&&verified.targetId!==BAN_ADMIN_ID?verified.targetId:'';
     const reason=canonicalReason(verified.reason)||verified.reason||'';
@@ -1328,15 +1418,16 @@
     }));
   }
 
+  function isQueueItemAlive(item){return !!item && !item.cancelled && state.queue.includes(item);}
   async function runOcrForUploadedItem(item,sourceSize,storedCopy,remoteSize=0){
-    if(!item)return;
+    if(!item||item.cancelled)return;
     let media=null;
     try{
       item.status='OCR läuft im Hintergrund · Upload der nächsten POV ist unabhängig';
       item.progress=60;renderQueue();
       media=await openLocalVideo(item.file,`POV ${item.file.name}`,storedCopy);
       item.progress=62;renderQueue();
-      item.result=await analyzeVideo(media.video,p=>{item.progress=62+Math.round(p*.38);item.status=`OCR läuft ${p}% · Upload-Warteschlange unabhängig`;renderQueue();},item.file.name);
+      item.result=await analyzeVideo(media.video,p=>{item.progress=62+Math.round(p*.38);item.status=`OCR läuft ${p}% · Upload-Warteschlange unabhängig`;renderQueue();},item.file.name,()=>item.cancelled);
       item.result.originalName=item.file.name;
       item.result.sourceSize=sourceSize;
       item.result.remoteSize=remoteSize||0;
@@ -1347,11 +1438,10 @@
       item.status=item.result.complete?'OCR fertig · Prüfung offen':'OCR unvollständig · Prüfung nötig';
       item.progress=100;
       renderQueue();
-      if(!state.editing)openEditor(item);
+      if(isQueueItemAlive(item)&&!state.editing)openEditor(item);
     }catch(err){
       console.error('OCR item failed',err);
-      item.status='Fehler: '+(err?.message||err);
-      item.progress=0;
+      if(item.cancelled){item.status='Aus Warteschlange entfernt';item.progress=0;}else{item.status='Fehler: '+(err?.message||err);item.progress=0;}
       renderQueue();
     }finally{
       if(media)closeLocalVideo(media);
