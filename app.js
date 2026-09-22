@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V58
+/* Grand RP DC Checker V65
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V63';
+  const BUILD='V65';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -18,7 +18,9 @@
   const BAN_ADMIN_ID='15340';
   const PC_CHECKER_POOL=['Hunter Sanchez','Mark Weber','Christoph Contro','John Koo','Fugo Weezy','Tony Shy','Jason Azul','Memo Savage'];
   const PC_CHECKER_LEAD='Adam Byers';
+  const PC_CUSTOM_KEY='grandrp_pc_checker_custom_v1';
   const pcCheckerCustom=new Set();
+  try{const saved=JSON.parse(localStorage.getItem(PC_CUSTOM_KEY)||'[]');if(Array.isArray(saved))saved.filter(Boolean).forEach(v=>pcCheckerCustom.add(String(v)));}catch{}
 
   const ALLOWED_REASONS=[
     'PC Check Positiv',
@@ -346,7 +348,7 @@
   if(isNode){module.exports={ALLOWED_REASONS,compact,similarity,normalizeHexLoose,normalizeIdToken,canonicalReason,parseTargetId,parseReason,extractScOrdered,extractScCandidatesFromString,extractHexCandidateAnyText,consensusHex,extractServerFromOcr,extractDate,serverVote,dateVote,clampId,validDate};return;}
 
   const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-  const state={entries:[],queue:[],filter:'all',editing:null,worker:null,specialWorker:null,accessToken:localStorage.getItem('yt_access_token')||sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:24,window:4.5,step:0.5},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,tokenExpiresAt:Number(localStorage.getItem('yt_access_expires_at_v50')||0),tokenRefreshPromise:null};
+  const state={entries:[],queue:[],filter:'all',editing:null,worker:null,specialWorker:null,accessToken:localStorage.getItem('yt_access_token')||sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,tokenExpiresAt:Number(localStorage.getItem('yt_access_expires_at_v50')||0),tokenRefreshPromise:null};
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
   // Local authentication: plaintext passwords are never stored; only salted PBKDF2 hashes are persisted in this browser.
   const AUTH_USERS_KEY='grandrp_auth_users_v1';
@@ -407,29 +409,42 @@
     return actual;
   }
   function formatDateDE(v){if(!v)return '';const m=String(v).match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}.${m[2]}.${m[1]}`:v;}
+  const META_DB_KEY='__grandrp_archive_meta__';
+  const PERMA_DB_KEY='__grandrp_perma_archive__';
+  async function getMetaDb(){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const os=tx.objectStore(STORE);const r=os.get(META_DB_KEY);const p=os.get(PERMA_DB_KEY);tx.oncomplete=()=>res({entries:Array.isArray(r.result)?r.result:[],perma:Array.isArray(p.result)?p.result:[]});tx.onerror=()=>rej(tx.error);});}catch{return {entries:[],perma:[]};}}
+  async function saveMetaDb(entries){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');const os=tx.objectStore(STORE);os.put(entries,META_DB_KEY);os.put(entries.filter(e=>e.permaArchive),PERMA_DB_KEY);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}catch(err){console.warn('Archiv-Metadaten konnten nicht in IndexedDB gesichert werden',err);}}
+  async function requestPersistentStorage(){try{if(navigator.storage?.persist)await navigator.storage.persist();const persisted=await navigator.storage?.persisted?.();const el=$('#persistentStorageStatus');if(el){el.textContent=persisted?'● Dauerhafter Browser-Speicher aktiv':'● Browser-Speicher nicht garantiert';el.className='connection '+(persisted?'good':'warn');}return !!persisted;}catch{const el=$('#persistentStorageStatus');if(el){el.textContent='● Browser-Speicherstatus nicht verfügbar';el.className='connection warn';}return false;}}
   async function loadMeta(){
     try{
+      const dbData=await getMetaDb();
+      const dbEntries=Array.isArray(dbData)?dbData:(dbData.entries||[]);
+      const dbPerma=Array.isArray(dbData?.perma)?dbData.perma:[];
       let raw=localStorage.getItem(META_KEY);
       if(!raw) raw=localStorage.getItem('grandrp_pov_meta_v27')||localStorage.getItem('grandrp_pov_meta_v26')||localStorage.getItem('grandrp_pov_meta_v25')||'[]';
-      state.entries=JSON.parse(raw)||[];
+      const localEntries=JSON.parse(raw)||[];
+      state.entries=Array.isArray(dbEntries)&&dbEntries.length?dbEntries:localEntries;
+      if(!state.entries.length && dbPerma.length) state.entries=dbPerma;
+      else if(dbPerma.length){const ids=new Set(state.entries.map(e=>e.id));for(const e of dbPerma) if(!ids.has(e.id)) state.entries.push(e);}
+      if(Array.isArray(dbEntries)&&dbEntries.length)try{localStorage.setItem(META_KEY,JSON.stringify(dbEntries.map(e=>({...e,file:undefined,videoUrl:undefined}))));}catch{}
     }catch{state.entries=[];}
     state.clientId=localStorage.getItem('yt_client_id')||'';$('#clientId').value=state.clientId;
-    // Repair legacy archive size metadata from the actual IndexedDB blob.
-    // This fixes old cards that displayed a stale/wrong sourceSize even though
-    // the stored POV file itself had the correct byte size.
     try{
       let changed=false;
       for(const e of state.entries){
         if(!e.id||!e.videoStored)continue;
         const stored=await getVideo(e.id);
         if(!stored)continue;
-        if(Number(e.sourceSize)!==Number(stored.size)){e.sourceSize=stored.size; changed=true;}
+        if(Number(e.sourceSize)!==Number(stored.size)){e.sourceSize=stored.size;changed=true;}
       }
       if(changed)saveMeta();
     }catch(err){console.warn('Archivgrößen konnten nicht synchronisiert werden',err);}
   }
-  function saveMeta(){localStorage.setItem(META_KEY,JSON.stringify(state.entries.map(e=>({...e,file:undefined,videoUrl:undefined}))));}
-  const DB_VERSION=2;
+  function saveMeta(){
+    const entries=state.entries.map(e=>({...e,file:undefined,videoUrl:undefined}));
+    try{localStorage.setItem(META_KEY,JSON.stringify(entries));}catch(err){console.warn('Archiv-Metadaten konnten nicht lokal gespeichert werden',err);}
+    void saveMetaDb(entries);
+  }
+  const DB_VERSION=3;
   async function openDB(){return new Promise((res,rej)=>{
     let done=false;
     const finish=db=>{done=true;try{db.onversionchange=()=>{try{db.close();}catch{}};}catch{};res(db);};
@@ -446,9 +461,10 @@
   async function clearDB(){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
   function showView(v){$$('.view').forEach(x=>x.classList.remove('active'));$('#view-'+v).classList.add('active');$$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));$('#pageTitle').textContent=views[v][0];$('#pageSubtitle').textContent=views[v][1];if(v==='archive')renderArchive();if(v==='cases')renderCases();if(v==='csv')renderCsv();}
   function updateCounts(){const all=state.entries;const count=k=>all.filter(e=>e.types?.includes(k)).length;$('#countAll').textContent=all.length;$('#countBan').textContent=all.filter(e=>!e.notBanned).length;$('#countPc').textContent=count('pccheck');$('#countSoc').textContent=count('socban');$('#countHard').textContent=count('hardban');$('#countCheat').textContent=count('cheater');$('#countNeg').textContent=count('negativ');$('#countNoVideo').textContent=all.filter(e=>!e.videoStored).length;}
-  function renderArchive(){updateCounts();const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;const list=state.entries.filter(e=>{if(filter==='ban'&&e.notBanned)return false;if(filter!=='all'&&filter!=='ban'&&!e.types?.includes(filter))return false;if(filter==='novideo'&&e.videoStored)return false;if(!q)return true;return [e.targetId,e.sc,e.reason,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));});$('#archiveGrid').innerHTML=list.map(e=>`<article class="card"><div class="thumb">${e.videoStored?'POV':'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(e.id.slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span></div><div class="card-body"><div class="card-title">${esc(e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div class="rid-cell"><span>SOC</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(formatDateDE(e.date)||'')}</div>${e.sourceSize?`<div><span>Dateigröße</span>${esc(formatSize(e.sourceSize))}<small class="size-bytes">${esc(formatBytesExact(e.sourceSize))}</small></div>`:''}</div></div><div class="card-actions"><button class="mini" data-open="${e.id}">Prüfen</button>${e.youtube?.url||e.proof?`<button class="mini primary" data-youtube="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}<button class="mini danger" data-delete="${e.id}">Löschen</button></div></article>`).join('');$('#emptyState').classList.toggle('hidden',list.length>0);$$('[data-open]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.open);if(e)openEditorFromEntry(e);});$$('[data-youtube]').forEach(b=>b.onclick=()=>{const url=b.dataset.youtube;if(url)window.open(url,'_blank','noopener,noreferrer');});$$('[data-delete]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.delete);if(!e)return;if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?\n\nDas YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.entries=state.entries.filter(x=>x.id!==e.id);saveMeta();renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}});}
+  function renderArchive(){updateCounts();const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;const list=state.entries.filter(e=>{if(filter==='ban'&&e.notBanned)return false;if(filter!=='all'&&filter!=='ban'&&!e.types?.includes(filter))return false;if(filter==='novideo'&&e.videoStored)return false;if(!q)return true;return [e.targetId,e.sc,e.reason,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));});$('#archiveGrid').innerHTML=list.map(e=>`<article class="card"><div class="thumb">${e.videoStored?'POV':'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(e.id.slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span>${e.permaArchive?'<span class="pill perma-tag">PERMA</span>':''}</div><div class="card-body"><div class="card-title">${esc(e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div class="rid-cell"><span>SOC</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(formatDateDE(e.date)||'')}</div>${e.sourceSize?`<div><span>Dateigröße</span>${esc(formatSize(e.sourceSize))}<small class="size-bytes">${esc(formatBytesExact(e.sourceSize))}</small></div>`:''}</div></div><div class="card-actions"><button class="mini" data-open="${e.id}">Prüfen</button>${e.youtube?.url||e.proof?`<button class="mini primary" data-youtube="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}<button class="mini danger" data-delete="${e.id}">Löschen</button></div></article>`).join('');$('#emptyState').classList.toggle('hidden',list.length>0);$$('[data-open]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.open);if(e)openEditorFromEntry(e);});$$('[data-youtube]').forEach(b=>b.onclick=()=>{const url=b.dataset.youtube;if(url)window.open(url,'_blank','noopener,noreferrer');});$$('[data-delete]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.delete);if(!e)return;if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?\n\nDas YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.entries=state.entries.filter(x=>x.id!==e.id);saveMeta();renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}});}
   function renderCases(){const cases=state.entries.filter(e=>!e.complete);$('#casesList').innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button class="mini" data-case="${e.id}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';$$('[data-case]').forEach(b=>b.onclick=()=>{const e=state.entries.find(x=>x.id===b.dataset.case);if(e)openEditorFromEntry(e);});}
-  function csvRowsBase(){return state.entries.filter(e=>e.saved).map(e=>({Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:e.discordId||'',Familie:'',Grund:e.reason||''}));}
+  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved).map(e=>({Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:e.discordId||'',Familie:'',Grund:e.reason||''}));}
+  function csvRowsPermaBase(){return csvRowsBase(state.entries.filter(e=>e.permaArchive));}
   function csvRows(){
     const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();
     const reason=($('#csvFilterReason')?.value)||'all';
@@ -465,16 +481,18 @@
     });
   }
   function renderCsv(){
-    const all=csvRowsBase(), rows=csvRows();
-    $('#csvSummary').textContent=`${rows.length} von ${all.length} Einträgen`;
+    const all=csvRowsBase(), rows=csvRows(), perma=csvRowsPermaBase();
+    $('#csvSummary').textContent=`${rows.length} von ${all.length} Einträgen · ${perma.length} Perma-Archiv`;
     $('#csvPreviewBody').innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.Proof)}</td><td>${esc(r.Datum)}</td><td>${esc(r.ID)}</td><td>${esc(r.SOC)}</td><td></td><td>${esc(r.DiscordID)}</td><td></td><td>${esc(r.Grund)}</td></tr>`).join(''):'<tr><td colspan=8 class="csv-empty">Keine Einträge passen zum Filter.</td></tr>';
   }
-  function csvText(){const rows=csvRows();const header=['Proof','Datum','ID','SOC','RID','Discord ID','Familie','Grund'];const line=a=>a.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(';');return '\uFEFF'+[line(header),...rows.map(r=>line([r.Proof,r.Datum,r.ID,r.SOC,r.RID,r.DiscordID,r.Familie,r.Grund]))].join('\r\n');}
+  function csvTextFromRows(rows){const header=['Proof','Datum','ID','SOC','RID','Discord ID','Familie','Grund'];const line=a=>a.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(';');return '﻿'+[line(header),...rows.map(r=>line([r.Proof,r.Datum,r.ID,r.SOC,r.RID,r.DiscordID,r.Familie,r.Grund]))].join('\r\n');}
+  function csvText(){return csvTextFromRows(csvRows());}
   function downloadCsv(){const blob=new Blob([csvText()],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='grandrp_bans.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+  function downloadPermaCsv(){const rows=csvRowsPermaBase();if(!rows.length){toast('Noch keine als „Perma eingetragen“ markierten Fälle.');return;}const blob=new Blob([csvTextFromRows(rows)],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='grandrp_perma_archiv.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast(`${rows.length} Perma-Archiv-Einträge exportiert.`);}
   async function copyCsv(){try{await navigator.clipboard.writeText(csvText());toast('CSV in die Zwischenablage kopiert.');}catch{toast('Kopieren nicht verfügbar. CSV herunterladen.');}}
 
   function setupNav(){
-    $$('.nav-item').forEach(b=>b.onclick=()=>showView(b.dataset.view));$('#headerUploadBtn').onclick=()=>showView('upload');$('#emptyUploadBtn').onclick=()=>showView('upload');$('#headerCsvBtn').onclick=()=>showView('csv');$('#reloadBtn').onclick=()=>renderArchive();$('#casesRefresh').onclick=renderCases;$('#search').oninput=renderArchive;$('#refreshCsvBtn').onclick=renderCsv;$('#downloadCsvBtn').onclick=downloadCsv;$('#copyCsvBtn').onclick=copyCsv;['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterDiscord'].forEach(s=>$(s)?.addEventListener($(s)?.tagName==='SELECT'?'change':'input',renderCsv));$('#csvFilterClear')?.addEventListener('click',()=>{if($('#csvFilterSearch'))$('#csvFilterSearch').value='';if($('#csvFilterReason'))$('#csvFilterReason').value='all';if($('#csvFilterSc'))$('#csvFilterSc').value='all';if($('#csvFilterDiscord'))$('#csvFilterDiscord').value='all';renderCsv();});
+    $$('.nav-item').forEach(b=>b.onclick=()=>showView(b.dataset.view));$('#headerUploadBtn').onclick=()=>showView('upload');$('#emptyUploadBtn').onclick=()=>showView('upload');$('#headerCsvBtn').onclick=()=>showView('csv');$('#reloadBtn').onclick=()=>renderArchive();$('#casesRefresh').onclick=renderCases;$('#search').oninput=renderArchive;$('#refreshCsvBtn').onclick=renderCsv;$('#downloadCsvBtn').onclick=downloadCsv;$('#downloadPermaCsvBtn')?.addEventListener('click',downloadPermaCsv);$('#copyCsvBtn').onclick=copyCsv;['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterDiscord'].forEach(s=>$(s)?.addEventListener($(s)?.tagName==='SELECT'?'change':'input',renderCsv));$('#csvFilterClear')?.addEventListener('click',()=>{if($('#csvFilterSearch'))$('#csvFilterSearch').value='';if($('#csvFilterReason'))$('#csvFilterReason').value='all';if($('#csvFilterSc'))$('#csvFilterSc').value='all';if($('#csvFilterDiscord'))$('#csvFilterDiscord').value='all';renderCsv();});
     $$('.filter').forEach(b=>b.onclick=()=>{state.filter=b.dataset.filter;$$('.filter').forEach(x=>x.classList.toggle('active',x===b));renderArchive();});
   }
 
@@ -731,7 +749,7 @@
     const raw=lines.filter(l=>(l.bbox?.y1||0)>=y0 && (l.bbox?.y0||0)<=y1).map(l=>l.text||'').join('\n');
     return {canvas:c,y:y0,raw,online:true};
   }
-  const BAN_ROI={x:0,y:.005,w:.84,h:.34};
+  const BAN_ROI={x:0,y:0,w:1,h:.70};
   async function readBanOnly(worker,video){
     const chat=makeCrop(video,BAN_ROI.x,BAN_ROI.y,BAN_ROI.w,BAN_ROI.h,3.8);
     const texts=[];
@@ -743,9 +761,29 @@
   async function analyzeVideo(video,onProgress){
     const worker=await ensureWorker();const duration=video.duration;const start=Math.max(0,duration-45);const settings=state.settings;
     if(!Number.isFinite(duration)||duration<=0)throw new Error('Videodauer konnte nicht bestimmt werden.');
-    const baseCount=Math.max(26,Math.min(40,Number(settings.frames)||30));const coarse=[];
+    const coarse=[];
+    let scanTimes=[];
+    if(duration<=120){
+      // Short POVs are scanned densely from start to finish. This intentionally
+      // ignores the coarse frame-count setting so 30–120s clips cannot lose a
+      // short-lived ban block between samples.
+      const step=Math.max(.18,Math.min(.22,Number(settings.step)||.20));
+      for(let t=0;t<=duration-.05;t+=step)scanTimes.push(t);
+      scanTimes.push(Math.max(0,duration-.05));
+    }else if(duration<=300){
+      const step=Math.max(.55,Number(settings.step)||.6);
+      const count=Math.min(220,Math.max(70,Math.ceil(duration/step)));
+      for(let i=0;i<count;i++)scanTimes.push(duration*(i/Math.max(1,count-1)));
+    }else{
+      const count=Math.max(32,Math.min(70,Number(settings.frames)||48));
+      for(let i=0;i<count;i++)scanTimes.push(duration*(i/Math.max(1,count-1)));
+      const denseStart=Math.max(0,duration-75);
+      for(let t=denseStart;t<=duration-.05;t+=1.0)scanTimes.push(t);
+    }
+    scanTimes=[...new Set(scanTimes.map(t=>Math.round(t*100)/100))].sort((a,b)=>a-b);
+    const baseCount=scanTimes.length;
     for(let i=0;i<baseCount;i++){
-      const t=duration<=45?duration*(i/Math.max(1,baseCount-1)):start+((duration-start-.35)*i/Math.max(1,baseCount-1));
+      const t=scanTimes[i];
       if(!(await safeSeek(video,t,3)))continue;
       try{const read=await readBanOnly(worker,video);const ban=extractBanEvent(read.text);coarse.push({time:t,text:read.text,ban,sharp:ban?sharpness(makeCrop(video,BAN_ROI.x,BAN_ROI.y,BAN_ROI.w,BAN_ROI.h,2.2)):0});}catch(err){console.debug('Ban OCR skipped',err);}
       onProgress?.(8+Math.round((i+1)/baseCount*40),`Bann-Scan ${i+1}/${baseCount}`);
@@ -763,26 +801,38 @@
     if(!frames.length){onProgress?.(100,'Ban-Anker nicht stabil genug');return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,missing:['Ziel-ID','Grund','Datum'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
     const idV=uniqueVote(frames.map(f=>f.ban.targetId));const reasonV=uniqueVote(frames.map(f=>f.ban.reason));
     const rankedFrames=frames.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp);
-    const topForAnchor=rankedFrames.slice(0,Math.min(9,rankedFrames.length));
-    // Info-Foto priority: verified hit in the final 10 seconds. If there is no such hit,
-    // explicitly inspect the 30-second area before falling back to the verified block anchor.
-    const recent=rankedFrames.filter(f=>f.time>=Math.max(0,duration-10));
-    let anchor=recent[0]||null;
+    const topForAnchor=rankedFrames.slice(0,Math.min(12,rankedFrames.length));
+    // Choose the Info-Foto from the densest verified ban cluster, not from an
+    // arbitrary first/last frame. A cluster requires nearby matching ban hits.
+    const clusters=[];
+    for(const f of rankedFrames){
+      let c=clusters.find(x=>Math.abs(x.last-f.time)<=1.6);
+      if(!c){c={items:[],last:f.time};clusters.push(c);}
+      c.items.push(f);c.last=f.time;
+    }
+    clusters.sort((a,b)=>b.items.length-a.items.length ||
+      Math.max(...b.items.map(x=>x.ban.score))-Math.max(...a.items.map(x=>x.ban.score)) ||
+      Math.max(...b.items.map(x=>x.sharp))-Math.max(...a.items.map(x=>x.sharp)));
+    let anchor=null;
+    const recentCluster=clusters.find(c=>c.items.length>=2 && c.items.some(x=>x.time>=Math.max(0,duration-10)));
+    if(recentCluster) anchor=recentCluster.items.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0];
     if(!anchor){
       const fallbackCenter=Math.min(30,Math.max(0,duration-.5));
       const fallbackTimes=new Set();
-      for(let dt=-5;dt<=5.001;dt+=.5)fallbackTimes.add(Math.max(0,Math.min(duration-.05,fallbackCenter+dt)));
+      for(let dt=-6;dt<=6.001;dt+=.5)fallbackTimes.add(Math.max(0,Math.min(duration-.05,fallbackCenter+dt)));
       const fallbackFrames=[];
       for(const t of [...fallbackTimes].sort((a,b)=>a-b)){
         if(!(await safeSeek(video,t,2)))continue;
         try{const read=await readBanOnly(worker,video);const ban=extractBanEvent(read.text);if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId===idV?.value&&ban.reason===reasonV?.value)fallbackFrames.push({time:t,text:read.text,ban,sharp:0});}catch{}
       }
-      if(fallbackFrames.length)anchor=fallbackFrames.sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0];
+      if(fallbackFrames.length){
+        const fb=[];
+        for(const f of fallbackFrames){let c=fb.find(x=>Math.abs(x.last-f.time)<=1.6);if(!c){c={items:[],last:f.time};fb.push(c);}c.items.push(f);c.last=f.time;}
+        fb.sort((a,b)=>b.items.length-a.items.length||Math.max(...b.items.map(x=>x.ban.score))-Math.max(...a.items.map(x=>x.ban.score)));
+        anchor=fb[0].items.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0];
+      }
     }
-    if(!anchor){
-      const medianTime=topForAnchor.length?topForAnchor.map(f=>f.time).sort((a,b)=>a-b)[Math.floor(topForAnchor.length/2)]:rankedFrames[0].time;
-      anchor=rankedFrames.slice().sort((a,b)=>Math.abs(a.time-medianTime)-Math.abs(b.time-medianTime)||b.ban.score-a.ban.score||b.sharp-a.sharp)[0]||rankedFrames[0];
-    }
+    if(!anchor) anchor=clusters[0]?.items.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0]||rankedFrames[0];
     const bannerTime=anchor.time;
     // Keep all info photos on the same verified ban frame so fields never point to unrelated OCR hits.
     const timestamps={banner:bannerTime,targetId:bannerTime,reason:bannerTime,server:bannerTime};
@@ -835,21 +885,26 @@
       const w=window.open(target.href,'_blank','noopener'); if(!w)toast('Pop-up blockiert. Bitte Pop-ups für die Website erlauben.');
     }catch(err){console.error(err);toast('POV konnte nicht geöffnet werden: '+err.message);}
   }
-  const PHOTO_ROIS={banner:[0,.005,.98,.54],targetId:[0,.015,.78,.18],reason:[0,.12,.78,.18],sc:[0,.10,.90,.32],server:[.80,0,.20,.20],date:[.70,.72,.30,.28],discordId:[0,.06,.86,.30]};
+  const PHOTO_ROIS={banner:[0,0,.88,.76],targetId:[0,0,.88,.76],reason:[0,0,.88,.76],sc:[0,0,.88,.76],server:[.78,0,.22,.22],date:[.70,.68,.30,.32],discordId:[0,0,.88,.76]};
   async function showInfoPhoto(field='banner'){
     const panel=$('#infoPhotoPanel'),canvas=$('#infoPhotoCanvas'),label=$('#infoPhotoLabel'),meta=$('#infoPhotoMeta');if(!panel||!canvas)return;
     const ctx=state.editing;const entry=ctx?.item||ctx?.entry;if(!entry)return;
     let file=entry.file||null;if(!file){try{file=await getVideo(entry.id);if(file)entry.file=file;}catch{}}
     if(!file){panel.classList.add('hidden');return;}
-    const r=entry.result||entry;const t=Number(r.timestamps?.[field]??r.timestamps?.banner??0)||0;
-    panel.classList.remove('hidden');label.textContent=`Info-Foto · ${field==='targetId'?'Ziel-ID':field==='reason'?'Grund':field==='sc'?'SC / RID':field==='server'?'Server':field==='date'?'Datum':field==='discordId'?'Discord ID':'Bannblock'}`;meta.textContent=`Zeitpunkt ${t.toFixed(2)} s`;
+    const r=entry.result||entry;let t=Number(r.timestamps?.[field]??r.timestamps?.banner??r.bannerTime??r.banTimestamp??0)||0;if(t<=0 && Number(entry.file?.duration||0)>3 && r.targetId&&r.reason)t=Math.min(30,Math.max(0,(entry.file?.duration||30)/2));
+    panel.classList.remove('hidden');label.textContent=`Info-Foto · ${field==='targetId'?'Ziel-ID':field==='reason'?'Grund':field==='sc'?'SC / RID':field==='server'?'Server':field==='date'?'Datum':field==='discordId'?'Discord ID':'Bannblock'}`;meta.textContent=`Zeitpunkt ${t.toFixed(2)} s · Originalauflösung`;
     for(const b of $$('.photo-field'))b.classList.toggle('active',b.dataset.field===field);
     let media=null;
     try{
       media=await openLocalVideo(file,'Info-Foto');
-      if(!(await safeSeek(media.video,t,2)))throw new Error('Zeitpunkt konnte nicht geladen werden.');
-      const maxW=1280,maxH=720,scale=Math.min(1,maxW/media.video.videoWidth,maxH/media.video.videoHeight);canvas.width=Math.max(1,Math.round(media.video.videoWidth*scale));canvas.height=Math.max(1,Math.round(media.video.videoHeight*scale));
-      const c=canvas.getContext('2d');c.drawImage(media.video,0,0,canvas.width,canvas.height);const roi=PHOTO_ROIS[field]||PHOTO_ROIS.banner;c.save();c.fillStyle='rgba(255,47,139,.10)';c.strokeStyle='#ff2f8b';c.lineWidth=Math.max(2,canvas.width/800);c.fillRect(canvas.width*roi[0],canvas.height*roi[1],canvas.width*roi[2],canvas.height*roi[3]);c.strokeRect(canvas.width*roi[0],canvas.height*roi[1],canvas.width*roi[2],canvas.height*roi[3]);c.restore();
+      const tt=Math.max(0,Math.min(t,Math.max(0,media.video.duration-.05)));
+      if(!(await safeSeek(media.video,tt,3)))throw new Error('Zeitpunkt konnte nicht geladen werden.');
+      const video=media.video;
+      const crop=(field==='banner'||field==='targetId'||field==='reason'||field==='discordId'||field==='sc')?PHOTO_ROIS.banner:PHOTO_ROIS[field]||PHOTO_ROIS.banner;
+      const sx=Math.round(video.videoWidth*crop[0]),sy=Math.round(video.videoHeight*crop[1]),sw=Math.max(1,Math.round(video.videoWidth*crop[2])),sh=Math.max(1,Math.round(video.videoHeight*crop[3]));
+      const maxW=1500,maxH=900,scale=Math.min(1,maxW/sw,maxH/sh);canvas.width=Math.max(1,Math.round(sw*scale));canvas.height=Math.max(1,Math.round(sh*scale));
+      const c=canvas.getContext('2d');c.imageSmoothingEnabled=true;c.drawImage(video,sx,sy,sw,sh,0,0,canvas.width,canvas.height);
+      if(field==='targetId'||field==='reason'||field==='discordId'){const guide=field==='targetId'?[0,.03,.92,.18]:field==='reason'?[0,.16,.92,.24]:[0,.02,.92,.28];c.save();c.fillStyle='rgba(255,47,139,.10)';c.strokeStyle='#ff2f8b';c.lineWidth=Math.max(2,canvas.width/700);c.fillRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.strokeRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.restore();}
     }catch(err){canvas.width=1;canvas.height=1;meta.textContent=`Foto konnte nicht geladen werden: ${err.message}`;}finally{closeLocalVideo(media);}
   }
   function setEditorValues(v={}){
@@ -863,6 +918,7 @@
     $('#discordId').value=val(r.discordId);
     $('#proof').value=val(r.proof);
     $('#perma').checked=!!r.perma;
+    $('#permaArchive').checked=!!r.permaArchive;
     $('#notBanned').checked=!!r.notBanned;
     $('#documentStatus').value=r.documentStatus==='eingetragen'?'eingetragen':'nicht eingetragen';
     setupPcCheckerUi(r.pcCheckers||[PC_CHECKER_LEAD]);
@@ -905,7 +961,7 @@
     const date=formatDateDE($('#date').value);
     $('#titlePreview').value=(id&&reason&&date)?`${id}, ${reason}, ${date}.mp4`:'';
   }
-  function openEditor(item){state.editing={item};$('#modalFile').textContent=item.finalName||item.file.name;setEditorValues({...item.result,discordId:item.result?.discordId||'',proof:item.result?.proof||'',perma:false,notBanned:false});state.selectedTypes=new Set(item.result?.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus(item);$('#editorModal').classList.remove('hidden');showInfoPhoto('banner');renderAcpStatus(item.result?.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',item.result?.sc?'ok':'warn');if(!item.result?.sc&&/^\d{1,6}$/.test(item.result?.targetId||'')){setTimeout(()=>{try{openAcpForCurrentId();}catch{}},350);}}
+  function openEditor(item){state.editing={item};$('#modalFile').textContent=item.finalName||item.file.name;setEditorValues({...item.result,discordId:item.result?.discordId||'',proof:item.result?.proof||'',perma:!!item.result?.perma,permaArchive:!!item.result?.permaArchive,notBanned:!!item.result?.notBanned});state.selectedTypes=new Set(item.result?.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus(item);$('#editorModal').classList.remove('hidden');showInfoPhoto('banner');renderAcpStatus(item.result?.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',item.result?.sc?'ok':'warn');if(!item.result?.sc&&/^\d{1,6}$/.test(item.result?.targetId||'')){setTimeout(()=>{try{openAcpForCurrentId();}catch{}},350);}}
   async function openEditorFromEntry(entry){const file=entry.file||await getVideo(entry.id);if(file)entry.file=file;state.editing={entry};$('#modalFile').textContent=entry.finalName||entry.originalName;setEditorValues(entry);state.selectedTypes=new Set(entry.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus({result:entry});$('#editorModal').classList.remove('hidden');showInfoPhoto('banner');renderAcpStatus(entry.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',entry.sc?'ok':'warn');}
   function closeEditor(){state.editing=null;$('#editorModal').classList.add('hidden');}
   async function saveEditor(e){
@@ -920,7 +976,7 @@
     const finalName=`${targetId}, ${reason}, ${formatDateDE(date)}.mp4`;
     const namedFile=new File([base.file],finalName,{type:base.file.type||'video/mp4',lastModified:base.file.lastModified||Date.now()}); if(namedFile.size!==base.file.size)throw new Error('Die Dateigröße hat sich beim Umbenennen verändert. Speicherung abgebrochen.');
     const yt=base.youtube||ctx.item?.youtube||ctx.entry?.youtube||null;
-    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,sc:offline?'':sc,server,date,rid:'',types:finalTypes,perma:$('#perma').checked,notBanned:$('#notBanned').checked,documentStatus:$('#documentStatus').value==='eingetragen'?'eingetragen':'nicht eingetragen',pcCheckers:getPcCheckers(),pcCheckerManual:[...pcCheckerCustom],discordId:$('#discordId').value.trim(),proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',timestamps:base.result?.timestamps||base.timestamps||{},infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
+    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,sc:offline?'':sc,server,date,rid:'',types:finalTypes,perma:$('#perma').checked,permaArchive:$('#permaArchive').checked,notBanned:$('#notBanned').checked,documentStatus:$('#documentStatus').value==='eingetragen'?'eingetragen':'nicht eingetragen',pcCheckers:getPcCheckers(),pcCheckerManual:[...pcCheckerCustom],discordId:$('#discordId').value.trim(),proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',timestamps:base.result?.timestamps||base.timestamps||{},infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
     await putVideo(record.id,namedFile);
     // YouTube must receive the exact final filename (including .mp4). The title update
     // is completed and verified before the saved POV is finalized in the UI.
@@ -945,7 +1001,7 @@
   window.addEventListener('message',e=>{if(e.data?.type==='grandrp-manual-field'){applyManualField(e.data.field,e.data.value,e.data.time);}});
 
   const ACP_ORIGIN='https://admin.gta5grand.com';
-  const ACP_EXTENSION_TOKEN='grandrp-acp-v62';
+  const ACP_EXTENSION_TOKEN='grandrp-acp-v64';
   let acpWindow=null;
   let acpTimeout=null;
   function buildAcpUrl(characterId){
@@ -963,6 +1019,7 @@
     return true;
   }
   function renderAcpStatus(text,kind=''){const el=$('#acpStatus');if(!el)return;el.textContent=text;el.className=`acp-status ${kind}`;}
+  function closeAcpWindow(){clearTimeout(acpTimeout);try{if(acpWindow&&!acpWindow.closed)acpWindow.close();}catch{}acpWindow=null;}
   function openAcpForCurrentId(){
     const id=clampId($('#targetId')?.value||'');
     if(!/^\d{1,6}$/.test(id)){toast('Zuerst eine gültige Ziel-ID eintragen.');return;}
@@ -973,7 +1030,7 @@
       if(!acpWindow){renderAcpStatus('Popup blockiert · bitte Popups für den Checker erlauben.','error');toast('Chrome-ACP konnte wegen Popup-Blockierung nicht geöffnet werden.');return;}
       const started=Date.now();
       clearTimeout(acpTimeout);
-      acpTimeout=setTimeout(()=>{renderAcpStatus('Noch keine SC-Antwort · ACP weiter geöffnet lassen oder erneut versuchen.','warn');},30000);
+      acpTimeout=setTimeout(()=>{renderAcpStatus('Kein SC im ACP gefunden · Fenster wird geschlossen.','warn');closeAcpWindow();},45000);
     }catch(err){console.error(err);renderAcpStatus('ACP konnte nicht geöffnet werden.','error');}
   }
   window.addEventListener('message',e=>{
@@ -984,10 +1041,10 @@
       const sc=String(e.data.socialClub||'');
       clearTimeout(acpTimeout);
       if(id && id===clampId($('#targetId')?.value||'') && setScValueFromAcp(sc,id)){
-        try{if(acpWindow&&!acpWindow.closed)acpWindow.focus();}catch{}
+        closeAcpWindow();
       }
     }
-    if(e.data.type==='GRANDRP_ACP_ERROR'){clearTimeout(acpTimeout);renderAcpStatus(String(e.data.message||'SC im ACP nicht gefunden · ACP weiter laden oder manuell übernehmen.'),'error');toast('ACP konnte den SC für die Ziel-ID nicht finden.');}
+    if(e.data.type==='GRANDRP_ACP_ERROR'){clearTimeout(acpTimeout);renderAcpStatus(String(e.data.message||'SC im ACP nicht gefunden · Fenster wird geschlossen.'),'error');toast('ACP konnte den SC für die Ziel-ID nicht finden.');closeAcpWindow();}
   });
 
   function rebuildPcCheckerOptions(selected=[]){
@@ -1002,7 +1059,7 @@
     }
     const list=$('#pcCheckerManualList');
     if(list)list.innerHTML=[...pcCheckerCustom].map(name=>`<span class="pc-manual-chip">${esc(name)}<button type="button" data-pc-remove="${esc(name)}">×</button></span>`).join('');
-    $$('[data-pc-remove]').forEach(b=>b.onclick=()=>{pcCheckerCustom.delete(b.dataset.pcRemove);rebuildPcCheckerOptions(getPcCheckers().slice(1));});
+    $$('[data-pc-remove]').forEach(b=>b.onclick=()=>{pcCheckerCustom.delete(b.dataset.pcRemove);localStorage.setItem(PC_CUSTOM_KEY,JSON.stringify([...pcCheckerCustom]));rebuildPcCheckerOptions(getPcCheckers().slice(1));});
   }
   function getPcCheckers(){
     const out=[PC_CHECKER_LEAD];
@@ -1028,6 +1085,8 @@
     $$('#targetId,#reason,#sc,#server,#date,#discordId').forEach(el=>el.addEventListener('focus',()=>showInfoPhoto(el.id==='targetId'?'targetId':el.id)));
     $('#reanalyzeBtn')?.addEventListener('click',async()=>{const x=state.editing?.item;if(x){closeEditor();await retryLocalOCR(x);}});
     $('#fetchAcpSc')?.addEventListener('click',openAcpForCurrentId);
+    $('#openDatePicker')?.addEventListener('click',()=>{const el=$('#date');try{el.showPicker?.();}catch{el.focus();el.click();}});
+    $('#addPcCheckerBtn')?.addEventListener('click',()=>{const input=$('#pcCheckerManual');if(!input)return;const name=input.value.trim().replace(/\s+/g,' ');if(!name){input.focus();return;}if(name===PC_CHECKER_LEAD||PC_CHECKER_POOL.includes(name)||pcCheckerCustom.has(name)){toast('Dieser PC Checker ist bereits vorhanden.');return;}if(getPcCheckers().length>=5){toast('Maximal 5 PC Checker.');return;}pcCheckerCustom.add(name);input.value='';rebuildPcCheckerOptions(getPcCheckers().slice(1));toast(`${name} zur PC-Checker-Auswahl hinzugefügt.`);});
     $('#copyAcpSc')?.addEventListener('click',async()=>{const v=$('#sc')?.value?.trim();if(!/^\w{40}$/i.test(v||'')){toast('Kein gültiger SC zum Kopieren.');return;}try{await navigator.clipboard.writeText(v);toast('SC kopiert.');}catch{toast('Zwischenablage nicht verfügbar.');}});
     // Manual picker buttons: use the user click directly to open the same-origin
     // picker page. This was missing in earlier builds, so SC/Discord-ID buttons
@@ -1602,8 +1661,9 @@
 
   async function bootApp(){
     if(window.__grandrpAppBooted)return;
+    try{const saved=JSON.parse(localStorage.getItem(PC_CUSTOM_KEY)||'[]');if(Array.isArray(saved))saved.filter(Boolean).forEach(v=>pcCheckerCustom.add(String(v)));}catch{}
     window.__grandrpAppBooted=true;
-    setupNav();setupUpload();setupEditor();setupSettings();renderQueue();updateYtStatus();
+    setupNav();setupUpload();setupEditor();setupSettings();renderQueue();updateYtStatus();void requestPersistentStorage();setInterval(()=>{if(authUser&&state.entries.length)saveMeta();},15000);
     loadMeta().then(()=>{renderArchive();renderCases();renderCsv();}).catch(err=>{console.error('Archiv konnte nicht geladen werden',err);renderArchive();renderCases();renderCsv();});
     renderAuthUsers();
   }

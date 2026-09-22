@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=63">
+<link rel="stylesheet" href="styles.css?v=65">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -37,7 +37,7 @@
     <header class="topbar">
       <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V63</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V65</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -77,15 +77,15 @@
           <div id="uploadQueue" class="upload-queue"></div>
         </div>
         <aside class="side-info">
-          <div class="info-card"><span class="info-icon">40s</span><div><strong>Letzte 40 Sekunden</strong><p>Intelligenter Schnellscan und danach nur bei Treffern ein dichter Präzisionsscan.</p></div></div>
-          <div class="info-card"><span class="info-icon">ROIs</span><div><strong>Feste Bereiche</strong><p>Links oben: Bannblock. Rechts oben: gelber Server-Badge. Rechts unten: Datum.</p></div></div>
+          <div class="info-card"><span class="info-icon">40s</span><div><strong>Kurze POVs komplett</strong><p>Bis 60 Sekunden wird die komplette POV dicht gescannt. Längere Videos werden adaptiv mit Schwerpunkt auf relevanten Bereichen geprüft.</p></div></div>
+          <div class="info-card"><span class="info-icon">ROIs</span><div><strong>Erkennung nach Bereich</strong><p>Links oben wird der komplette Bannbereich aus der Originalauflösung gezeigt. Ziel-ID, Bannblock und Grund stammen aus demselben verifizierten Frame.</p></div></div>
           <div class="info-card"><span class="info-icon">CSV</span><div><strong>CSV direkt erstellen</strong><p>Proof, Datum, ID, SOC = SC aus ACP, RID bleibt leer, Discord ID optional, Familie leer, Grund.</p></div></div>
         </aside>
       </div>
     </section>
 
     <section id="view-csv" class="view">
-      <div class="panel-head"><div><h2>CSV erstellen</h2><p>SOC wird mit dem SC aus dem Adminpanel gefüllt. RID bleibt immer leer. Familie bleibt leer.</p></div><div class="top-actions"><button class="ghost" id="refreshCsvBtn">Aktualisieren</button><button class="ghost" id="copyCsvBtn">CSV kopieren</button><button class="pink" id="downloadCsvBtn">CSV herunterladen</button></div></div>
+      <div class="panel-head"><div><h2>CSV erstellen</h2><p>SOC wird mit dem SC aus dem Adminpanel gefüllt. RID bleibt immer leer. Familie bleibt leer.</p></div><div class="top-actions"><button class="ghost" id="refreshCsvBtn">Aktualisieren</button><button class="ghost" id="copyCsvBtn">CSV kopieren</button><button class="pink" id="downloadCsvBtn">CSV herunterladen</button><button class="ghost perma-csv" id="downloadPermaCsvBtn">Perma-CSV herunterladen</button></div></div>
       <div class="csv-filters">
         <input id="csvFilterSearch" class="csv-filter-input" placeholder="CSV durchsuchen: ID, SOC/SC, Discord, Grund …" autocomplete="off">
         <select id="csvFilterReason" class="csv-filter-select"><option value="all">Alle Gründe</option>
@@ -103,12 +103,12 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V63</span></div>
-          <p class="hint">Die Software nutzt einen Schnellscan über die letzten 40 Sekunden und priorisiert für das Info-Foto die letzten 10 Sekunden. Wenn dort kein verifizierter Bann gefunden wird, wird zusätzlich der 30-Sekunden-Bereich geprüft; danach startet bei Treffern ein dichter Präzisionsscan. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V65</span></div>
+          <p class="hint">POVs bis 2 Minuten werden vollständig in 250-ms-Schritten durchsucht. Längere Videos werden adaptiv gescannt und bei Treffern verdichtet. Das Info-Foto kommt aus einem verifizierten Bann-Cluster; fehlt dort ein Treffer, wird zusätzlich der Bereich um Sekunde 30 geprüft. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
           <label>Präzisionsschritt (Sekunden)<input id="refineStep" type="number" min="0.4" max="1" step="0.1" value="0.5"></label>
-          <div class="setting-note">V59: strenger Bannblock-Anker, feldspezifisches OCR, robuste Seek-Wiederholungen, Speicherbegrenzung und Info-Foto am Erkennungszeitpunkt. Nach vollständig abgeschlossenem YouTube-Upload startet OCR getrennt im Hintergrund; der Upload-Pump startet die nächste POV unabhängig von OCR und Prüfung. Empfohlen: <b>28 / 5 / 0.45</b>. Server ist im aktuellen Workflow fest <b>3</b>. Der SC wird nicht mehr aus dem Video ermittelt, sondern ausschließlich über das Grand-RP-Adminpanel in Chrome übernommen.</div>
+          <div class="setting-note">V65: komplette Kurz-POV-Prüfung bis 120 Sekunden mit dichtem Start-bis-Ende-Scan, originalauflösungsbasiertes OCR, verifizierter Bannblock-Anker, ACP-SC in Chrome mit automatischem Schließen und dauerhafter Browser-Speicheranforderung. Ziel-ID, Bannblock und Grund werden am selben verifizierten Frame angezeigt. Server ist im aktuellen Workflow fest <b>3</b>. Der SC wird nicht mehr aus dem Video ermittelt, sondern ausschließlich über das Grand-RP-Adminpanel in Chrome übernommen.</div>
         </div>
         <div class="settings-card">
           <div class="card-title">YouTube-Verbindung <span id="ytStatus" class="connection">● Nicht verbunden</span></div>
@@ -126,8 +126,8 @@
           <div id="adminUserPanel" class="admin-user-panel"><div class="subhead">Benutzer hinzufügen</div><form id="addUserForm" class="auth-form-inline"><div class="auth-form-grid"><label>Benutzername<input id="newUsername" type="text" autocomplete="off" required></label><label>Passwort<input id="newPassword" type="password" autocomplete="new-password" minlength="8" required></label></div><label>Rolle<select id="newRole"><option value="user">Benutzer</option><option value="admin">Administrator</option></select></label><button type="submit" class="pink" id="addUserBtn">Benutzer hinzufügen</button></form><div id="authUsersList" class="auth-users-list"></div></div>
         </div>
         <div class="settings-card">
-          <div class="card-title">Lokale Daten</div>
-          <p class="hint">Archiv und POV-Dateien liegen lokal in diesem Browser. Ein Löschen entfernt sie aus diesem Browser.</p>
+          <div class="card-title">Lokale Daten <span id="persistentStorageStatus" class="connection">● Speicherstatus wird geprüft</span></div>
+          <p class="hint">Archiv-Metadaten und POV-Dateien werden lokal in IndexedDB und zusätzlich als Metadaten in localStorage gehalten. Der Checker fordert persistenten Browser-Speicher an und speichert automatisch weiter. Ein Eintrag bleibt erhalten, bis du ihn selbst löschst; das Löschen der Browser-/Profildaten kann lokale Daten jedoch trotzdem entfernen.</p>
           <button class="ghost danger" id="clearLocal">Lokales Archiv komplett löschen</button>
         </div>
       </div>
@@ -157,7 +157,7 @@
       <div class="field"><label>Grund</label><select id="reason"><option value="">Bitte wählen</option><option>PC Check Positiv</option><option>PC Check Verweigert</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv (Banevading)</option><option>PC Check Positiv (Cleaning)</option><option>PC Check Trolling</option><option>Cheating</option><option>Acc 1.1</option><option>Acc 1.4</option><option>ACC 1.4 (Twink)</option><option>Event 1.7</option></select><button type="button" class="jump hidden" data-field="reason">Manuell auswählen</button></div>
       <div class="field"><label>SOC / SC aus Adminpanel</label><input id="sc" maxlength="40" placeholder="SC wird aus dem Chrome-Adminpanel übernommen"><div class="acp-actions"><button type="button" class="pink mini" id="fetchAcpSc">SC aus ACP holen</button><button type="button" class="ghost mini" id="copyAcpSc">SC kopieren</button></div><div id="acpStatus" class="acp-status warn">SC fehlt · über ACP holen</div></div>
       <div class="field"><label>Server</label><input id="server" maxlength="1" inputmode="numeric" placeholder="1–4"><button type="button" class="jump hidden" data-field="server">Manuell auswählen</button></div>
-      <div class="field"><label>Datum</label><input id="date" type="date"><button type="button" class="jump hidden" data-field="date">Manuell auswählen</button></div>
+      <div class="field"><label>Datum</label><div class="inline-control"><input id="date" type="date" aria-label="Datum auswählen"><button type="button" class="ghost mini" id="openDatePicker">Kalender öffnen</button></div><button type="button" class="jump hidden" data-field="date">POV hier öffnen</button></div>
       <div class="field"><label>Discord ID</label><input id="discordId" placeholder="optional"><button type="button" class="jump hidden" data-field="discordId">Manuell auswählen</button></div>
       <div class="field"><label>Proof</label><input id="proof" placeholder="optional / YouTube-Link"></div>
       <div class="field full"><label>Finaler Dateiname</label><input id="titlePreview" readonly></div>
@@ -169,11 +169,11 @@
       <div class="field"><label>3. PC Checker</label><select id="pcChecker3" class="pc-checker-select"><option value="">Nicht besetzt</option></select></div>
       <div class="field"><label>4. PC Checker</label><select id="pcChecker4" class="pc-checker-select"><option value="">Nicht besetzt</option></select></div>
       <div class="field"><label>5. PC Checker</label><select id="pcChecker5" class="pc-checker-select"><option value="">Nicht besetzt</option></select></div>
-      <div class="field full"><label>PC Checker manuell hinzufügen</label><input id="pcCheckerManual" placeholder="Name eingeben und mit Enter hinzufügen"><div id="pcCheckerManualList" class="pc-manual-list"></div></div>
+      <div class="field full"><label>PC Checker manuell hinzufügen</label><div class="inline-control"><input id="pcCheckerManual" placeholder="Name eingeben"><button type="button" class="ghost mini" id="addPcCheckerBtn">Hinzufügen</button></div><div class="field-note">Der PC-Check-Leiter ist automatisch Adam Byers. Insgesamt sind maximal 5 PC Checker möglich. Eigene Namen bleiben für spätere Prüfungen verfügbar.</div><div id="pcCheckerManualList" class="pc-manual-list"></div></div>
     </div>
     <div class="section-label">Bann-Typen <span>Mehrere gleichzeitig möglich</span></div>
     <div class="chips" id="banTypes"><button type="button" data-value="hardban" class="chip">Hardban</button><button type="button" data-value="socban" class="chip">Soc-Ban</button><button type="button" data-value="cheater" class="chip">Cheater</button><button type="button" data-value="negativ" class="chip">Negativ</button><button type="button" data-value="verweigert" class="chip">Verweigert</button><button type="button" data-value="pccheck" class="chip">PC-Check</button></div>
-    <div class="switches"><label>Perma-Bann<input id="perma" type="checkbox"><span class="switch"></span></label><label>Nicht gebannt<input id="notBanned" type="checkbox"><span class="switch"></span></label></div>
+    <div class="switches"><label>Perma-Bann<input id="perma" type="checkbox"><span class="switch"></span></label><label>Archiv: in Perma eingetragen<input id="permaArchive" type="checkbox"><span class="switch"></span></label><label>Nicht gebannt<input id="notBanned" type="checkbox"><span class="switch"></span></label></div>
     <div class="field" style="margin-top:12px"><label>Im Dokument</label><select id="documentStatus"><option value="nicht eingetragen">Nicht eingetragen</option><option value="eingetragen">Eingetragen</option></select></div>
     <div id="ocrWarning" class="ocr-warning hidden"></div><div class="modal-tools"><button type="button" class="ghost mini hidden" id="reanalyzeBtn">OCR erneut ausführen</button></div>
     <div class="modal-actions"><button type="button" class="ghost" id="cancelBtn">Abbrechen</button><button type="submit" class="pink" id="saveBtn">Speichern & YouTube hochladen</button></div>
