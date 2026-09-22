@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=59">
+<link rel="stylesheet" href="styles.css?v=60">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -95,8 +95,8 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V59</span></div>
-          <p class="hint">Die Software nutzt einen Schnellscan über die letzten 40 Sekunden und startet danach nur bei einem Treffer einen dichten Präzisionsscan. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V60</span></div>
+          <p class="hint">Die Software nutzt einen Schnellscan über die letzten 40 Sekunden und priorisiert für das Info-Foto die letzten 10 Sekunden. Wenn dort kein verifizierter Bann gefunden wird, wird zusätzlich der 30-Sekunden-Bereich geprüft; danach startet bei Treffern ein dichter Präzisionsscan. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
           <label>Präzisionsschritt (Sekunden)<input id="refineStep" type="number" min="0.4" max="1" step="0.1" value="0.5"></label>
@@ -148,6 +148,7 @@
     <div class="section-label">Bann-Typen <span>Mehrere gleichzeitig möglich</span></div>
     <div class="chips" id="banTypes"><button type="button" data-value="hardban" class="chip">Hardban</button><button type="button" data-value="socban" class="chip">Soc-Ban</button><button type="button" data-value="cheater" class="chip">Cheater</button><button type="button" data-value="negativ" class="chip">Negativ</button><button type="button" data-value="verweigert" class="chip">Verweigert</button><button type="button" data-value="pccheck" class="chip">PC-Check</button></div>
     <div class="switches"><label>Perma-Bann<input id="perma" type="checkbox"><span class="switch"></span></label><label>Nicht gebannt<input id="notBanned" type="checkbox"><span class="switch"></span></label></div>
+    <div class="field" style="margin-top:12px"><label>Im Dokument</label><select id="documentStatus"><option value="nicht eingetragen">Nicht eingetragen</option><option value="eingetragen">Eingetragen</option></select></div>
     <div id="ocrWarning" class="ocr-warning hidden"></div><div class="modal-tools"><button type="button" class="ghost mini hidden" id="reanalyzeBtn">OCR erneut ausführen</button></div>
     <div class="modal-actions"><button type="button" class="ghost" id="cancelBtn">Abbrechen</button><button type="submit" class="pink" id="saveBtn">Speichern & YouTube hochladen</button></div>
   </form>
@@ -225,6 +226,6 @@
   });
 })();
 </script>
-<script src="app.js?v=59"></script>
+<script src="app.js?v=60"></script>
 </body>
 </html>

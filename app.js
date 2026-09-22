@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V59';
+  const BUILD='V60';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -723,14 +723,28 @@
     const idV=uniqueVote(frames.map(f=>f.ban.targetId));const reasonV=uniqueVote(frames.map(f=>f.ban.reason));
     const rankedFrames=frames.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp);
     const topForAnchor=rankedFrames.slice(0,Math.min(9,rankedFrames.length));
-    // Pick the temporal centre of the VERIFIED ban block, not an arbitrary first/last
-    // OCR hit. Every candidate here already contains Adam Byers + [15340] + target + reason.
-    const medianTime=topForAnchor.length?topForAnchor.map(f=>f.time).sort((a,b)=>a-b)[Math.floor(topForAnchor.length/2)]:rankedFrames[0].time;
-    const anchor=rankedFrames.slice().sort((a,b)=>Math.abs(a.time-medianTime)-Math.abs(b.time-medianTime)||b.ban.score-a.ban.score||b.sharp-a.sharp)[0]||rankedFrames[0];
+    // Info-Foto priority: verified hit in the final 10 seconds. If there is no such hit,
+    // explicitly inspect the 30-second area before falling back to the verified block anchor.
+    const recent=rankedFrames.filter(f=>f.time>=Math.max(0,duration-10));
+    let anchor=recent[0]||null;
+    if(!anchor){
+      const fallbackCenter=Math.min(30,Math.max(0,duration-.5));
+      const fallbackTimes=new Set();
+      for(let dt=-5;dt<=5.001;dt+=.5)fallbackTimes.add(Math.max(0,Math.min(duration-.05,fallbackCenter+dt)));
+      const fallbackFrames=[];
+      for(const t of [...fallbackTimes].sort((a,b)=>a-b)){
+        if(!(await safeSeek(video,t,2)))continue;
+        try{const read=await readBanOnly(worker,video);const ban=extractBanEvent(read.text);if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId===idV?.value&&ban.reason===reasonV?.value)fallbackFrames.push({time:t,text:read.text,ban,sharp:0});}catch{}
+      }
+      if(fallbackFrames.length)anchor=fallbackFrames.sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0];
+    }
+    if(!anchor){
+      const medianTime=topForAnchor.length?topForAnchor.map(f=>f.time).sort((a,b)=>a-b)[Math.floor(topForAnchor.length/2)]:rankedFrames[0].time;
+      anchor=rankedFrames.slice().sort((a,b)=>Math.abs(a.time-medianTime)-Math.abs(b.time-medianTime)||b.ban.score-a.ban.score||b.sharp-a.sharp)[0]||rankedFrames[0];
+    }
     const bannerTime=anchor.time;
-    const bestIdFrame=frames.slice().filter(f=>f.ban.targetId===idV?.value).sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0]||anchor;
-    const bestReasonFrame=frames.slice().filter(f=>f.ban.reason===reasonV?.value).sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp)[0]||anchor;
-    const timestamps={banner:bannerTime,targetId:bestIdFrame.time,reason:bestReasonFrame.time,server:bestReasonFrame.time};
+    // Keep all info photos on the same verified ban frame so fields never point to unrelated OCR hits.
+    const timestamps={banner:bannerTime,targetId:bannerTime,reason:bannerTime,server:bannerTime};
     const specialWorker=await ensureSpecialWorker();const scCandidates=[];
     for(const f of frames.slice(0,12)){if(!(await safeSeek(video,f.time,2)))continue;let chat=null;try{chat=makeCrop(video,0,.005,.82,.40,3.6);const read=await readChat(worker,chat);const precise=extractScFromData(read.data,chat);if(precise.canvas){for(const [img,psm] of [[precise.canvas,7],[threshold(precise.canvas,125),7],[threshold(precise.canvas,150),7],[enhancedCanvas(precise.canvas,1.8,1.02),7]]){try{const r=await ocr(specialWorker,img,{psm,whitelist:'0123456789ABCDEFabcdef',nodict:true});const c=extractHexCandidateAnyText(r.text||'');if(c)scCandidates.push(c);}finally{if(img!==precise.canvas)clearCanvas(img);}}clearCanvas(precise.canvas);}}catch(err){console.debug('SC precision OCR',err);}finally{clearCanvas(chat);}}
     const online=frames.some(f=>/\bIP\b/i.test(f.text||''));const sc=online?consensusHex(scCandidates):'';if(sc){const scFrame=frames.find(f=>/\bIP\b/i.test(f.text||''))||anchor;timestamps.sc=scFrame.time;}const server='3';const dateVotes=[];
@@ -807,6 +821,7 @@
     $('#proof').value=val(r.proof);
     $('#perma').checked=!!r.perma;
     $('#notBanned').checked=!!r.notBanned;
+    $('#documentStatus').value=r.documentStatus==='eingetragen'?'eingetragen':'nicht eingetragen';
     renderTitlePreview();
   }
   function setFieldStatus(item){
@@ -860,7 +875,7 @@
     const finalName=`${targetId}, ${reason}, ${formatDateDE(date)}.mp4`;
     const namedFile=new File([base.file],finalName,{type:base.file.type||'video/mp4',lastModified:base.file.lastModified||Date.now()}); if(namedFile.size!==base.file.size)throw new Error('Die Dateigröße hat sich beim Umbenennen verändert. Speicherung abgebrochen.');
     const yt=base.youtube||ctx.item?.youtube||ctx.entry?.youtube||null;
-    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,sc:offline?'':sc,server,date,types:finalTypes,perma:$('#perma').checked,notBanned:$('#notBanned').checked,discordId:$('#discordId').value.trim(),proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',timestamps:base.result?.timestamps||base.timestamps||{},infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
+    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,sc:offline?'':sc,server,date,types:finalTypes,perma:$('#perma').checked,notBanned:$('#notBanned').checked,documentStatus:$('#documentStatus').value==='eingetragen'?'eingetragen':'nicht eingetragen',discordId:$('#discordId').value.trim(),proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',timestamps:base.result?.timestamps||base.timestamps||{},infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
     await putVideo(record.id,namedFile);
     // YouTube must receive the exact final filename (including .mp4). The title update
     // is completed and verified before the saved POV is finalized in the UI.
