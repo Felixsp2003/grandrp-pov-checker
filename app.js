@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V71
+/* Grand RP DC Checker V72
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V71';
+  const BUILD='V72';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -474,7 +474,7 @@
   function updateCounts(){const all=state.entries;const count=k=>all.filter(e=>e.types?.includes(k)).length;$('#countAll').textContent=all.length;$('#countBan').textContent=all.filter(e=>!e.notBanned).length;$('#countPc').textContent=count('pccheck');$('#countSoc').textContent=count('socban');$('#countHard').textContent=count('hardban');$('#countCheat').textContent=count('cheater');$('#countNeg').textContent=count('negativ');$('#countNoVideo').textContent=all.filter(e=>!e.videoStored).length;}
   function renderArchive(){updateCounts();const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;const list=state.entries.filter(e=>{if(filter==='ban'&&e.notBanned)return false;if(filter!=='all'&&filter!=='ban'&&!e.types?.includes(filter))return false;if(filter==='novideo'&&e.videoStored)return false;if(!q)return true;return [e.targetId,e.sc,e.reason,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));});$('#archiveGrid').innerHTML=list.map(e=>`<article class="card"><div class="thumb">${e.videoStored?'POV':'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(e.id.slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span>${e.permaArchive?'<span class="pill perma-tag">PERMA</span>':''}</div><div class="card-body"><div class="card-title">${esc(e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div class="rid-cell"><span>SOC</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(formatDateDE(e.date)||'')}</div>${e.sourceSize?`<div><span>Dateigröße</span>${esc(formatSize(e.sourceSize))}<small class="size-bytes">${esc(formatBytesExact(e.sourceSize))}</small></div>`:''}</div></div><div class="card-actions"><button class="mini" data-open="${e.id}">Prüfen</button>${e.youtube?.url||e.proof?`<button class="mini primary" data-youtube="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}<button class="mini danger" data-delete="${e.id}">Löschen</button></div></article>`).join('');$('#emptyState').classList.toggle('hidden',list.length>0);$$('[data-open]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.open);if(e)openEditorFromEntry(e);});$$('[data-youtube]').forEach(b=>b.onclick=()=>{const url=b.dataset.youtube;if(url)window.open(url,'_blank','noopener,noreferrer');});$$('[data-delete]').forEach(b=>b.onclick=async()=>{const e=state.entries.find(x=>x.id===b.dataset.delete);if(!e)return;if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?\n\nDas YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.entries=state.entries.filter(x=>x.id!==e.id);saveMeta();renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}});}
   function renderCases(){const cases=state.entries.filter(e=>!e.complete);$('#casesList').innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button class="mini" data-case="${e.id}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';$$('[data-case]').forEach(b=>b.onclick=()=>{const e=state.entries.find(x=>x.id===b.dataset.case);if(e)openEditorFromEntry(e);});}
-  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved).map(e=>({Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Grund:e.reason||''}));}
+  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Grund:e.reason||'',Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
   function csvRowsPermaBase(){return csvRowsBase(state.entries.filter(e=>e.permaArchive));}
   function csvRows(){
     const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();
@@ -491,9 +491,9 @@
   function renderCsv(){
     const all=csvRowsBase(), rows=csvRows(), perma=csvRowsPermaBase();
     $('#csvSummary').textContent=`${rows.length} von ${all.length} Einträgen · ${perma.length} Perma-Archiv`;
-    $('#csvPreviewBody').innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.Proof)}</td><td>${esc(r.Datum)}</td><td>${esc(r.ID)}</td><td>${esc(r.SOC)}</td><td></td><td>${esc(r.DiscordID)}</td><td></td><td>${esc(r.Grund)}</td></tr>`).join(''):'<tr><td colspan=8 class="csv-empty">Keine Einträge passen zum Filter.</td></tr>';
+    $('#csvPreviewBody').innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.Proof)}</td><td>${esc(r.Datum)}</td><td>${esc(r.ID)}</td><td>${esc(r.SOC)}</td><td></td><td>${esc(r.DiscordID)}</td><td></td><td>${esc(r.Grund)}</td><td>${esc(r.Admin1)}</td><td>${esc(r.Admin2)}</td><td>${esc(r.Admin3)}</td><td>${esc(r.Admin4)}</td><td>${esc(r.Admin5)}</td></tr>`).join(''):'<tr><td colspan=13 class="csv-empty">Keine Einträge passen zum Filter.</td></tr>';
   }
-  function csvTextFromRows(rows){const header=['Proof','Datum','ID','SOC','RID','Discord ID','Familie','Grund'];const line=a=>a.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(';');return '﻿'+[line(header),...rows.map(r=>line([r.Proof,r.Datum,r.ID,r.SOC,r.RID,r.DiscordID,r.Familie,r.Grund]))].join('\r\n');}
+  function csvTextFromRows(rows){const header=['Proof','Datum','ID','SOC','RID','Discord ID','Familie','Grund','Admin 1','Admin 2','Admin 3','Admin 4','Admin 5'];const line=a=>a.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(';');return '﻿'+[line(header),...rows.map(r=>line([r.Proof,r.Datum,r.ID,r.SOC,r.RID,r.DiscordID,r.Familie,r.Grund,r.Admin1,r.Admin2,r.Admin3,r.Admin4,r.Admin5]))].join('\r\n');}
   function csvText(){return csvTextFromRows(csvRows());}
   function downloadCsv(){const blob=new Blob([csvText()],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='grandrp_bans.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
   function downloadPermaCsv(){const rows=csvRowsPermaBase();if(!rows.length){toast('Noch keine als „Perma eingetragen“ markierten Fälle.');return;}const blob=new Blob([csvTextFromRows(rows)],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='grandrp_perma_archiv.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast(`${rows.length} Perma-Archiv-Einträge exportiert.`);}
@@ -913,7 +913,7 @@
         }
       }
     }
-    if(!strictCoarse.length){onProgress?.(100,`Kein eindeutiger Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}]`);return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,missing:['Ziel-ID','Grund'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
+    if(!strictCoarse.length){onProgress?.(100,`Kein eindeutiger Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}]`);return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,duration,missing:['Ziel-ID','Grund'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
     const grouped=new Map();for(const f of strictCoarse){const k=`${f.ban.targetId}|${f.ban.reason}`;(grouped.get(k)||grouped.set(k,[]).get(k)).push(f);}
     const group=[...grouped.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.ban.score,0)-a.reduce((s,x)=>s+x.ban.score,0))[0]||[];
     const seeds=group.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp).slice(0,duration<=180?3:5);const refineTimes=new Set();const win=Math.max(2.2,Math.min(5.5,duration<=180?3.4:(Number(settings.window)||5)));const rstep=Math.max(.6,Math.min(.9,duration<=180?.7:(Number(settings.step)||.4)));
@@ -922,7 +922,7 @@
     for(const t of times){if(!(await safeSeek(video,t,2)))continue;try{const read=await readBanOnly(worker,video);const ban=read.ban||extractBanEvent(read.text);if(ban)refined.push({time:t,text:read.text,ban,sharp:0});}catch{}n++;onProgress?.(48+Math.round(n/Math.max(1,times.length)*28),`Ban-Präzisionsscan ${n}/${times.length}`);}
     const all=[...strictCoarse,...refined].filter(f=>f.ban&&f.ban.adminId===BAN_ADMIN_ID&&f.ban.targetId&&f.ban.reason);const map=new Map();for(const f of all){const k=`${f.ban.targetId}|${f.ban.reason}`;(map.get(k)||map.set(k,[]).get(k)).push(f);}
     const frames=[...(( [...map.values()].sort((a,b)=>b.length-a.length||b.reduce((s,x)=>s+x.ban.score,0)-a.reduce((s,x)=>s+x.ban.score,0))[0] )||[])];
-    if(!frames.length){onProgress?.(100,'Ban-Anker nicht stabil genug');return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,missing:['Ziel-ID','Grund'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
+    if(!frames.length){onProgress?.(100,'Ban-Anker nicht stabil genug');return {targetId:'',reason:'',sc:'',server:'3',date:'',offline:true,duration,missing:['Ziel-ID','Grund'],complete:false,timestamps:{},confidence:{id:0,reason:0,sc:0,server:1,date:0,ban:0,admin:0}};}
     const idV=uniqueVote(frames.map(f=>f.ban.targetId));const reasonV=uniqueVote(frames.map(f=>f.ban.reason));
     const rankedFrames=frames.slice().sort((a,b)=>b.ban.score-a.ban.score||b.sharp-a.sharp);
     const topForAnchor=rankedFrames.slice(0,Math.min(12,rankedFrames.length));
@@ -948,11 +948,11 @@
     }
     if(!anchor){
       onProgress?.(100,'Bannblock erkannt, aber kein sicherer Timestamp gefunden');
-      return {targetId:idV?.value||'',reason:reasonV?.value||'',sc:'',server:'3',date:'',offline:false,missing:['Datum','SC / ACP'],complete:false,timestamps:{},confidence:{id:1,reason:1,sc:0,server:1,date:0,ban:0,admin:1}};
+      return {targetId:idV?.value||'',reason:reasonV?.value||'',sc:'',server:'3',date:dateFromFilename(originalName||video.currentSrc||''),offline:false,duration,missing:['SC / ACP'],complete:false,timestamps:{pcCheck:Math.max(0,Math.min(duration/2,Math.max(0,duration-.05)))},confidence:{id:1,reason:1,sc:0,server:1,date:0,ban:0,admin:1}};
     }
     const bannerTime=anchor.time;
     // Keep all info photos on the same verified ban frame so fields never point to unrelated OCR hits.
-    const timestamps={banner:bannerTime,targetId:bannerTime,reason:bannerTime};
+    const timestamps={banner:bannerTime,targetId:bannerTime,reason:bannerTime,pcCheck:Math.max(0,Math.min(duration/2,Math.max(0,duration-.05)))};
     // SC/RID is intentionally NOT read from the POV anymore. The authoritative
     // Social Club value comes from the Grand RP Admin Panel and is written into SOC.
     const sc='';
@@ -965,7 +965,7 @@
     if(!reasonV?.value)missing.push('Grund');
     if(!sc)missing.push('SC / ACP');
     onProgress?.(100,idV?.value&&reasonV?.value?`Ban von ${BAN_ADMIN_NAME} [${BAN_ADMIN_ID}] erkannt`:'Ban erkannt, Angaben fehlen');
-    return {targetId:/^\d{1,6}$/.test(idV?.value||'')?idV.value:'',reason:reasonV?.value||'',sc:'',server,date,offline:false,missing,complete:missing.length===0,timestamps,confidence:{id:idV?idV.votes/Math.max(1,frames.length):0,reason:reasonV?reasonV.votes/Math.max(1,frames.length):0,sc:0,server:1,date:date?1:0,ban:anchor.ban.score||0,admin:1}};
+    return {targetId:/^\d{1,6}$/.test(idV?.value||'')?idV.value:'',reason:reasonV?.value||'',sc:'',server,date,offline:false,duration,missing,complete:missing.length===0,timestamps,confidence:{id:idV?idV.votes/Math.max(1,frames.length):0,reason:reasonV?reasonV.votes/Math.max(1,frames.length):0,sc:0,server:1,date:date?1:0,ban:anchor.ban.score||0,admin:1}};
   }
   async function openManualPicker(entry, field, secondsOverride){
     if(!entry)return;
@@ -1007,22 +1007,29 @@
       const w=window.open(target.href,'_blank','noopener'); if(!w)toast('Pop-up blockiert. Bitte Pop-ups für die Website erlauben.');
     }catch(err){console.error(err);toast('POV konnte nicht geöffnet werden: '+err.message);}
   }
-  const PHOTO_ROIS={banner:[0,0,.94,.74],targetId:[0,0,.94,.74],reason:[0,0,.94,.74],sc:[0,0,.94,.74]};
+  const PHOTO_ROIS={banner:[0,0,.94,.74],targetId:[0,0,.94,.74],reason:[0,0,.94,.74],sc:[0,0,.94,.74],pcCheck:[0,0,.94,.90]};
   async function showInfoPhoto(field='banner'){
     const panel=$('#infoPhotoPanel'),canvas=$('#infoPhotoCanvas'),label=$('#infoPhotoLabel'),meta=$('#infoPhotoMeta');if(!panel||!canvas)return;
     const ctx=state.editing;const entry=ctx?.item||ctx?.entry;if(!entry)return;
     let file=entry.file||null;if(!file){try{file=await getVideo(entry.id);if(file)entry.file=file;}catch{}}
     if(!file){panel.classList.add('hidden');return;}
-    const r=entry.result||entry;let t=Number(r.timestamps?.[field]??r.timestamps?.banner??r.bannerTime??r.banTimestamp??NaN);if(!Number.isFinite(t)||t<0)t=0;
-    panel.classList.remove('hidden');label.textContent=`Info-Foto · ${field==='targetId'?'Ziel-ID':field==='reason'?'Grund':field==='sc'?'SC / RID':'Bannblock'}`;meta.textContent=`Zeitpunkt ${t.toFixed(2)} s · Originalauflösung`;
+    const r=entry.result||entry;let t=Number(r.timestamps?.[field]??r.timestamps?.banner??r.bannerTime??r.banTimestamp??NaN);
+    panel.classList.remove('hidden');label.textContent=`Info-Foto · ${field==='targetId'?'Ziel-ID':field==='reason'?'Grund':field==='sc'?'SC / RID':field==='pcCheck'?'PC-Check':'Bannblock'}`;
+    // SOC/SC does not come from the POV. Show a useful frame from the final 5 seconds instead of 0.00s.
+    let videoDurationHint=Number(entry.duration||r.duration||NaN);
+    if(field==='sc' || !Number.isFinite(t) || t<0) t=Number.isFinite(videoDurationHint)?Math.max(0,videoDurationHint-5):0;
+    meta.textContent=`Zeitpunkt ${t.toFixed(2)} s · Originalauflösung`;
     for(const b of $$('.photo-field'))b.classList.toggle('active',b.dataset.field===field);
     let media=null;
     try{
       media=await openLocalVideo(file,'Info-Foto');
+      if(field==='sc') t=Math.max(0,media.video.duration-5);
+      else if(field==='pcCheck' && (!Number.isFinite(t)||t<0)) t=Math.max(0,media.video.duration/2);
       const tt=Math.max(0,Math.min(t,Math.max(0,media.video.duration-.05)));
+      meta.textContent=`Zeitpunkt ${tt.toFixed(2)} s · Originalauflösung`;
       if(!(await safeSeek(media.video,tt,3)))throw new Error('Zeitpunkt konnte nicht geladen werden.');
       const video=media.video;
-      const crop=(field==='banner'||field==='targetId'||field==='reason'||field==='sc')?PHOTO_ROIS.banner:PHOTO_ROIS[field]||PHOTO_ROIS.banner;
+      const crop=(field==='banner'||field==='targetId'||field==='reason'||field==='sc'||field==='pcCheck')?PHOTO_ROIS[field]||PHOTO_ROIS.banner:PHOTO_ROIS.banner;
       const sx=Math.round(video.videoWidth*crop[0]),sy=Math.round(video.videoHeight*crop[1]),sw=Math.max(1,Math.round(video.videoWidth*crop[2])),sh=Math.max(1,Math.round(video.videoHeight*crop[3]));
       const maxW=1500,maxH=900,scale=Math.min(1,maxW/sw,maxH/sh);canvas.width=Math.max(1,Math.round(sw*scale));canvas.height=Math.max(1,Math.round(sh*scale));
       const c=canvas.getContext('2d');c.imageSmoothingEnabled=true;c.drawImage(video,sx,sy,sw,sh,0,0,canvas.width,canvas.height);
@@ -1041,6 +1048,7 @@
     const derivedDate=validDate(r.date)?val(r.date):dateFromFilename(r.originalName||r.file?.name||state.editing?.item?.file?.name||state.editing?.entry?.file?.name||'');
     $('#date').value=validDate(derivedDate)?derivedDate:'';
     const discordEl=$('#discordId'); if(discordEl)discordEl.value='';
+    const pcTime=Number(r.timestamps?.pcCheck); if(!Number.isFinite(pcTime) && state.editing?.item?.file){/* showInfoPhoto will derive midpoint when opened */}
     $('#proof').value=val(r.proof);
     $('#perma').checked=!!r.perma;
     $('#permaArchive').checked=!!r.permaArchive;
@@ -1097,7 +1105,9 @@
     const finalName=`${targetId}, ${reason}, ${formatDateDE(date)}.mp4`;
     const namedFile=new File([base.file],finalName,{type:base.file.type||'video/mp4',lastModified:base.file.lastModified||Date.now()}); if(namedFile.size!==base.file.size)throw new Error('Die Dateigröße hat sich beim Umbenennen verändert. Speicherung abgebrochen.');
     const yt=base.youtube||ctx.item?.youtube||ctx.entry?.youtube||null;
-    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,sc:offline?'':sc,server,date,rid:'',types:finalTypes,perma:$('#perma').checked,permaArchive:$('#permaArchive').checked,notBanned:$('#notBanned').checked,documentStatus:$('#documentStatus').value==='eingetragen'?'eingetragen':'nicht eingetragen',pcCheckers:getPcCheckers(),pcCheckerManual:[...pcCheckerCustom],discordId:'',proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',timestamps:base.result?.timestamps||base.timestamps||{},infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
+    const timestamps={...(base.result?.timestamps||base.timestamps||{})};
+    if(!Number.isFinite(Number(timestamps.pcCheck))){const d=Number(base.result?.duration||base.duration||0);if(d>0)timestamps.pcCheck=Math.max(0,Math.min(d/2,Math.max(0,d-.05)));}
+    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,sc:offline?'':sc,server,date,rid:'',types:finalTypes,perma:$('#perma').checked,permaArchive:$('#permaArchive').checked,notBanned:$('#notBanned').checked,documentStatus:$('#documentStatus').value==='eingetragen'?'eingetragen':'nicht eingetragen',pcCheckers:getPcCheckers(),pcCheckerManual:[...pcCheckerCustom],discordId:'',proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',duration:Number(base.result?.duration||base.duration||0)||0,timestamps,infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
     await putVideo(record.id,namedFile);
     // YouTube must receive the exact final filename (including .mp4). The title update
     // is completed and verified before the saved POV is finalized in the UI.
@@ -1203,6 +1213,14 @@
     $$('.chip').forEach(c=>c.onclick=()=>{const v=c.dataset.value;c.classList.toggle('active');if(c.classList.contains('active'))state.selectedTypes.add(v);else state.selectedTypes.delete(v);});
     $$('.photo-field').forEach(b=>b.onclick=()=>showInfoPhoto(b.dataset.field));
     $('#photoRefresh')?.addEventListener('click',()=>{const active=$('.photo-field.active');showInfoPhoto(active?.dataset.field||'banner');});
+    $('#pcCheckCapture')?.addEventListener('click',()=>{
+      const v=$('#editorVideoPreview'),ctx=state.editing;if(!v||!ctx)return;
+      const t=Number(v.currentTime)||0; const entry=ctx.item||ctx.entry; if(!entry)return;
+      entry.result=entry.result||{}; entry.result.timestamps={...(entry.result.timestamps||{}),pcCheck:t}; entry.timestamps={...(entry.timestamps||{}),pcCheck:t};
+      renderQueue();
+      showInfoPhoto('pcCheck');
+      toast(`PC-Check-Foto auf ${t.toFixed(2)} s gesetzt.`);
+    });
     $('#previewPicker')?.addEventListener('click',async()=>{const ctx=state.editing;if(!ctx)return;const entry=ctx.item||ctx.entry;if(entry)await openManualPicker({...entry,file:entry.file},'view',Number($('#editorVideoPreview')?.currentTime||0));});
     $('#previewJumpBack')?.addEventListener('click',()=>{const v=$('#editorVideoPreview');if(v)v.currentTime=Math.max(0,v.currentTime-5);});
     $('#previewJumpForward')?.addEventListener('click',()=>{const v=$('#editorVideoPreview');if(v)v.currentTime=Math.min(v.duration||0,v.currentTime+5);});
