@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V77
+/* Grand RP DC Checker V78
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V77';
+  const BUILD='V78';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -400,7 +400,7 @@
   if(isNode){module.exports={ALLOWED_REASONS,compact,similarity,normalizeHexLoose,normalizeIdToken,canonicalReason,parseTargetId,parseReason,extractBanEvent,extractScOrdered,extractScCandidatesFromString,extractHexCandidateAnyText,consensusHex,extractServerFromOcr,extractDate,serverVote,dateVote,clampId,validDate,dateFromFilename};return;}
 
   const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-  const state={entries:[],queue:[],filter:'all',editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:localStorage.getItem('yt_access_token')||sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,tokenExpiresAt:Number(localStorage.getItem('yt_access_expires_at_v50')||0),tokenRefreshPromise:null};
+  const state={entries:[],queue:[],filter:'all',editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:localStorage.getItem('yt_access_token')||sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,localFallbackRunner:false,youtubeUploadBlocked:false,tokenExpiresAt:Number(localStorage.getItem('yt_access_expires_at_v50')||0),tokenRefreshPromise:null};
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
   // Local authentication: plaintext passwords are never stored; only salted PBKDF2 hashes are persisted in this browser.
   const AUTH_USERS_KEY='grandrp_auth_users_v1';
@@ -553,10 +553,52 @@
     dropzone.addEventListener('drop',e=>addFiles([...e.dataTransfer.files].filter(f=>f.type.startsWith('video/')||/\.(mp4|mov|webm|mkv)$/i.test(f.name))));
   }
   function addFiles(files){for(const file of files){state.queue.push({id:crypto.randomUUID(),file,status:'Upload wartet',progress:0,result:null,processing:false,uploading:false,ocrProcessing:false,editingDone:false,youtube:null,uploadStarted:false,uploadFailed:false});}renderQueue();pumpUploads();}
+  function isYoutubeUploadLimitError(err){
+    const m=String(err?.message||err||'').toLowerCase();
+    return /uploadlimitexceeded|exceeded the number of videos they may upload|number of videos they may upload/.test(m);
+  }
   async function retryQueueItem(item){
     if(!item||item.processing)return;
     if(item.youtube){await retryLocalOCR(item);return;}
+    item.youtubeLimitBlocked=false;
+    state.youtubeUploadBlocked=false;
     item.status='Upload wartet · neuer Versuch';item.progress=0;item.processing=false;item.uploading=false;item.uploadStarted=false;item.uploadFailed=false;renderQueue();await pumpUploads();
+  }
+  async function runLocalOnlyOcr(item){
+    if(!item||item.ocrProcessing)return;
+    item.ocrProcessing=true;item.processing=true;item.uploading=false;item.status='YouTube-Limit erreicht · lokale OCR läuft';item.progress=5;renderQueue();
+    let media=null;
+    try{
+      const sourceSize=await verifyLocalFile(item.file,0,'Lokale OCR-Quelle');
+      await putVideo(item.id,item.file);
+      const storedCopy=await getVideo(item.id);
+      if(!storedCopy)throw new Error('Lokale Kopie der POV konnte nicht gespeichert werden.');
+      if(Number(storedCopy.size)!==sourceSize)throw new Error(`Lokale Speicherung beschädigt: Quelle ${formatBytesExact(sourceSize)} · Archiv ${formatBytesExact(storedCopy.size)}.`);
+      media=await openLocalVideo(item.file,`POV ${item.file.name}`,storedCopy);
+      item.result=await analyzeVideo(media.video,p=>{item.progress=5+Math.round(p*.95);item.status=`YouTube-Limit · lokale OCR ${p}%`;renderQueue();},item.file.name);
+      item.result.originalName=item.file.name;item.result.sourceSize=sourceSize;item.result.remoteSize=0;item.result.sourceType=item.file.type||'video/mp4';item.result.types=[];item.result.proof='';item.result.youtube=null;
+      item.youtube=null;item.uploadFailed=true;item.uploadStarted=true;item.status=item.result.complete?'YouTube-Limit · OCR fertig · YouTube später erneut':'YouTube-Limit · OCR unvollständig · Prüfung nötig';item.progress=100;renderQueue();
+      if(!state.editing)openEditor(item);
+    }catch(err){
+      item.status='Fehler: '+(err?.message||err);item.progress=0;item.uploadFailed=true;item.uploadStarted=true;renderQueue();
+    }finally{
+      closeLocalVideo(media);item.processing=false;item.ocrProcessing=false;renderQueue();
+    }
+  }
+  async function pumpLocalFallbackQueue(){
+    if(state.localFallbackRunner)return;
+    state.localFallbackRunner=true;
+    try{
+      for(const item of state.queue.filter(i=>!i.uploadStarted&&!i.uploadFailed&&!i.editingDone&&i.status!=='Gespeichert'&&!i.youtube)){
+        if(item.processing)continue;
+        item.youtubeLimitBlocked=true;
+        item.uploadStarted=true;
+        await runLocalOnlyOcr(item);
+      }
+    }finally{
+      state.localFallbackRunner=false;
+      renderQueue();
+    }
   }
   function renderQueue(){const q=$('#uploadQueue');$('#queueCount').textContent=`${state.queue.length} ${state.queue.length===1?'Datei':'Dateien'}`;q.innerHTML=state.queue.map(item=>{const hasError=/^Fehler:/i.test(item.status||'');const retry=(!item.uploading&&!item.ocrProcessing&&((!!item.youtube&&!item.result)||hasError));const label=item.youtube?'OCR erneut':'Erneut hochladen';return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(item.finalName||item.file.name)}</strong><small>${formatSize(item.file.size)} · ${esc(item.status)}</small><div class="progress"><i style="width:${item.progress}%"></i></div></div><div class="queue-actions">${item.result?`<button class="mini" data-check="${item.id}">Prüfen</button>`:''}${retry?`<button class="mini primary" data-retry="${item.id}">${label}</button>`:''}<button class="mini" data-remove="${item.id}">×</button></div></div>`}).join('');$$('[data-check]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.check);if(x?.result)openEditor(x);});$$('[data-retry]').forEach(b=>b.onclick=async()=>{const x=state.queue.find(i=>i.id===b.dataset.retry);if(x)await retryQueueItem(x);});$$('[data-remove]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.remove);if(x?.uploading){toast('YouTube-Upload läuft noch.');return;}state.queue=state.queue.filter(i=>i.id!==b.dataset.remove);renderQueue();});}
   async function retryLocalOCR(item){
@@ -1300,7 +1342,7 @@
       item.result.remoteSize=remoteSize||0;
       item.result.sourceType=item.file.type||'video/mp4';
       item.result.types=[];
-      item.result.proof=item.youtube.url;
+      item.result.proof=item.youtube?.url||'';
       item.result.youtube=item.youtube;
       item.status=item.result.complete?'OCR fertig · Prüfung offen':'OCR unvollständig · Prüfung nötig';
       item.progress=100;
@@ -1324,6 +1366,10 @@
     // Dedicated upload pump: OCR/review NEVER owns this lock and can never block the
     // next YouTube upload. Only one large video is uploaded at a time.
     if(state.uploadRunner)return;
+    if(state.youtubeUploadBlocked){
+      await pumpLocalFallbackQueue();
+      return;
+    }
     state.uploadRunner=true;
     try{
       while(true){
@@ -1372,6 +1418,19 @@
           item.ocrPromise=runOcrForUploadedItem(item,sourceSize,storedCopy,0);
         }catch(err){
           console.error('Queue upload failed',err);
+          if(isYoutubeUploadLimitError(err)){
+            state.youtubeUploadBlocked=true;
+            item.youtubeLimitBlocked=true;
+            item.processing=false;
+            item.uploading=false;
+            item.uploadFailed=true;
+            item.uploadStarted=true;
+            item.status='YouTube-Uploadlimit erreicht · OCR läuft lokal';
+            item.progress=0;
+            renderQueue();
+            await runLocalOnlyOcr(item);
+            break;
+          }
           item.status='Fehler: '+(err?.message||err);
           item.progress=0;
           item.processing=false;
@@ -1385,7 +1444,9 @@
       state.uploadRunner=false;
       // A new file may have been added while this pump was uploading the previous one.
       // Start another pump without touching any OCR promises.
-      if(state.queue.some(i=>!i.uploadStarted&&!i.uploadFailed&&!i.editingDone&&i.status!=='Gespeichert'&& !i.youtube)){
+      if(state.youtubeUploadBlocked){
+        queueMicrotask(()=>pumpLocalFallbackQueue());
+      }else if(state.queue.some(i=>!i.uploadStarted&&!i.uploadFailed&&!i.editingDone&&i.status!=='Gespeichert'&& !i.youtube)){
         queueMicrotask(()=>pumpUploads());
       }
     }
