@@ -68,7 +68,7 @@
   const $=s=>document.querySelector(s), video=$('#video'), overlay=$('#overlay'), ctx=overlay.getContext('2d'), time=$('#time'), manual=$('#manual'), status=$('#status'), fieldTitle=$('#fieldTitle'), tip=$('#tip'), serverButtons=$('#serverButtons');
   let selection=null,drawing=false,sx=0,sy=0,file=null,drawMode=false;
   function setStatus(t,kind=''){status.textContent=t;status.className='status '+kind}
-  function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});}
+  function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,2);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains(STORE))r.result.createObjectStore(STORE);};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});}
   async function getVideo(id){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const r=tx.objectStore(STORE).get(id);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});}
   function formatSize(n){return n>1024**3?(n/1024**3).toFixed(1)+' GB':n>1024**2?(n/1024**2).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB'}
   function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}

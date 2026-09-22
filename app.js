@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V62';
+  const BUILD='V63';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -348,6 +348,34 @@
   const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
   const state={entries:[],queue:[],filter:'all',editing:null,worker:null,specialWorker:null,accessToken:localStorage.getItem('yt_access_token')||sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:24,window:4.5,step:0.5},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,tokenExpiresAt:Number(localStorage.getItem('yt_access_expires_at_v50')||0),tokenRefreshPromise:null};
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
+  // Local authentication: plaintext passwords are never stored; only salted PBKDF2 hashes are persisted in this browser.
+  const AUTH_USERS_KEY='grandrp_auth_users_v1';
+  const AUTH_SESSION_KEY='grandrp_auth_session_v1';
+  const AUTH_ITERATIONS=210000;
+  const AUTH_SEED={username:'adam',role:'admin',salt:'DY69sWp+SO0RsyKJxK7D3g==',hash:'M3TR78gYXDBGTs6B5ciKSnQn6o11g82CavmziyWhTUE=',iterations:AUTH_ITERATIONS};
+  let authUser=null;
+  const authB64=b=>btoa(String.fromCharCode(...new Uint8Array(b)));
+  const authFromB64=s=>Uint8Array.from(atob(String(s||'')),c=>c.charCodeAt(0));
+  async function authDerive(password,salt,iterations=AUTH_ITERATIONS){const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(String(password||'')),'PBKDF2',false,['deriveBits']);const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:authFromB64(salt),iterations,hash:'SHA-256'},key,256);return authB64(bits);}
+  const authUsers=()=>{try{return JSON.parse(localStorage.getItem(AUTH_USERS_KEY)||'[]')||[];}catch{return[];}};
+  const saveAuthUsers=u=>localStorage.setItem(AUTH_USERS_KEY,JSON.stringify(u));
+  function authInit(){let u=authUsers();if(!u.length){u=[{id:crypto.randomUUID(),...AUTH_SEED,createdAt:Date.now()}];saveAuthUsers(u);}return u;}
+  function authGate(show){$('#loginGate')?.classList.toggle('hidden',!show);$('.app-shell')?.classList.toggle('auth-locked',show);}
+  function authMessage(text,kind=''){const el=$('#authMessage');if(el){el.textContent=text||'';el.className='auth-message '+kind;}}
+  function renderAuthUser(){const el=$('#activeUserName');if(el)el.textContent=authUser?`${authUser.username} · ${authUser.role==='admin'?'Administrator':'Benutzer'}`:'';}
+  async function authLogin(username,password){const u=authInit().find(x=>x.username.toLowerCase()===String(username||'').trim().toLowerCase());if(!u)throw new Error('Benutzername oder Passwort falsch.');if(await authDerive(password,u.salt,u.iterations||AUTH_ITERATIONS)!==u.hash)throw new Error('Benutzername oder Passwort falsch.');authUser={id:u.id,username:u.username,role:u.role};sessionStorage.setItem(AUTH_SESSION_KEY,JSON.stringify(authUser));return authUser;}
+  function authLogout(){authUser=null;sessionStorage.removeItem(AUTH_SESSION_KEY);authGate(true);authMessage('');$('#editorModal')?.classList.add('hidden');setTimeout(()=>$('#loginUsername')?.focus(),50);}
+  async function authChangePassword(current,newPw){if(!authUser)throw new Error('Nicht eingeloggt.');if(String(newPw||'').length<8)throw new Error('Das neue Passwort muss mindestens 8 Zeichen haben.');const users=authUsers();const u=users.find(x=>x.id===authUser.id);if(!u)throw new Error('Benutzer nicht gefunden.');if(await authDerive(current,u.salt,u.iterations||AUTH_ITERATIONS)!==u.hash)throw new Error('Aktuelles Passwort ist falsch.');u.salt=authB64(crypto.getRandomValues(new Uint8Array(16)));u.hash=await authDerive(newPw,u.salt,AUTH_ITERATIONS);u.iterations=AUTH_ITERATIONS;saveAuthUsers(users);}
+  async function authAddUser(username,password,role){if(authUser?.role!=='admin')throw new Error('Nur Administratoren dürfen Benutzer anlegen.');const name=String(username||'').trim();if(!/^[A-Za-z0-9._-]{2,32}$/.test(name))throw new Error('Benutzername: 2–32 Zeichen, Buchstaben, Zahlen, Punkt, Unterstrich oder Bindestrich.');if(String(password||'').length<8)throw new Error('Passwort muss mindestens 8 Zeichen haben.');const users=authUsers();if(users.some(u=>u.username.toLowerCase()===name.toLowerCase()))throw new Error('Benutzer existiert bereits.');const salt=authB64(crypto.getRandomValues(new Uint8Array(16)));users.push({id:crypto.randomUUID(),username:name,role:role==='admin'?'admin':'user',salt,hash:await authDerive(password,salt),iterations:AUTH_ITERATIONS,createdAt:Date.now()});saveAuthUsers(users);renderAuthUsers();}
+  function authDeleteUser(id){if(authUser?.role!=='admin')throw new Error('Nur Administratoren dürfen Benutzer löschen.');if(id===authUser.id)throw new Error('Der aktuell eingeloggte Benutzer kann nicht gelöscht werden.');const users=authUsers();const v=users.find(x=>x.id===id);if(v?.role==='admin'&&users.filter(x=>x.role==='admin').length===1)throw new Error('Der letzte Administrator kann nicht gelöscht werden.');saveAuthUsers(users.filter(x=>x.id!==id));renderAuthUsers();}
+  function renderAuthUsers(){const panel=$('#adminUserPanel'),box=$('#authUsersList');if(!panel||!box)return;const admin=authUser?.role==='admin';panel.classList.toggle('hidden',!admin);if(!admin){box.innerHTML='';return;}box.innerHTML=authUsers().map(u=>`<div class="auth-user-row"><div><strong>${esc(u.username)}</strong><small>${u.role==='admin'?'Administrator':'Benutzer'}</small></div><button type="button" class="mini danger" data-auth-delete="${u.id}" ${u.id===authUser.id?'disabled':''}>Löschen</button></div>`).join('');$$('[data-auth-delete]').forEach(b=>b.onclick=()=>{try{authDeleteUser(b.dataset.authDelete);toast('Benutzer gelöscht.');}catch(e){toast(e.message||String(e));}});}
+  async function authResume(){authInit();try{const x=JSON.parse(sessionStorage.getItem(AUTH_SESSION_KEY)||'null');const u=x&&authUsers().find(a=>a.id===x.id);if(u){authUser={id:u.id,username:u.username,role:u.role};authGate(false);renderAuthUser();return true;}}catch{}authGate(true);return false;}
+  function setupAuthUI(){
+    $('#loginForm')?.addEventListener('submit',async e=>{e.preventDefault();const b=$('#loginBtn');b.disabled=true;authMessage('Anmeldung wird geprüft…','working');try{await authLogin($('#loginUsername').value,$('#loginPassword').value);$('#loginPassword').value='';authMessage('');authGate(false);renderAuthUser();await bootApp();}catch(err){authMessage(err.message||String(err),'error');}finally{b.disabled=false;}});
+    $('#logoutBtn')?.addEventListener('click',authLogout);
+    $('#changePasswordForm')?.addEventListener('submit',async e=>{e.preventDefault();const b=$('#changePasswordBtn');b.disabled=true;try{await authChangePassword($('#currentPassword').value,$('#newPassword').value);e.target.reset();toast('Passwort geändert.');}catch(err){toast(err.message||String(err));}finally{b.disabled=false;}});
+    $('#addUserForm')?.addEventListener('submit',async e=>{e.preventDefault();const b=$('#addUserBtn');b.disabled=true;try{await authAddUser($('#newUsername').value,$('#newPassword').value,$('#newRole').value);e.target.reset();toast('Benutzer angelegt.');}catch(err){toast(err.message||String(err));}finally{b.disabled=false;}});
+  }
 
   function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2600);}
   // File sizes are displayed in decimal units, matching Windows/browser file
@@ -401,7 +429,17 @@
     }catch(err){console.warn('Archivgrößen konnten nicht synchronisiert werden',err);}
   }
   function saveMeta(){localStorage.setItem(META_KEY,JSON.stringify(state.entries.map(e=>({...e,file:undefined,videoUrl:undefined}))));}
-  async function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+  const DB_VERSION=2;
+  async function openDB(){return new Promise((res,rej)=>{
+    let done=false;
+    const finish=db=>{done=true;try{db.onversionchange=()=>{try{db.close();}catch{}};}catch{};res(db);};
+    const wire=(req,allowFallback)=>{
+      req.onupgradeneeded=()=>{try{const db=req.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE);}catch(err){console.error('IndexedDB Upgrade fehlgeschlagen',err);}};
+      req.onsuccess=()=>finish(req.result);
+      req.onerror=()=>{if(!done&&allowFallback&&req.error?.name==='VersionError'){try{wire(indexedDB.open(DB_NAME),false);}catch(err){rej(err);}}else if(!done)rej(req.error||new Error('IndexedDB konnte nicht geöffnet werden.'));};
+    };
+    try{wire(indexedDB.open(DB_NAME,DB_VERSION),true);}catch(err){rej(err);}
+  });}
   async function putVideo(id,file){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(file,id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
   async function getVideo(id){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const r=tx.objectStore(STORE).get(id);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
   async function delVideo(id){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
@@ -1562,6 +1600,14 @@
     updateYtStatus();
   }
 
+  async function bootApp(){
+    if(window.__grandrpAppBooted)return;
+    window.__grandrpAppBooted=true;
+    setupNav();setupUpload();setupEditor();setupSettings();renderQueue();updateYtStatus();
+    loadMeta().then(()=>{renderArchive();renderCases();renderCsv();}).catch(err=>{console.error('Archiv konnte nicht geladen werden',err);renderArchive();renderCases();renderCsv();});
+    renderAuthUsers();
+  }
   window.addEventListener('beforeunload' ,()=>{try{state.worker?.terminate();}catch{};try{state.specialWorker?.terminate();}catch{}});
-  setupNav();setupUpload();setupEditor();setupSettings();renderQueue();updateYtStatus();loadMeta().then(()=>{renderArchive();renderCases();renderCsv();}).catch(err=>{console.error('Archiv konnte nicht geladen werden',err);renderArchive();renderCases();renderCsv();});
+  setupAuthUI();
+  authResume().then(ok=>{if(ok)bootApp();});
 })();

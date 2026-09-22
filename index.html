@@ -7,12 +7,20 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=62">
+<link rel="stylesheet" href="styles.css?v=63">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
-<div class="app-shell">
+<div id="loginGate" class="login-gate">
+  <div class="login-card">
+    <div class="login-brand"><span class="brand-icon">⊘</span><div><strong>Grand RP DC Checker</strong><small>Interner Admin-Bereich</small></div></div>
+    <h1>Anmelden</h1><p>Bitte mit einem Benutzer anmelden.</p>
+    <form id="loginForm" autocomplete="on"><label>Benutzername<input id="loginUsername" name="username" type="text" autocomplete="username" required autofocus></label><label>Passwort<input id="loginPassword" name="password" type="password" autocomplete="current-password" required></label><button class="pink login-submit" id="loginBtn" type="submit">Anmelden</button></form>
+    <div id="authMessage" class="auth-message"></div><div class="login-note">Lokale Anmeldung · Passwörter werden nur als gesalzene PBKDF2-Hashes gespeichert.</div>
+  </div>
+</div>
+<div class="app-shell auth-locked">
   <aside class="sidebar">
     <div class="brand"><span class="brand-icon">⊘</span><span>Archiv</span></div>
     <nav class="nav">
@@ -29,7 +37,7 @@
     <header class="topbar">
       <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V62</span>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V63</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -95,7 +103,7 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V62</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V63</span></div>
           <p class="hint">Die Software nutzt einen Schnellscan über die letzten 40 Sekunden und priorisiert für das Info-Foto die letzten 10 Sekunden. Wenn dort kein verifizierter Bann gefunden wird, wird zusätzlich der 30-Sekunden-Bereich geprüft; danach startet bei Treffern ein dichter Präzisionsscan. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
@@ -110,6 +118,12 @@
         </div>
         <div class="settings-card">
           <div class="card-title">Browser / Chrome ACP</div><p class="hint">Für den SC wird Chrome mit dem Grand-RP-Adminpanel verwendet. Die Begleit-Erweiterung wartet auf die geladenen Authorization-Daten und übernimmt die Social-Club-Zeile zur Ziel-ID.</p><div class="setting-note">ACP-Erkennung: bis zu 30 Sekunden Lade-/DOM-Wartezeit. Der SC wird nicht mehr aus der POV-OCR geraten.</div>
+        </div>
+        <div class="settings-card">
+          <div class="card-title">Benutzer & Sicherheit <span class="badge">Lokal</span></div>
+          <p class="hint">Konten gelten für diesen Browser. Passwörter werden niemals im Klartext gespeichert.</p>
+          <form id="changePasswordForm" class="auth-form-inline"><div class="auth-form-grid"><label>Aktuelles Passwort<input id="currentPassword" type="password" autocomplete="current-password" required></label><label>Neues Passwort<input id="newPassword" type="password" autocomplete="new-password" minlength="8" required></label></div><button type="submit" class="ghost" id="changePasswordBtn">Eigenes Passwort ändern</button></form>
+          <div id="adminUserPanel" class="admin-user-panel"><div class="subhead">Benutzer hinzufügen</div><form id="addUserForm" class="auth-form-inline"><div class="auth-form-grid"><label>Benutzername<input id="newUsername" type="text" autocomplete="off" required></label><label>Passwort<input id="newPassword" type="password" autocomplete="new-password" minlength="8" required></label></div><label>Rolle<select id="newRole"><option value="user">Benutzer</option><option value="admin">Administrator</option></select></label><button type="submit" class="pink" id="addUserBtn">Benutzer hinzufügen</button></form><div id="authUsersList" class="auth-users-list"></div></div>
         </div>
         <div class="settings-card">
           <div class="card-title">Lokale Daten</div>
@@ -238,6 +252,6 @@
   });
 })();
 </script>
-<script src="app.js?v=62"></script>
+<script src="app.js?v=63"></script>
 </body>
 </html>
