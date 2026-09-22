@@ -23,7 +23,7 @@
     <button id="drawMode" class="primary">Rahmen ziehen: AUS</button>
     <select id="preset">
       <option value="">Bereich wählen</option>
-      <option value="chat">Links oben · Bannblock</option>
+      <option value="chat">Links oben · kompletter Bann-Chat</option>
       <option value="sc">SC/IP · Chatbereich</option>
       <option value="server">Rechts oben · Server</option>
       <option value="date">Rechts unten · Datum</option>
@@ -89,7 +89,7 @@
   overlay.addEventListener('pointermove',e=>{if(!drawing)return;const p=pos(e);selection={x:Math.min(sx,p.x),y:Math.min(sy,p.y),w:Math.abs(sx-p.x),h:Math.abs(sy-p.y)};draw()});
   overlay.addEventListener('pointerup',()=>{drawing=false}); overlay.addEventListener('pointercancel',()=>{drawing=false});
   function seekTo(t){video.currentTime=Math.max(0,Math.min(video.duration||1e9,Number(t)||0));time.value=video.currentTime.toFixed(1)}
-  function presetRect(name){const W=overlay.width,H=overlay.height;const m={chat:[0,0,.94,.74],sc:[0,.04,.94,.74],targetId:[0,0,.94,.74],reason:[0,0,.94,.74],server:[.86,.0,.14,.18],date:[0,0,.94,.74]}[name];if(!m)return;selection={x:W*m[0],y:H*m[1],w:W*m[2],h:H*m[3]};draw();setDrawMode(false);setStatus('Bereich vorgewählt. Du kannst sofort OCR lesen oder die Auswahl mit „Rahmen ziehen: AN“ neu ziehen.');}
+  function presetRect(name){const W=overlay.width,H=overlay.height;const m={chat:[.02,.02,.84,.42],sc:[.02,.02,.84,.42],targetId:[.02,.02,.84,.42],reason:[.02,.08,.84,.34],server:[.82,.0,.16,.22],date:[.02,.02,.84,.42]}[name];if(!m)return;selection={x:W*m[0],y:H*m[1],w:W*m[2],h:H*m[3]};draw();setDrawMode(false);setStatus('Bereich vorgewählt. Du kannst sofort OCR lesen oder die Auswahl mit „Rahmen ziehen: AN“ neu ziehen.');}
   $('#seek').onclick=()=>seekTo(time.value);$('#prev').onclick=()=>seekTo(video.currentTime-.5);$('#next').onclick=()=>seekTo(video.currentTime+.5);$('#prev2').onclick=()=>seekTo(video.currentTime-5);$('#next2').onclick=()=>seekTo(video.currentTime+5);
   video.addEventListener('loadedmetadata',()=>{syncCanvas();seekTo(start);setDrawMode(false);setStatus(`POV bereit · ${video.videoWidth}×${video.videoHeight} · ${file?formatSize(file.size):''}`,'good')});video.addEventListener('timeupdate',()=>time.value=video.currentTime.toFixed(1));window.addEventListener('resize',syncCanvas);
   $('#preset').onchange=e=>{if(e.target.value)presetRect(e.target.value)};

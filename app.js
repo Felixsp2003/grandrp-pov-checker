@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V72
+/* Grand RP DC Checker V73
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V72';
+  const BUILD='V73';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -771,8 +771,8 @@
     const raw=lines.filter(l=>(l.bbox?.y1||0)>=y0 && (l.bbox?.y0||0)<=y1).map(l=>l.text||'').join('\n');
     return {canvas:c,y:y0,raw,online:true};
   }
-  const BAN_ROI={x:0,y:0,w:.94,h:.74};
-  const FAST_BAN_ROI={x:0,y:0,w:.92,h:.58};
+  const BAN_ROI={x:.02,y:.02,w:.84,h:.42};
+  const FAST_BAN_ROI={x:.02,y:.02,w:.84,h:.42};
   async function readBanFast(worker,video){
     // Fast path for short POVs: only OCR the relevant upper-left ban area once,
     // then run one fallback threshold pass when the strict ban anchor is missing.
@@ -1007,7 +1007,7 @@
       const w=window.open(target.href,'_blank','noopener'); if(!w)toast('Pop-up blockiert. Bitte Pop-ups für die Website erlauben.');
     }catch(err){console.error(err);toast('POV konnte nicht geöffnet werden: '+err.message);}
   }
-  const PHOTO_ROIS={banner:[0,0,.94,.74],targetId:[0,0,.94,.74],reason:[0,0,.94,.74],sc:[0,0,.94,.74],pcCheck:[0,0,.94,.90]};
+  const PHOTO_ROIS={banner:[.02,.02,.84,.42],targetId:[.02,.02,.84,.42],reason:[.02,.08,.84,.34],sc:[.02,.02,.84,.42],pcCheck:[.02,.02,.84,.50]};
   async function showInfoPhoto(field='banner'){
     const panel=$('#infoPhotoPanel'),canvas=$('#infoPhotoCanvas'),label=$('#infoPhotoLabel'),meta=$('#infoPhotoMeta');if(!panel||!canvas)return;
     const ctx=state.editing;const entry=ctx?.item||ctx?.entry;if(!entry)return;
@@ -1033,7 +1033,7 @@
       const sx=Math.round(video.videoWidth*crop[0]),sy=Math.round(video.videoHeight*crop[1]),sw=Math.max(1,Math.round(video.videoWidth*crop[2])),sh=Math.max(1,Math.round(video.videoHeight*crop[3]));
       const maxW=1500,maxH=900,scale=Math.min(1,maxW/sw,maxH/sh);canvas.width=Math.max(1,Math.round(sw*scale));canvas.height=Math.max(1,Math.round(sh*scale));
       const c=canvas.getContext('2d');c.imageSmoothingEnabled=true;c.drawImage(video,sx,sy,sw,sh,0,0,canvas.width,canvas.height);
-      if(field==='targetId'||field==='reason'){const guide=field==='targetId'?[0,.03,.92,.18]:field==='reason'?[0,.16,.92,.24]:[0,.02,.92,.28];c.save();c.fillStyle='rgba(255,47,139,.10)';c.strokeStyle='#ff2f8b';c.lineWidth=Math.max(2,canvas.width/700);c.fillRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.strokeRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.restore();}
+      if(field==='targetId'||field==='reason'){const guide=field==='targetId'?[.02,.02,.84,.24]:field==='reason'?[.02,.08,.84,.34]:[.02,.02,.84,.42];c.save();c.fillStyle='rgba(255,47,139,.10)';c.strokeStyle='#ff2f8b';c.lineWidth=Math.max(2,canvas.width/700);c.fillRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.strokeRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.restore();}
     }catch(err){canvas.width=1;canvas.height=1;meta.textContent=`Foto konnte nicht geladen werden: ${err.message}`;}finally{closeLocalVideo(media);}
   }
   function revokeEditorPreview(){if(state.editorVideoUrl){try{URL.revokeObjectURL(state.editorVideoUrl);}catch{}state.editorVideoUrl=null;}const v=$('#editorVideoPreview');if(v){try{v.pause();}catch{}v.removeAttribute('src');v.load();}}
