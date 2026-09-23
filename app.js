@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V78
+/* Grand RP DC Checker V83
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V82';
+  const BUILD='V83';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -36,8 +36,8 @@
     'Acc 1.4 (Main)'
   ];
   const REASON_ALIASES={
-    'PC-Check Verweigerung':['pc check verweigerung','pc-check verweigerung','pc check verweigert','pc-check verweigert','pc che k rwelg nn','pc che k verweig'],
-    'PC-Check Verweigerung - Trolling':['pc check verweigerung trolling','pc-check verweigerung trolling','pc check verweigert trolling','pc-check verweigert trolling','pc check trolling verweigerung','pc-check trolling verweigerung'],
+    'PC-Check Verweigerung':['pc check verweigerung','pc-check verweigerung','pc check verweigert','pc-check verweigert','pc che k rwelg nn','pc che k verweig','pc check yerweigerung','pc-check yerweigerung','po-check verweigerung','c-check verweigerung','pc check verweigern'],
+    'PC-Check Verweigerung - Trolling':['pc check verweigerung trolling','pc-check verweigerung trolling','pc check verweigert trolling','pc-check verweigert trolling','pc check trolling verweigerung','pc-check trolling verweigerung','pc check trolling','pc-check trolling','trolling in pc check','trolling im pc check'],
     'PC-Check Positiv 4.1 (Discord)':['pc check positiv 4.1 discord','pc-check positiv 4.1 discord','pccheck positiv 4.1 discord','pc check positiv 4 1 discord'],
     'PC-Check Positiv':['pc check positiv','pc-check positiv','pccheck positiv','pccheckpositiv'],
     'PC-Check Positiv 4.1 (Redux)':['pc check positiv 4.1 redux','pc-check positiv 4.1 redux','pccheck positiv 4.1 redux','pc check positiv 4 1 redux'],
@@ -210,15 +210,20 @@
   function reasonOcrNormalize(text){
     return String(text||'').toLowerCase()
       .replace(/[‐‑‒–—]/g,'-')
+      .replace(/[°º¤]/g,'p')
       .replace(/[|¦]/g,'i')
-      .replace(/0/g,'o').replace(/5/g,'s').replace(/9/g,'g')
-      .replace(/4\s*[.,\-_ ]*\s*[il]/g,'41')
-      .replace(/\bpc\s*[-_]?\s*chek\b/g,'pc check')
-      .replace(/\bpcchec\b/g,'pc check')
-      .replace(/\bverweig(?:er|e|t|n|un|ung|rung|runq|rungn)[a-z0-9]*\b/g,'verweigerung')
+      .replace(/\byerweigerung\b/g,'verweigerung')
+      .replace(/\byerweiger[a-z0-9]*\b/g,'verweigerung')
+      .replace(/\bverweigerunq\b/g,'verweigerung')
+      .replace(/\bverweigerun[a-z0-9]*\b/g,'verweigerung')
       .replace(/\bweiger[a-z0-9]*\b/g,'verweigerung')
       .replace(/\brefus[a-z0-9]*\b/g,'verweigerung')
       .replace(/\breject[a-z0-9]*\b/g,'verweigerung')
+      .replace(/\b(?:po|0|o|c)[\s\-_]*check\b/g,'pc check')
+      .replace(/\bpchek\b/g,'pc check')
+      .replace(/\bpcchec\b/g,'pc check')
+      .replace(/\bpc\s*[-_]??\s*chek\b/g,'pc check')
+      .replace(/\bverweigerung\b/g,'verweigerung')
       .replace(/\bposi(?:t|v)[a-z0-9]*\b/g,'positiv')
       .replace(/\bdiscor[a-z0-9]*\b/g,'discord')
       .replace(/\bredu[cx][a-z0-9]*\b/g,'redux')
@@ -235,31 +240,49 @@
     const c=reasonOcrNormalize(raw);
     const n=reasonCompact(raw);
     if(!n)return '';
-    const hasPc=/pccheck|pcchec|pcck|pchek/.test(n);
-    const hasTroll=/troll|trol/.test(n);
-    const hasVerweig=/verweig|weiger|refus|reject/.test(n);
-    const hasPosit=/posit|posiv/.test(n);
-    const hasDiscord=/discord|discor/.test(n);
-    const hasRedux=/redux|reduc/.test(n);
-    const hasClean=/clean|cleaning/.test(n);
-    const hasBane=/banevad|banvad/.test(n);
-    const hasCover=/covering|cheater/.test(n);
-    const hasNoPov=/nopov|no[pv]ov/.test(n);
-    const has41=/(?:41|4i|4l)/.test(n);
-    const hasAcc14=/acc\s*1?4|acc14/.test(c) || /acc14/.test(n);
-
-    if((hasPc||hasVerweig)&&hasVerweig&&hasTroll) return 'PC-Check Verweigerung - Trolling';
+    // Fix OCR forms such as "°C-Check Yerweigerung", "PO-Check Verweigerung"
+    // and "Trolling in PC Check" before applying the semantic flags below.
+    let nn=n.replace(/^(?:0|o|c)?check/,'pccheck').replace(/^(?:po|0|o|c)check/,'pccheck');
+    nn=nn.replace(/yerweigerung/g,'verweigerung').replace(/yerweiger/g,'verweig');
+    const cc=nn;
+    const hasPc=/pccheck|pcchec|pcck|pchek/.test(cc);
+    const hasTroll=/troll|trol/.test(cc);
+    const hasVerweig=/verweig|weiger|refus|reject/.test(cc);
+    const hasPosit=/posit|posiv/.test(cc);
+    const hasDiscord=/discord|discor/.test(cc);
+    const hasRedux=/redux|reduc/.test(cc);
+    const hasClean=/clean|cleaning/.test(cc);
+    const hasBane=/banevad|banvad/.test(cc);
+    const hasCover=/covering|cheater/.test(cc);
+    const hasNoPov=/nopov|no[pv]ov/.test(cc);
+    const has41=/(?:41|4i|4l)/.test(cc);
+    const hasAcc14=/acc\s*1?4|acc14/.test(c) || /acc14/.test(cc);
+    if((hasTroll&&/(?:pccheck|pcheck|trollinginpc|trollingimpccheck)/.test(cc)) || (hasPc&&hasVerweig&&hasTroll)) return 'PC-Check Verweigerung - Trolling';
     if(hasPosit&&hasDiscord&&has41) return 'PC-Check Positiv 4.1 (Discord)';
     if(hasPosit&&hasRedux&&has41) return 'PC-Check Positiv 4.1 (Redux)';
     if(hasPosit&&hasBane) return 'PC Check Positiv (Banevading)';
     if(hasPosit&&hasCover) return 'PC Check Positiv (Covering Cheater)';
     if(hasPosit&&hasClean) return 'PC-Check Positiv - Cleaning';
     if(/event\s*1\s*[\.:_-]?\s*7/.test(c.replace(/[^a-z0-9.:-]/g,'')) && hasNoPov) return 'Event 1.7 (NoPov in PC Check)';
-    // A reason-only OCR selection may contain only "Verweigerung" or "Positiv".
     if(hasPosit) return 'PC-Check Positiv';
     if(hasVerweig) return 'PC-Check Verweigerung';
-    if(/acc\s*1[\.,_-]?\s*4\s*twink|acc14twink/.test(c)||/acc14twink/.test(n)) return 'Acc 1.4 (Twink)';
-    if(/acc\s*1[\.,_-]?\s*4\s*main|acc14main/.test(c)||/acc14main/.test(n)||hasAcc14) return 'Acc 1.4 (Main)';
+    if(/acc\s*1[\.,_-]?\s*4\s*twink|acc14twink/.test(c)||/acc14twink/.test(cc)) return 'Acc 1.4 (Twink)';
+    if(/acc\s*1[\.,_-]?\s*4\s*main|acc14main/.test(c)||/acc14main/.test(cc)||hasAcc14) return 'Acc 1.4 (Main)';
+
+    // Final fuzzy pass: reason-only OCR may contain one or two character errors.
+    const candidates=ALLOWED_REASONS.flatMap(r=>[r,...(REASON_ALIASES[r]||[])]);
+    let best='',bestScore=0;
+    for(const cand of candidates){
+      const sig=reasonCompact(cand);
+      if(!sig)continue;
+      const score=similarity(cc,sig);
+      if(score>bestScore){bestScore=score;best=cand;}
+    }
+    if(bestScore>=0.82){
+      for(const r of ALLOWED_REASONS){if(r===best|| (REASON_ALIASES[r]||[]).includes(best)) return r;}
+      const compactBest=reasonCompact(best);
+      const hit=ALLOWED_REASONS.find(r=>reasonCompact(r)===compactBest); if(hit)return hit;
+    }
     return '';
   }
   function extractReasonStrict(text){
@@ -472,7 +495,7 @@
     return `${yyyy}-${mm}-${dd}`;
   }
   function consensusString(values, minVotes=2){const m=uniqueVote(values.filter(Boolean));return m&&m.votes>=minVotes?m.value:'';}
-  if(isNode){module.exports={ALLOWED_REASONS,compact,similarity,normalizeHexLoose,normalizeIdToken,canonicalReason,parseTargetId,parseReason,extractBanEvent,extractScOrdered,extractScCandidatesFromString,extractHexCandidateAnyText,consensusHex,extractServerFromOcr,extractDate,serverVote,dateVote,clampId,validDate,dateFromFilename};return;}
+  if(isNode){module.exports={ALLOWED_REASONS,compact,similarity,normalizeHexLoose,normalizeIdToken,canonicalReason,reasonOcrNormalize,reasonCompact,classifyReasonStrong,extractReasonStrict,parseTargetId,parseReason,extractBanEvent,extractScOrdered,extractScCandidatesFromString,extractHexCandidateAnyText,consensusHex,extractServerFromOcr,extractDate,serverVote,dateVote,clampId,validDate,dateFromFilename};return;}
 
   const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
   const state={entries:[],queue:[],filter:'all',editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:localStorage.getItem('yt_access_token')||sessionStorage.getItem('yt_access_token')||'',tokenClient:null,clientId:localStorage.getItem('yt_client_id')||'',settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,localFallbackRunner:false,youtubeUploadBlocked:false,tokenExpiresAt:Number(localStorage.getItem('yt_access_expires_at_v50')||0),tokenRefreshPromise:null};
@@ -976,12 +999,12 @@
   const REASON_ROI={x:0.00,y:0.00,w:0.82,h:0.60};
   async function readReasonDirect(worker,video){
     const crop=makeCrop(video,REASON_ROI.x,REASON_ROI.y,REASON_ROI.w,REASON_ROI.h,3.25);
-    const texts=[];let best='';
+    const texts=[];const votes=new Map();
     try{
       const imgs=[
         [orangeMask(crop),6],[grayCanvas(enhancedCanvas(crop,1.60,1.04)),6],
         [grayCanvas(enhancedCanvas(crop,1.90,1.05)),11],[threshold(crop,150),11],
-        [threshold(crop,175),12]
+        [threshold(crop,175),12],[enhancedCanvas(crop,2.10,1.07),7]
       ];
       for(const [img,psm] of imgs){
         try{
@@ -989,11 +1012,12 @@
           const txt=cleanText(r?.text||'');
           if(txt)texts.push(txt);
           const rr=extractReasonStrict(txt)||parseReason(txt);
-          if(rr){best=rr;break;}
+          if(rr)votes.set(rr,(votes.get(rr)||0)+1);
         }catch{} finally{clearCanvas(img);}
       }
       const merged=[...new Set(texts)].join('\n');
-      return {reason:best||extractReasonStrict(merged)||parseReason(merged),text:merged};
+      const voteBest=[...votes.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]||'';
+      return {reason:voteBest||extractReasonStrict(merged)||parseReason(merged),text:merged};
     }finally{clearCanvas(crop);}
   }
   async function readBanOnly(worker,video){
@@ -1293,7 +1317,8 @@
     const missing=new Set(Array.isArray(r.missing)?r.missing:[]);
     const uiTarget=clampId($('#targetId')?.value||r.targetId||'');
     const rawReason=String($('#reason')?.value||r.reason||'').trim();
-    const uiReason=ALLOWED_REASONS.includes(rawReason)?rawReason:(classifyReasonStrong(rawReason)||canonicalReason(rawReason)?.value||'');
+    const normalizedUiReason=String(rawReason||'').trim();
+    const uiReason=ALLOWED_REASONS.includes(normalizedUiReason)?normalizedUiReason:(classifyReasonStrong(normalizedUiReason)||canonicalReason(normalizedUiReason)?.value||'');
     const uiSc=normalizeHexLoose($('#sc')?.value||r.sc||'');
     const statuses=[
       ['ID','Ziel-ID',/^\d{1,6}$/.test(uiTarget)],

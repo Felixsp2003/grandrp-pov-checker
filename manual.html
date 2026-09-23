@@ -74,25 +74,36 @@
   function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
   function normalizeHexLoose(s){return String(s||'').toUpperCase().replace(/[OoQq]/g,'0').replace(/[IiLl|!]/g,'1').replace(/[Ss$]/g,'5').replace(/[Gg]/g,'6').replace(/[Zz]/g,'2').replace(/[Tt]/g,'7').replace(/[^0-9A-F]/g,'').toLowerCase();}
   function extractDate(text){const m=String(text||'').match(/\b(0?[1-9]|[12]\d|3[01])[\/\.\-](0?[1-9]|1[0-2])[\/\.\-](20\d{2})\b/);if(!m)return '';return `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;}
+  function lev(a,b){a=String(a);b=String(b);const p=Array.from({length:b.length+1},(_,i)=>i);for(let i=1;i<=a.length;i++){const c=[i];for(let j=1;j<=b.length;j++)c[j]=Math.min(c[j-1]+1,p[j]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p.splice(0,p.length,...c)}return p[b.length]}
+  function compactReason(s){return String(s||'').toLowerCase().replace(/[°º¤]/g,'p').replace(/[‐‑‒–—]/g,'-').replace(/[|¦]/g,'i').replace(/yerweigerung/g,'verweigerung').replace(/verweigerunq/g,'verweigerung').replace(/(?:po|0|o|c)[\s\-_]*check/g,'pc check').replace(/pchek/g,'pc check').replace(/pcchec/g,'pc check').replace(/0/g,'o').replace(/5/g,'s').replace(/9/g,'g').replace(/4\s*[.,\-_ ]*\s*[il]/g,'41').replace(/\s+/g,'').replace(/[^a-z0-9]/g,'')}
+  function reasonScore(a,b){const aa=compactReason(a),bb=compactReason(b);if(!aa||!bb)return 0;return 1-lev(aa,bb)/Math.max(aa.length,bb.length)}
   function reasonFromText(text){
-    const c=String(text||'').toLowerCase().replace(/[‐‑‒–—]/g,'-').replace(/[|¦]/g,'i')
-      .replace(/0/g,'o').replace(/5/g,'s').replace(/9/g,'g').replace(/4\s*[.,\-_ ]*\s*[il]/g,'41')
-      .replace(/\s+/g,'').replace(/[^a-z0-9]/g,'');
-    if(!c)return '';
-    const pc=/pccheck|pcche|pcck|pchek/.test(c), ver=/verweig|verweiger|weiger|refus|reject/.test(c), troll=/troll|trol/.test(c), pos=/posit|posiv/.test(c);
-    const dc=/discord|discor/.test(c), redux=/redux|reduc/.test(c), clean=/clean|cleaning/.test(c), bane=/banevad|banvad/.test(c), cover=/covering|cheater/.test(c), nopov=/nopov|nop0v/.test(c);
-    if((pc||ver)&&ver&&troll)return 'PC-Check Verweigerung - Trolling';
-    if(pos&&dc&&/41|4l|4i/.test(c))return 'PC-Check Positiv 4.1 (Discord)';
-    if(pos&&redux&&/41|4l|4i/.test(c))return 'PC-Check Positiv 4.1 (Redux)';
+    const raw=String(text||'');
+    const lines=raw.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    const pieces=[];
+    for(const line of lines){
+      const gm=line.match(/(?:grund|grun[dti]|gru[nm]d)\s*[:.\-]?\s*(.*)$/i); if(gm?.[1])pieces.push(gm[1]);
+      pieces.push(line);
+    }
+    const AL=ALLOWED;
+    const direct=pieces.map(compactReason).join(' ');
+    const n=direct;
+    const pc=/pccheck|pchek|pcchec|pcheck/.test(n), ver=/verweig|weiger|refus|reject/.test(n), troll=/troll/.test(n), pos=/posit|posiv/.test(n);
+    const dc=/discord/.test(n), redux=/redux/.test(n), clean=/cleaning|clean/.test(n), bane=/banevad|banvad/.test(n), cover=/covering|cheater/.test(n), nopov=/nopov|no[pv]ov/.test(n), has41=/(41|4i|4l)/.test(n);
+    if((pc&&ver&&troll)||(troll&&n.includes('pccheck'))||/trollinginpc/.test(n))return 'PC-Check Verweigerung - Trolling';
+    if(pos&&dc&&has41)return 'PC-Check Positiv 4.1 (Discord)';
+    if(pos&&redux&&has41)return 'PC-Check Positiv 4.1 (Redux)';
     if(pos&&bane)return 'PC Check Positiv (Banevading)';
     if(pos&&cover)return 'PC Check Positiv (Covering Cheater)';
     if(pos&&clean)return 'PC-Check Positiv - Cleaning';
-    if(/event17/.test(c)&&nopov)return 'Event 1.7 (NoPov in PC Check)';
+    if(/event17/.test(n)&&nopov)return 'Event 1.7 (NoPov in PC Check)';
     if(pos)return 'PC-Check Positiv';
     if(ver)return 'PC-Check Verweigerung';
-    if(/acc14twink/.test(c))return 'Acc 1.4 (Twink)';
-    if(/acc14main/.test(c)||/^acc14$/.test(c))return 'Acc 1.4 (Main)';
-    return '';
+    if(/acc14twink/.test(n))return 'Acc 1.4 (Twink)';
+    if(/acc14main/.test(n)||n==='acc14')return 'Acc 1.4 (Main)';
+    let best='',score=0;
+    for(const r of AL){const sc=reasonScore(raw,r);if(sc>score){score=sc;best=r;}}
+    return score>=0.78?best:'';
   }
   function fieldLabel(){const map={sc:'SC / RID',server:'Server',targetId:'Ziel-ID',reason:'Grund',date:'Datum',discordId:'Discord ID',view:'POV ansehen'};return map[field]||field}
   function syncCanvas(){const r=video.getBoundingClientRect();overlay.width=Math.max(1,Math.round(r.width));overlay.height=Math.max(1,Math.round(r.height));overlay.style.width=r.width+'px';overlay.style.height=r.height+'px';draw()}
@@ -113,7 +124,7 @@
   function fieldConfig(){
     return {
       targetId:{psm:[7,8,11], whitelist:'0123456789[]()ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz', label:'Ziel-ID / Bannzeile'},
-      reason:{psm:[6,7,11,12], whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789().- ', label:'Grund'},
+      reason:{psm:[6,7,11,12,13], whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789().-° ', label:'Grund'},
       sc:{psm:[7,8,11], whitelist:'0123456789ABCDEFabcdef:.- ', label:'SC / RID'},
       date:{psm:[7,8,11], whitelist:'0123456789./- ', label:'Datum'},
       discordId:{psm:[7,8,11], whitelist:'0123456789 ', label:'Discord ID'}
@@ -145,7 +156,7 @@
     try{
       const sx=selection.x/overlay.clientWidth*video.videoWidth, sy=selection.y/overlay.clientHeight*video.videoHeight, sw=selection.w/overlay.clientWidth*video.videoWidth, sh=selection.h/overlay.clientHeight*video.videoHeight;
       const base=document.createElement('canvas');base.width=Math.max(20,Math.min(5000,Math.round(sw*4)));base.height=Math.max(20,Math.min(5000,Math.round(sh*4)));const octx=base.getContext('2d');octx.imageSmoothingEnabled=true;octx.filter='contrast(1.35) saturate(.9)';octx.drawImage(video,sx,sy,sw,sh,0,0,base.width,base.height);canvases.push(base);
-      const variants=[base,gray(base),thresh(base,135),thresh(base,175)];canvases.push(...variants.slice(1));
+      const variants=[base,gray(base),thresh(base,125),thresh(base,145),thresh(base,165),thresh(base,185)];canvases.push(...variants.slice(1));
       const texts=[];
       for(const img of variants){for(const psm of cfg.psm){
         try{const res=await Tesseract.recognize(img,'eng',{config:{tessedit_pageseg_mode:String(psm),tessedit_char_whitelist:cfg.whitelist,preserve_interword_spaces:'1'},logger:m=>{if(m.status&&m.progress)setStatus(`${cfg.label}: ${Math.round(m.progress*100)}% · ${m.status}`)}});const t=(res.data.text||'').trim();if(t)texts.push(t);}catch{}
@@ -157,7 +168,7 @@
         value=extractTargetFromBanner(joined);
       }else if(field==='reason'){
         const lines=joined.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
-        const reasonText=lines.filter(x=>/grund|pc[ -]?check|verweig|posit|cheat|acc|event|troll|discord|redux|clean|banevading|covering|nopov/i.test(x)).join(' ') || joined;
+        const reasonText=[...lines.filter(x=>/grund|pc[ -]?check|verweig|yerweig|posit|cheat|acc|event|troll|discord|redux|clean|banevading|covering|nopov/i.test(x)),joined].join(' ');
         const r=reasonFromText(reasonText);value=r||'';
       }else if(field==='sc'){
         const ipLike=joined.match(/(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{0,4}/ig)||[];const normalized=String(joined||'').toUpperCase().replace(/[OoQq]/g,'0').replace(/[IiLl|!]/g,'1').replace(/[Ss$]/g,'5').replace(/[Gg]/g,'6').replace(/[Zz]/g,'2').replace(/[Tt]/g,'7').replace(/[^0-9A-F]/g,'').toLowerCase();const candidates=normalized.match(/[0-9a-f]{40}/g)||[];value='';if(ipLike.length){const ip=ipLike[ipLike.length-1].replace(/[^0-9A-F]/gi,'').toLowerCase();const pos=normalized.lastIndexOf(ip);if(pos>=0){const after=normalized.slice(pos+ip.length);const m=after.match(/^[0-9a-f]{40}/);value=m?m[0]:'';}}if(!value&&candidates.length===1)value=candidates[0];}
@@ -169,7 +180,7 @@
   }
   $('#ocr').onclick=runOcr;
   $('#use').onclick=()=>{let v=manual.value.trim();if(field==='server')v=(v.match(/[1-4]/)||['3'])[0];if(field==='sc')v=normalizeHexLoose(v);if(field==='date')v=extractDate(v)||v;if(field==='targetId'){v=normId(v);}if(field==='reason'){v=reasonFromText(v)||v;}if(!v&&field!=='server'){setStatus('Kein Wert vorhanden.','warn');return}if(field==='sc'&&v.length!==40){setStatus('SC muss nach der Bereinigung 40 Zeichen haben.','warn');return}if(field==='targetId'&&!(Number(v)>=0&&Number(v)<=999999)){setStatus('Ziel-ID darf höchstens 6 Ziffern haben.','warn');return}if(window.opener&&!window.opener.closed){window.opener.postMessage({type:'grandrp-manual-field',field,value:v,time:Number(video.currentTime)||0},location.origin);setStatus('Übernommen. Du kannst diesen Tab schließen.','good')}else{setStatus('Ursprungsfenster nicht mehr geöffnet.','warn')}};
-  $('#serverButtons').classList.toggle('hidden',field!=='server'); fieldTitle.textContent=`Feld: ${fieldLabel()}`; document.title=`Grand RP · ${fieldLabel()} · V82`;
+  $('#serverButtons').classList.toggle('hidden',field!=='server'); fieldTitle.textContent=`Feld: ${fieldLabel()}`; document.title=`Grand RP · ${fieldLabel()} · V83`;
   (async()=>{if(!job){setStatus('Keine POV-ID angegeben.','warn');return;}try{file=await getVideo(job);if(!file){setStatus('POV-Datei nicht gefunden. Bitte zuerst im Hauptfenster neu hochladen.','warn');return;}video.src=URL.createObjectURL(file);$('#meta').textContent=`${file.name} · ${formatSize(file.size)} · Original unverändert`;if(field==='server'){serverButtons.classList.remove('hidden');manual.value='3';setStatus('Server 3 ist voreingestellt. Bei Bedarf einen anderen Wert wählen.','good');}}catch(err){setStatus('POV konnte nicht geladen werden: '+err.message,'warn')}})();
 })();
 </script>
