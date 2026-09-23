@@ -37,7 +37,7 @@
     <header class="topbar">
       <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V88</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V89</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -102,18 +102,23 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V88</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V89</span></div>
           <p class="hint">POVs bis 2 Minuten werden vollständig in 250-ms-Schritten durchsucht. Längere Videos werden adaptiv gescannt und bei Treffern verdichtet. Das Info-Foto kommt aus einem verifizierten Bann-Cluster; der Bannblock wird für das Info-Foto bevorzugt in den letzten 5 Sekunden verifiziert. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
           <label>Präzisionsschritt (Sekunden)<input id="refineStep" type="number" min="0.4" max="1" step="0.1" value="0.5"></label>
-          <div class="setting-note">V88: BannGrund wird nach erkannter Ziel-ID direkt aus dem Grand-RP-Adminpanel übernommen (2,5 s Ladezeit); einheitlicher kompletter Chat-ROI links oben, Priorität auf den letzten 5 Sekunden, strikter Bannblock mit Adam Byers [15340], Datum automatisch aus dem Dateinamen, SC ausschließlich über ACP/Chrome. </div>
+          <div class="setting-note">V89: 3 YouTube-Verbindungen + BannGrund wird nach erkannter Ziel-ID direkt aus dem Grand-RP-Adminpanel übernommen (2,5 s Ladezeit); einheitlicher kompletter Chat-ROI links oben, Priorität auf den letzten 5 Sekunden, strikter Bannblock mit Adam Byers [15340], Datum automatisch aus dem Dateinamen, SC ausschließlich über ACP/Chrome. </div>
         </div>
-        <div class="settings-card">
-          <div class="card-title">YouTube-Verbindung <span id="ytStatus" class="connection">● Nicht verbunden</span></div>
-          <p class="hint">Die POV wird zuerst vollständig zu YouTube hochgeladen (nicht gelistet). Erst danach startet die OCR. Nach dem Prüfen wird der YouTube-Titel auf den finalen Dateinamen aktualisiert.</p>
-          <label>Google OAuth Client ID<input id="clientId" placeholder="...apps.googleusercontent.com" autocomplete="off" oninput="localStorage.setItem('yt_client_id', this.value.trim())"></label>
-          <div class="settings-actions"><a class="pink yt-link" id="connectYoutube" href="#" onclick="return grandrpPrepareYouTubeAuth(false)">Mit YouTube verbinden</a><a class="ghost yt-link" id="reauthorizeYoutube" href="#" onclick="return grandrpPrepareYouTubeAuth(true)">Berechtigung erneut</a><button type="button" class="ghost" id="disconnectYoutube" onclick="grandrpDisconnectYouTube()">Verbindung entfernen</button></div><div id="ytConnectHelp" class="hint" style="margin-top:10px"></div><div class="setting-note" style="margin-top:10px"><b>OAuth-Weiterleitung:</b> <code id="ytRedirectUriText"></code><br><span>Diese URL einmal in Google Cloud unter „Autorisierte Weiterleitungs-URIs“ eintragen.</span></div>
+        <div class="settings-card yt-settings-card">
+          <div class="card-title">YouTube-Verbindungen <span class="badge">3 Slots</span></div>
+          <p class="hint">Bis zu drei YouTube-Verbindungen können hinterlegt werden. Ist eine Verbindung wegen Uploadlimit/Quota voll, wird automatisch die nächste verfügbare Verbindung verwendet. Sind alle gesperrt, bleibt die POV in der Warteschlange und wird später automatisch erneut versucht. Leere Client-ID-Felder werden vollständig ignoriert.</p>
+          <div class="yt-connection-grid">
+            <div class="yt-connection-card"><div class="yt-connection-head"><strong>YouTube-Verbindung 1</strong><span id="ytStatus1" class="connection">● Nicht verbunden</span></div><label>Google OAuth Client-ID<input id="ytClientId1" placeholder="...apps.googleusercontent.com" autocomplete="off"></label><div class="settings-actions"><button type="button" class="pink" id="ytConnect1">Mit YouTube verbinden</button><button type="button" class="ghost" id="ytReauth1">Berechtigung erneut</button><button type="button" class="ghost" id="ytDisconnect1">Trennen</button></div><div id="ytHelp1" class="hint yt-help"></div></div>
+            <div class="yt-connection-card"><div class="yt-connection-head"><strong>YouTube-Verbindung 2</strong><span id="ytStatus2" class="connection">● Nicht verbunden</span></div><label>Google OAuth Client-ID<input id="ytClientId2" placeholder="...apps.googleusercontent.com" autocomplete="off"></label><div class="settings-actions"><button type="button" class="pink" id="ytConnect2">Mit YouTube verbinden</button><button type="button" class="ghost" id="ytReauth2">Berechtigung erneut</button><button type="button" class="ghost" id="ytDisconnect2">Trennen</button></div><div id="ytHelp2" class="hint yt-help"></div></div>
+            <div class="yt-connection-card"><div class="yt-connection-head"><strong>YouTube-Verbindung 3</strong><span id="ytStatus3" class="connection">● Nicht verbunden</span></div><label>Google OAuth Client-ID<input id="ytClientId3" placeholder="...apps.googleusercontent.com" autocomplete="off"></label><div class="settings-actions"><button type="button" class="pink" id="ytConnect3">Mit YouTube verbinden</button><button type="button" class="ghost" id="ytReauth3">Berechtigung erneut</button><button type="button" class="ghost" id="ytDisconnect3">Trennen</button></div><div id="ytHelp3" class="hint yt-help"></div></div>
+          </div>
+          <div id="ytConnectHelp" class="hint" style="margin-top:10px"></div>
+          <div class="setting-note" style="margin-top:10px"><b>OAuth-Weiterleitung:</b> <code id="ytRedirectUriText"></code><br><span>Diese URL einmal in Google Cloud unter „Autorisierte Weiterleitungs-URIs“ eintragen. Jede Verbindung kann ein anderes Google-Konto verwenden.</span></div>
         </div>
         <div class="settings-card">
           <div class="card-title">Browser / Chrome ACP</div><p class="hint">Für SC und BannGrund wird Chrome mit dem Grand-RP-Adminpanel verwendet. Die Begleit-Erweiterung wartet auf die geladenen Daten und übernimmt Social Club sowie BannGrund zur Ziel-ID.</p><div class="setting-note">ACP-Erkennung: SC bis zu 30 Sekunden; BannGrund mit mindestens 2,5 Sekunden Ladezeit vor dem Auslesen des roten Bannbereichs.</div>
@@ -183,74 +188,13 @@
 <script>
 (function(){
   'use strict';
-  const CLIENT_KEY='yt_client_id';
-  const TOKEN_KEY='yt_access_token';
-  const STATE_KEY='grandrp_oauth_state_v51';
-  const SCOPE_KEY='grandrp_yt_scope_v51';
-  const YT_SCOPES='https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl';
-  const RESULT_KEY='grandrp_oauth_result_v51';
-  const EXPIRES_KEY='yt_access_expires_at_v50';
   function callbackUrl(){ return new URL('oauth-callback.html', location.href).href; }
-  function validClientId(id){ return /^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(String(id||'').trim()); }
-  function state(){
-    const bytes=new Uint8Array(24); crypto.getRandomValues(bytes);
-    return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
-  }
-  function show(text,color){ const el=document.getElementById('ytConnectHelp'); if(el){el.textContent=text;el.style.color=color||'';} }
-  function startAuth(forceConsent){
-    try{
-      const id=String(document.getElementById('clientId')?.value||localStorage.getItem(CLIENT_KEY)||'').trim();
-      if(!id) throw new Error('Bitte zuerst die Google OAuth Client-ID eintragen.');
-      if(!validClientId(id)) throw new Error('Die Google OAuth Client-ID hat kein gültiges Format.');
-      localStorage.setItem(CLIENT_KEY,id);
-      const s=state();
-      // Persist across the Google round-trip even if the browser recreates the tab context.
-      localStorage.setItem(STATE_KEY,s);
-      sessionStorage.setItem(STATE_KEY,s);
-      localStorage.removeItem(RESULT_KEY);
-      sessionStorage.removeItem(RESULT_KEY);
-      const params=new URLSearchParams({
-        client_id:id,
-        redirect_uri:callbackUrl(),
-        response_type:'token',
-        scope:YT_SCOPES,
-        include_granted_scopes:'true',
-        state:s
-      });
-      if(forceConsent) params.set('prompt','consent');
-      show('Google wird geöffnet…');
-      // Direct navigation from the user click. No popup and no async operation.
-      window.location.href='https://accounts.google.com/o/oauth2/v2/auth?'+params.toString();
-      return false;
-    }catch(err){
-      show(err.message||String(err),'#ff8ebd');
-      return false;
-    }
-  }
-  window.grandrpPrepareYouTubeAuth=function(forceConsent){ return startAuth(!!forceConsent); };
-  window.grandrpDisconnectYouTube=function(){
-    localStorage.removeItem(TOKEN_KEY);sessionStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(STATE_KEY);sessionStorage.removeItem(STATE_KEY);
-    localStorage.removeItem(RESULT_KEY);sessionStorage.removeItem(RESULT_KEY);
-    const status=document.getElementById('ytStatus'); if(status){status.textContent='● Nicht verbunden';status.style.color='#7f7488';}
-    show('YouTube-Verbindung entfernt.');
-  };
+  const uri=callbackUrl();
   window.addEventListener('DOMContentLoaded',function(){
-    const input=document.getElementById('clientId');
-    if(input){input.value=localStorage.getItem(CLIENT_KEY)||''; input.addEventListener('input',()=>localStorage.setItem(CLIENT_KEY,input.value.trim()));}
-    const uri=document.getElementById('ytRedirectUriText'); if(uri) uri.textContent=callbackUrl();
-    const status=document.getElementById('ytStatus');
-    const scopeReady=localStorage.getItem(SCOPE_KEY)==='1';
-    const token=scopeReady?(localStorage.getItem(TOKEN_KEY)||sessionStorage.getItem(TOKEN_KEY)||''):'';
-    if(!scopeReady){localStorage.removeItem(TOKEN_KEY);sessionStorage.removeItem(TOKEN_KEY);}
-    if(token){sessionStorage.setItem(TOKEN_KEY,token); if(status){status.textContent='● Verbunden';status.style.color='#69e1af';}}
-    const resultRaw=localStorage.getItem(RESULT_KEY)||sessionStorage.getItem(RESULT_KEY)||'';
-    if(resultRaw){try{const data=JSON.parse(resultRaw);show(data.message||'',data.ok?'#69e1af':'#ff8ebd'); if(data.ok)localStorage.removeItem(RESULT_KEY); sessionStorage.removeItem(RESULT_KEY);}catch{}}
-    const connect=document.getElementById('connectYoutube'); const reauth=document.getElementById('reauthorizeYoutube');
-    if(connect) connect.href='#'; if(reauth) reauth.href='#';
+    const out=document.getElementById('ytRedirectUriText'); if(out) out.textContent=uri;
   });
 })();
 </script>
-<script src="app.js?v=87"></script>
+<script src="app.js?v=89"></script>
 </body>
 </html>
