@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V84';
+  const BUILD='V85';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -1444,12 +1444,13 @@
   window.addEventListener('message',e=>{if(e.data?.type==='grandrp-manual-field'){applyManualField(e.data.field,e.data.value,e.data.time);}});
 
   const ACP_ORIGIN='https://admin.gta5grand.com';
-  const ACP_EXTENSION_TOKEN='grandrp-acp-v64';
+  const ACP_EXTENSION_TOKEN='grandrp-acp-v85';
   let acpWindow=null;
   let acpTimeout=null;
   function buildAcpUrl(characterId){
     const id=String(characterId||'').replace(/\D/g,'');
-    return `${ACP_ORIGIN}/de/3/logs/authorization?nick=&characterid=${encodeURIComponent(id)}&ip=&socialname=&socialid=&date=&subdate=`;
+    const nonce=(crypto.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    return `${ACP_ORIGIN}/de/3/logs/authorization?nick=&characterid=${encodeURIComponent(id)}&ip=&socialname=&socialid=&date=&subdate=&grandrpBridge=1&bridgeToken=${encodeURIComponent(nonce)}`;
   }
   function setScValueFromAcp(sc,characterId){
     const value=normalizeHexLoose(sc);
@@ -1469,7 +1470,7 @@
     const url=buildAcpUrl(id);
     renderAcpStatus('ACP wird in Chrome geöffnet · Lade Daten …');
     try{
-      acpWindow=window.open(url,'grandrp-acp');
+      acpWindow=window.open(url,'_blank');
       if(!acpWindow){renderAcpStatus('Popup blockiert · bitte Popups für den Checker erlauben.','error');toast('Chrome-ACP konnte wegen Popup-Blockierung nicht geöffnet werden.');return;}
       const started=Date.now();
       clearTimeout(acpTimeout);
