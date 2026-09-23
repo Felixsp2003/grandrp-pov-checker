@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V86';
+  const BUILD='V88';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -1498,8 +1498,8 @@
     const date=formatDateDE($('#date').value);
     $('#titlePreview').value=(id&&reason&&date)?`${id}, ${reason}, ${date}.mp4`:'';
   }
-  function openEditor(item){state.editing={item};$('#modalFile').textContent=item.finalName||item.file.name;setEditorValues({...item.result,proof:item.result?.proof||'',perma:!!item.result?.perma,permaArchive:!!item.result?.permaArchive,notBanned:!!item.result?.notBanned});state.selectedTypes=new Set(item.result?.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus(item);$('#editorModal').classList.remove('hidden');loadEditorPreview(item.file,item.result?.timestamps?.banner||0);showInfoPhoto('banner');renderAcpStatus(item.result?.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',item.result?.sc?'ok':'warn');if(!item.result?.sc&&/^\d{1,6}$/.test(item.result?.targetId||'')){setTimeout(()=>{try{openAcpForCurrentId();}catch{}},350);}}
-  async function openEditorFromEntry(entry){const file=entry.file||await getVideo(entry.id);if(file)entry.file=file;state.editing={entry};$('#modalFile').textContent=entry.finalName||entry.originalName;setEditorValues(entry);state.selectedTypes=new Set(entry.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus({result:entry});$('#editorModal').classList.remove('hidden');loadEditorPreview(entry.file,entry.timestamps?.banner||0);showInfoPhoto('banner');renderAcpStatus(entry.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',entry.sc?'ok':'warn');}
+  function openEditor(item){state.editing={item};$('#modalFile').textContent=item.finalName||item.file.name;setEditorValues({...item.result,proof:item.result?.proof||'',perma:!!item.result?.perma,permaArchive:!!item.result?.permaArchive,notBanned:!!item.result?.notBanned});state.selectedTypes=new Set(item.result?.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus(item);$('#editorModal').classList.remove('hidden');loadEditorPreview(item.file,item.result?.timestamps?.banner||0);showInfoPhoto('banner');renderAcpStatus(item.result?.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',item.result?.sc?'ok':'warn');if(!item.result?.sc&&/^\d{1,6}$/.test(item.result?.targetId||'')){setTimeout(()=>{try{openAcpForCurrentId();}catch{}},350);}if(/^\d{1,6}$/.test(item.result?.targetId||'')){setTimeout(()=>{try{openAcpReasonForCurrentId();}catch{}},450);}}
+  async function openEditorFromEntry(entry){const file=entry.file||await getVideo(entry.id);if(file)entry.file=file;state.editing={entry};$('#modalFile').textContent=entry.finalName||entry.originalName;setEditorValues(entry);state.selectedTypes=new Set(entry.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus({result:entry});$('#editorModal').classList.remove('hidden');loadEditorPreview(entry.file,entry.timestamps?.banner||0);showInfoPhoto('banner');renderAcpStatus(entry.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',entry.sc?'ok':'warn');if(/^\d{1,6}$/.test(entry.targetId||'')){setTimeout(()=>{try{openAcpReasonForCurrentId();}catch{}},450);}}
   function closeEditor(){revokeEditorPreview();state.editing=null;$('#editorModal').classList.add('hidden');}
   async function saveEditor(e){
     e.preventDefault(); const ctx=state.editing; if(!ctx)return;
@@ -1559,7 +1559,7 @@
   window.addEventListener('message',e=>{if(e.data?.type==='grandrp-manual-field'){applyManualField(e.data.field,e.data.value,e.data.time);}});
 
   const ACP_ORIGIN='https://admin.gta5grand.com';
-  const ACP_EXTENSION_TOKEN='grandrp-acp-v85';
+  const ACP_EXTENSION_TOKEN='grandrp-acp-v86';
   let acpWindow=null;
   let acpTimeout=null;
   function buildAcpUrl(characterId){
@@ -1576,6 +1576,45 @@
     showInfoPhoto('banner');
     toast('SC aus Adminpanel übernommen. SOC wird damit gefüllt.');
     return true;
+  }
+  let acpReasonWindow=null;
+  let acpReasonTimeout=null;
+  function buildAcpReasonUrl(characterId){
+    const id=String(characterId||'').replace(/\D/g,'');
+    const nonce=(crypto.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    return `${ACP_ORIGIN}/de/3/character/info/${encodeURIComponent(id)}?grandrpBridge=1&bridgeMode=reason&bridgeToken=${encodeURIComponent(nonce)}`;
+  }
+  function setReasonValueFromAcp(reason,characterId){
+    const raw=String(reason||'').replace(/\s+/g,' ').trim();
+    if(!raw)return false;
+    const canonical=canonicalReason(raw)?.value||raw;
+    const allowed=ALLOWED_REASONS.includes(canonical);
+    if(allowed) $('#reason').value=canonical;
+    applyReasonPermaPolicy(canonical,false);
+    renderTitlePreview();
+    setFieldStatus({result:{targetId:characterId,reason:canonical}});
+    const status=$('#reasonStatus');
+    if(status){
+      status.textContent=allowed?`✓ BannGrund aus Adminpanel übernommen · ID ${characterId}`:`BannGrund aus Adminpanel gelesen: ${raw}`;
+      status.className='acp-status '+(allowed?'ok':'warn');
+    }
+    if(allowed) toast(`BannGrund aus Adminpanel übernommen: ${canonical}`);
+    else toast(`BannGrund gelesen, aber nicht in der erlaubten Grund-Liste: ${raw}`);
+    return allowed;
+  }
+  function closeAcpReasonWindow(){clearTimeout(acpReasonTimeout);try{if(acpReasonWindow&&!acpReasonWindow.closed)acpReasonWindow.close();}catch{}acpReasonWindow=null;}
+  function openAcpReasonForCurrentId(){
+    const id=clampId($('#targetId')?.value||'');
+    if(!/^\d{1,6}$/.test(id))return;
+    const url=buildAcpReasonUrl(id);
+    const status=$('#reasonStatus');
+    if(status){status.textContent=`Adminpanel lädt BannGrund für ID ${id} … (2,5 s)`;status.className='acp-status warn';}
+    try{
+      acpReasonWindow=window.open(url,'_blank');
+      if(!acpReasonWindow){if(status){status.textContent='Popup blockiert · BannGrund konnte nicht geladen werden.';status.className='acp-status error';}return;}
+      clearTimeout(acpReasonTimeout);
+      acpReasonTimeout=setTimeout(()=>{if(status){status.textContent='Kein BannGrund im Adminpanel gefunden.';status.className='acp-status warn';}closeAcpReasonWindow();},45000);
+    }catch(err){console.error(err);if(status){status.textContent='Adminpanel für BannGrund konnte nicht geöffnet werden.';status.className='acp-status error';}}
   }
   function renderAcpStatus(text,kind=''){const el=$('#acpStatus');if(!el)return;el.textContent=text;el.className=`acp-status ${kind}`;}
   function closeAcpWindow(){clearTimeout(acpTimeout);try{if(acpWindow&&!acpWindow.closed)acpWindow.close();}catch{}acpWindow=null;}
@@ -1604,6 +1643,7 @@
       }
     }
     if(e.data.type==='GRANDRP_ACP_ERROR'){clearTimeout(acpTimeout);renderAcpStatus(String(e.data.message||'SC im ACP nicht gefunden · Fenster wird geschlossen.'),'error');toast('ACP konnte den SC für die Ziel-ID nicht finden.');closeAcpWindow();}
+    if(e.data.type==='GRANDRP_ACP_REASON'){const id=String(e.data.characterId||'');const reason=String(e.data.reason||'');clearTimeout(acpReasonTimeout);if(id&&id===clampId($('#targetId')?.value||'')){setReasonValueFromAcp(reason,id);closeAcpReasonWindow();}}
   });
 
   function rebuildPcCheckerOptions(selected=[]){

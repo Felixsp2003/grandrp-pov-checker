@@ -1,11 +1,8 @@
-GrandRP DC Checker – V87 (Webseite)
+Grand RP DC Checker V88
 
-Neu in V87:
-- Die Verarbeitungswarteschlange wird lokal in localStorage und IndexedDB gespeichert.
-- POV-Dateien werden beim Hinzufügen sofort in IndexedDB gesichert.
-- Nach einer Seitenaktualisierung werden die Warteschlangen-Einträge mitsamt Datei wiederhergestellt.
-- Angefangene Uploads ohne fertige YouTube-ID werden nach dem Reload erneut aufgenommen.
-- Bereits auf YouTube hochgeladene POVs können die OCR nach einem Reload fortsetzen.
-- Gespeicherte/geprüfte POVs bleiben im Archiv und werden aus der Warteschlange entfernt.
-
-Die Chrome-Extension ACP-v85 ist nicht enthalten und wurde nicht verändert.
+Änderungen:
+- BannGrund wird nach erkannter Ziel-ID automatisch aus dem Grand-RP-Adminpanel /de/3/character/info/{ID} gelesen.
+- Vor dem Auslesen wartet die ACP-Bridge 2,5 Sekunden auf das Laden der Character-Info.
+- Der aus dem roten Bannbereich gelesene Grund wird in das Grund-Feld übernommen und auf die erlaubte Grund-Liste normalisiert.
+- ACP Bridge auf V86 angehoben; SC aus Authorization Logs bleibt erhalten.
+- Warteschlange bleibt nach Seitenaktualisierung erhalten.
