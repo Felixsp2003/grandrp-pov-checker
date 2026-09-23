@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=83">
+<link rel="stylesheet" href="styles.css?v=84">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -37,7 +37,7 @@
     <header class="topbar">
       <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V83</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V84</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -102,12 +102,12 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V83</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V84</span></div>
           <p class="hint">POVs bis 2 Minuten werden vollständig in 250-ms-Schritten durchsucht. Längere Videos werden adaptiv gescannt und bei Treffern verdichtet. Das Info-Foto kommt aus einem verifizierten Bann-Cluster; der Bannblock wird für das Info-Foto bevorzugt in den letzten 5 Sekunden verifiziert. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
           <label>Präzisionsschritt (Sekunden)<input id="refineStep" type="number" min="0.4" max="1" step="0.1" value="0.5"></label>
-          <div class="setting-note">V83: Reason-OCR neu aufgebaut: einheitlicher kompletter Chat-ROI links oben, Priorität auf den letzten 5 Sekunden, strikter Bannblock mit Adam Byers [15340], Datum automatisch aus dem Dateinamen, SC ausschließlich über ACP/Chrome. </div>
+          <div class="setting-note">V84: Reason-OCR neu aufgebaut: einheitlicher kompletter Chat-ROI links oben, Priorität auf den letzten 5 Sekunden, strikter Bannblock mit Adam Byers [15340], Datum automatisch aus dem Dateinamen, SC ausschließlich über ACP/Chrome. </div>
         </div>
         <div class="settings-card">
           <div class="card-title">YouTube-Verbindung <span id="ytStatus" class="connection">● Nicht verbunden</span></div>
@@ -251,6 +251,6 @@
   });
 })();
 </script>
-<script src="app.js?v=83"></script>
+<script src="app.js?v=84"></script>
 </body>
 </html>

@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V83';
+  const BUILD='V84';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -19,6 +19,9 @@
   const PC_CHECKER_POOL=['Hunter Sanchez','Mark Weber','Christoph Contro','John Koo','Fugo Weezy','Tony Shy','Jason Azul','Memo Savage'];
   const PC_CHECKER_LEAD='Adam Byers';
   const PC_CUSTOM_KEY='grandrp_pc_checker_custom_v1';
+  const YT_RETRY_DELAY_MS=30*60*1000;
+  const YT_RETRY_KEY='grandrp_yt_quota_retry_at_v84';
+  let youtubeRetryTimer=0;
   const pcCheckerCustom=new Set();
   try{const saved=JSON.parse(localStorage.getItem(PC_CUSTOM_KEY)||'[]');if(Array.isArray(saved))saved.filter(Boolean).forEach(v=>pcCheckerCustom.add(String(v)));}catch{}
 
@@ -657,6 +660,57 @@
     const m=String(err?.message||err||'').toLowerCase();
     return /uploadlimitexceeded|exceeded the number of videos they may upload|number of videos they may upload/.test(m);
   }
+  function isYoutubeQuotaError(err){
+    if(err?.code==='YT_QUOTA_429')return true;
+    const m=String(err?.message||err||'').toLowerCase();
+    return /ratelimitexceeded|quota exceeded|video uploads.*per day|video uploads|resource_exhausted/.test(m) && /429|quota|video uploads|ratelimitexceeded|resource_exhausted/.test(m);
+  }
+  function youtubeRetryAt(){
+    const n=Number(localStorage.getItem(YT_RETRY_KEY)||0);
+    return Number.isFinite(n)&&n>0?n:0;
+  }
+  function formatRetryClock(ms){
+    const sec=Math.max(0,Math.ceil(ms/1000));
+    const m=Math.floor(sec/60), s=sec%60;
+    return `${m}:${String(s).padStart(2,'0')}`;
+  }
+  function clearYoutubeRetryTimer(){if(youtubeRetryTimer){clearTimeout(youtubeRetryTimer);youtubeRetryTimer=0;}}
+  function scheduleYoutubeRetryAt(at){
+    clearYoutubeRetryTimer();
+    const target=Math.max(Date.now()+1000,Number(at)||Date.now()+YT_RETRY_DELAY_MS);
+    localStorage.setItem(YT_RETRY_KEY,String(target));
+    state.youtubeUploadBlocked=true;
+    const tick=()=>{
+      const left=target-Date.now();
+      if(left<=0){
+        localStorage.removeItem(YT_RETRY_KEY);
+        state.youtubeUploadBlocked=false;
+        youtubeRetryTimer=0;
+        for(const item of state.queue){
+          if(!item.youtubeLimitBlocked||item.cancelled||item.editingDone||item.status==='Gespeichert')continue;
+          item.youtubeLimitBlocked=false;
+          item.uploadStarted=false;
+          item.uploadFailed=false;
+          item.processing=false;
+          item.uploading=false;
+          item.status='Upload wartet · 30-Minuten-Retry';
+          item.progress=0;
+        }
+        renderQueue();
+        void pumpUploads();
+        return;
+      }
+      for(const item of state.queue){
+        if(item.youtubeLimitBlocked&&!item.uploading&&!item.ocrProcessing&&item.status!=='Gespeichert'){
+          item.status=`YouTube-Quota erreicht · Retry in ${formatRetryClock(left)}` + (item.result?' · OCR fertig':' · OCR läuft/lokal');
+        }
+      }
+      renderQueue();
+      youtubeRetryTimer=setTimeout(tick,Math.min(30000,left));
+    };
+    tick();
+  }
+  function scheduleYoutubeRetry30(){scheduleYoutubeRetryAt(Date.now()+YT_RETRY_DELAY_MS);}
   async function retryQueueItem(item){
     if(!item||item.processing)return;
     if(item.youtube){await retryLocalOCR(item);return;}
@@ -1588,18 +1642,42 @@
 
           // The resumable upload is finished here. Do NOT wait for YouTube processing,
           // OCR, editor/review, title changes, or any other work before moving on.
+          item.youtubeLimitBlocked=false;
+          item.uploadFailed=false;
           item.progress=60;
           item.uploading=false;
           item.processing=false;
-          item.status='Upload fertig · OCR läuft im Hintergrund';
-          renderQueue();
-
-          // Start OCR completely detached from the upload pump. Its promise is kept only
-          // for diagnostics/retry handling; it is NEVER awaited by pumpUploads().
-          item.ocrProcessing=true;
-          item.ocrPromise=runOcrForUploadedItem(item,sourceSize,storedCopy,0);
+          if(item.result){
+            item.result.sourceSize=sourceSize;
+            item.result.youtube=item.youtube;
+            item.result.proof=item.youtube?.url||item.result.proof||'';
+            item.status='Upload fertig · OCR bereits vorhanden · Prüfung offen';
+            item.progress=100;
+            renderQueue();
+          }else{
+            item.status='Upload fertig · OCR läuft im Hintergrund';
+            renderQueue();
+            // Start OCR completely detached from the upload pump. Its promise is kept only
+            // for diagnostics/retry handling; it is NEVER awaited by pumpUploads().
+            item.ocrProcessing=true;
+            item.ocrPromise=runOcrForUploadedItem(item,sourceSize,storedCopy,0);
+          }
         }catch(err){
           console.error('Queue upload failed',err);
+          if(isYoutubeQuotaError(err)){
+            state.youtubeUploadBlocked=true;
+            item.youtubeLimitBlocked=true;
+            item.processing=false;
+            item.uploading=false;
+            item.uploadFailed=true;
+            item.uploadStarted=true;
+            item.status='YouTube-Quota erreicht · Retry in 30:00 · OCR läuft lokal';
+            item.progress=0;
+            renderQueue();
+            scheduleYoutubeRetry30();
+            await runLocalOnlyOcr(item);
+            break;
+          }
           if(isYoutubeUploadLimitError(err)){
             state.youtubeUploadBlocked=true;
             item.youtubeLimitBlocked=true;
@@ -1610,6 +1688,7 @@
             item.status='YouTube-Uploadlimit erreicht · OCR läuft lokal';
             item.progress=0;
             renderQueue();
+            scheduleYoutubeRetry30();
             await runLocalOnlyOcr(item);
             break;
           }
@@ -1946,7 +2025,13 @@
       const doInit=async(t)=>await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',{method:'POST',headers:{Authorization:`Bearer ${t}`,'Content-Type':'application/json; charset=UTF-8','X-Upload-Content-Length':String(expectedSize),'X-Upload-Content-Type':contentType},body:JSON.stringify(meta)});
       let init=await doInit(accessToken);
       if(init.status===401){accessToken=await refreshYoutubeToken(true);init=await doInit(accessToken);}
-      if(!init.ok)throw new Error((await init.text()).slice(0,700));
+      if(!init.ok){
+        const body=(await init.text()).slice(0,1200);
+        if(init.status===429 && /ratelimitexceeded|quota exceeded|video uploads|resource_exhausted/i.test(body)){
+          const e=new Error('YouTube-Video-Upload-Quota erreicht (HTTP 429). Neuer Versuch in 30 Minuten.');e.code='YT_QUOTA_429';throw e;
+        }
+        throw new Error(body);
+      }
       const loc=init.headers.get('Location');if(!loc)throw new Error('YouTube Upload-URL fehlt.');
       return loc;
     }
@@ -2002,6 +2087,12 @@
         else offset=await queryOffset();
         onProgress?.(Math.round(offset/expectedSize*100));
         continue;
+      }
+      if(resp.status===429){
+        const body=String(resp.responseText||'');
+        if(/ratelimitexceeded|quota exceeded|video uploads|resource_exhausted/i.test(body)){
+          const e=new Error('YouTube-Video-Upload-Quota erreicht (HTTP 429). Neuer Versuch in 30 Minuten.');e.code='YT_QUOTA_429';throw e;
+        }
       }
       if(resp.status===408||resp.status===429||resp.status>=500){
         if(++attempts>5)throw new Error(resp.responseText?.slice(0,700)||`YouTube Upload HTTP ${resp.status}`);
@@ -2093,6 +2184,11 @@
     try{const saved=JSON.parse(localStorage.getItem(PC_CUSTOM_KEY)||'[]');if(Array.isArray(saved))saved.filter(Boolean).forEach(v=>pcCheckerCustom.add(String(v)));}catch{}
     window.__grandrpAppBooted=true;
     setupNav();setupUpload();setupEditor();setupSettings();renderQueue();updateYtStatus();void requestPersistentStorage();setInterval(()=>{if(authUser&&state.entries.length)saveMeta();},15000);
+    const persistedRetry=youtubeRetryAt();
+    if(persistedRetry>0){
+      if(persistedRetry>Date.now())scheduleYoutubeRetryAt(persistedRetry);
+      else {localStorage.removeItem(YT_RETRY_KEY);state.youtubeUploadBlocked=false;}
+    }
     loadMeta().then(()=>{renderArchive();renderCases();renderCsv();}).catch(err=>{console.error('Archiv konnte nicht geladen werden',err);renderArchive();renderCases();renderCsv();});
     renderAuthUsers();
   }
