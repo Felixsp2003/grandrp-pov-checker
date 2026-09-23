@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V85';
+  const BUILD='V86';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -564,8 +564,83 @@
   function formatDateDE(v){if(!v)return '';const m=String(v).match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}.${m[2]}.${m[1]}`:v;}
   const META_DB_KEY='__grandrp_archive_meta__';
   const PERMA_DB_KEY='__grandrp_perma_archive__';
+  const QUEUE_DB_KEY='__grandrp_upload_queue__';
+  const QUEUE_STORAGE_KEY='grandrp_pov_queue_v1';
+  let queuePersistTimer=0;
   async function getMetaDb(){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const os=tx.objectStore(STORE);const r=os.get(META_DB_KEY);const p=os.get(PERMA_DB_KEY);tx.oncomplete=()=>res({entries:Array.isArray(r.result)?r.result:[],perma:Array.isArray(p.result)?p.result:[]});tx.onerror=()=>rej(tx.error);});}catch{return {entries:[],perma:[]};}}
   async function saveMetaDb(entries){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');const os=tx.objectStore(STORE);os.put(entries,META_DB_KEY);os.put(entries.filter(e=>e.permaArchive),PERMA_DB_KEY);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}catch(err){console.warn('Archiv-Metadaten konnten nicht in IndexedDB gesichert werden',err);}}
+  async function getQueueDb(){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const r=tx.objectStore(STORE).get(QUEUE_DB_KEY);tx.oncomplete=()=>res(Array.isArray(r.result)?r.result:[]);tx.onerror=()=>rej(tx.error);});}catch{return [];}}
+  async function saveQueueDb(items){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(items,QUEUE_DB_KEY);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}catch(err){console.warn('Warteschlange konnte nicht in IndexedDB gesichert werden',err);}}
+  function queueMetaSnapshot(){
+    return state.queue.filter(item=>item && item.id && !item.editingDone && item.status!=='Gespeichert').map(item=>{
+      const out={...item};
+      delete out.file;
+      delete out.ocrPromise;
+      if(out.result && typeof out.result==='object'){
+        out.result={...out.result};
+        delete out.result.file;
+        delete out.result.videoUrl;
+      }
+      return out;
+    });
+  }
+  function persistQueueNow(){
+    const items=queueMetaSnapshot();
+    try{localStorage.setItem(QUEUE_STORAGE_KEY,JSON.stringify(items));}catch(err){console.warn('Warteschlange konnte nicht in localStorage gesichert werden',err);}
+    void saveQueueDb(items);
+  }
+  function scheduleQueuePersist(){
+    persistQueueNow();
+    clearTimeout(queuePersistTimer);
+    queuePersistTimer=setTimeout(()=>{queuePersistTimer=0;void saveQueueDb(queueMetaSnapshot());},450);
+  }
+  async function loadQueue(){
+    let stored=[];
+    try{stored=JSON.parse(localStorage.getItem(QUEUE_STORAGE_KEY)||'[]');}catch{stored=[];}
+    const dbQueue=await getQueueDb();
+    if(Array.isArray(dbQueue)&&dbQueue.length)stored=dbQueue;
+    if(!Array.isArray(stored)||!stored.length){state.queue=[];return;}
+    const restored=[];
+    let changed=false;
+    for(const meta of stored){
+      if(!meta?.id || meta.editingDone || meta.status==='Gespeichert'){changed=true;continue;}
+      let file=null;
+      try{file=await getVideo(meta.id);}catch{}
+      if(!file){changed=true;continue;}
+      const item={...meta,file,ocrPromise:null};
+      item.cancelled=false;
+      item.processing=false;
+      item.uploading=false;
+      item.ocrProcessing=false;
+      if(item.youtube){
+        item.uploadStarted=true;
+        item.uploadFailed=false;
+        if(item.result){
+          item.progress=100;
+          item.status=item.result.complete?'OCR fertig · Prüfung offen':'OCR unvollständig · Prüfung nötig';
+        }else{
+          item.progress=Math.max(60,Number(item.progress)||60);
+          item.status='Upload fertig · OCR wird nach Seitenaktualisierung fortgesetzt';
+        }
+      }else if(item.result && item.youtubeLimitBlocked){
+        item.uploadStarted=true;
+        item.uploadFailed=true;
+        item.progress=100;
+        item.status=item.result.complete?'YouTube-Limit · OCR fertig · YouTube später erneut':'YouTube-Limit · OCR unvollständig · Prüfung nötig';
+      }else if(item.uploadFailed || /^Fehler:/i.test(item.status||'')){
+        item.uploadStarted=true;
+      }else{
+        item.uploadStarted=false;
+        item.uploadFailed=false;
+        item.progress=0;
+        item.status='Upload wird nach Seitenaktualisierung fortgesetzt';
+      }
+      restored.push(item);
+    }
+    state.queue=restored;
+    if(changed)persistQueueNow();
+    else scheduleQueuePersist();
+  }
   async function requestPersistentStorage(){try{if(navigator.storage?.persist)await navigator.storage.persist();const persisted=await navigator.storage?.persisted?.();const el=$('#persistentStorageStatus');if(el){el.textContent=persisted?'● Dauerhafter Browser-Speicher aktiv':'● Browser-Speicher nicht garantiert';el.className='connection '+(persisted?'good':'warn');}return !!persisted;}catch{const el=$('#persistentStorageStatus');if(el){el.textContent='● Browser-Speicherstatus nicht verfügbar';el.className='connection warn';}return false;}}
   async function loadMeta(){
     try{
@@ -655,7 +730,28 @@
     ['dragleave','drop'].forEach(ev=>dropzone.addEventListener(ev,e=>{e.preventDefault();dropzone.classList.remove('drag');}));
     dropzone.addEventListener('drop',e=>addFiles([...e.dataTransfer.files].filter(f=>f.type.startsWith('video/')||/\.(mp4|mov|webm|mkv)$/i.test(f.name))));
   }
-  function addFiles(files){for(const file of files){state.queue.push({id:crypto.randomUUID(),file,status:'Upload wartet',progress:0,result:null,processing:false,uploading:false,ocrProcessing:false,editingDone:false,youtube:null,uploadStarted:false,uploadFailed:false,cancelled:false});}renderQueue();pumpUploads();}
+  async function addFiles(files){
+    const pending=[];
+    for(const file of files){
+      const item={id:crypto.randomUUID(),file,status:'Upload wartet',progress:0,result:null,processing:false,uploading:false,ocrProcessing:false,editingDone:false,youtube:null,uploadStarted:false,uploadFailed:false,cancelled:false,youtubeLimitBlocked:false};
+      state.queue.push(item);
+      pending.push(item);
+    }
+    renderQueue();
+    for(const item of pending){
+      try{
+        await putVideo(item.id,item.file);
+      }catch(err){
+        item.status='Fehler: Lokale Speicherung fehlgeschlagen: '+(err?.message||err);
+        item.uploadFailed=true;
+        item.uploadStarted=true;
+        renderQueue();
+      }
+    }
+    scheduleQueuePersist();
+    renderQueue();
+    await pumpUploads();
+  }
   function isYoutubeUploadLimitError(err){
     const m=String(err?.message||err||'').toLowerCase();
     return /uploadlimitexceeded|exceeded the number of videos they may upload|number of videos they may upload/.test(m);
@@ -754,7 +850,7 @@
       renderQueue();
     }
   }
-  function renderQueue(){const q=$('#uploadQueue');$('#queueCount').textContent=`${state.queue.length} ${state.queue.length===1?'Datei':'Dateien'}`;q.innerHTML=state.queue.map(item=>{const hasError=/^Fehler:/i.test(item.status||'');const retry=(!item.uploading&&!item.ocrProcessing&&((!!item.youtube&&!item.result)||hasError));const label=item.youtube?'OCR erneut':'Erneut hochladen';return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(item.finalName||item.file.name)}</strong><small>${formatSize(item.file.size)} · ${esc(item.status)}</small><div class="progress"><i style="width:${item.progress}%"></i></div></div><div class="queue-actions">${item.result?`<button class="mini" data-check="${item.id}">Prüfen</button>`:''}${retry?`<button class="mini primary" data-retry="${item.id}">${label}</button>`:''}<button class="mini" data-remove="${item.id}">×</button></div></div>`}).join('');$$('[data-check]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.check);if(x?.result)openEditor(x);});$$('[data-retry]').forEach(b=>b.onclick=async()=>{const x=state.queue.find(i=>i.id===b.dataset.retry);if(x)await retryQueueItem(x);});$$('[data-remove]').forEach(b=>b.onclick=async()=>{const x=state.queue.find(i=>i.id===b.dataset.remove);if(!x)return;if(x.uploading){toast('YouTube-Upload läuft noch.');return;}x.cancelled=true;x.editingDone=true;x.ocrProcessing=false;x.processing=false;try{await delVideo(x.id);}catch{}state.queue=state.queue.filter(i=>i.id!==b.dataset.remove);renderQueue();toast('POV aus der Warteschlange entfernt. OCR wurde gestoppt.');});}
+  function renderQueue(){scheduleQueuePersist();const q=$('#uploadQueue');$('#queueCount').textContent=`${state.queue.length} ${state.queue.length===1?'Datei':'Dateien'}`;q.innerHTML=state.queue.map(item=>{const hasError=/^Fehler:/i.test(item.status||'');const retry=(!item.uploading&&!item.ocrProcessing&&((!!item.youtube&&!item.result)||hasError));const label=item.youtube?'OCR erneut':'Erneut hochladen';return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(item.finalName||item.file.name)}</strong><small>${formatSize(item.file.size)} · ${esc(item.status)}</small><div class="progress"><i style="width:${item.progress}%"></i></div></div><div class="queue-actions">${item.result?`<button class="mini" data-check="${item.id}">Prüfen</button>`:''}${retry?`<button class="mini primary" data-retry="${item.id}">${label}</button>`:''}<button class="mini" data-remove="${item.id}">×</button></div></div>`}).join('');$$('[data-check]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.check);if(x?.result)openEditor(x);});$$('[data-retry]').forEach(b=>b.onclick=async()=>{const x=state.queue.find(i=>i.id===b.dataset.retry);if(x)await retryQueueItem(x);});$$('[data-remove]').forEach(b=>b.onclick=async()=>{const x=state.queue.find(i=>i.id===b.dataset.remove);if(!x)return;if(x.uploading){toast('YouTube-Upload läuft noch.');return;}x.cancelled=true;x.editingDone=true;x.ocrProcessing=false;x.processing=false;try{await delVideo(x.id);}catch{}state.queue=state.queue.filter(i=>i.id!==b.dataset.remove);renderQueue();toast('POV aus der Warteschlange entfernt. OCR wurde gestoppt.');});}
   async function retryLocalOCR(item){
     if(item.processing||item.cancelled)return;
     item.processing=true;item.status='OCR wird erneut gestartet…';item.progress=60;renderQueue();
@@ -1437,9 +1533,28 @@
         throw err;
       }
     }
-    state.entries=[record,...state.entries.filter(x=>x.id!==record.id)]; saveMeta();
-    if(ctx.item){ctx.item.file=namedFile;ctx.item.finalName=finalName;ctx.item.result={...ctx.item.result,...record};ctx.item.status='Gespeichert';ctx.item.progress=100;renderQueue();}
-    closeEditor(); renderArchive(); renderCases(); renderCsv(); toast('Gespeichert. YouTube-Titel und Dateiname sind identisch.');
+    state.entries=[record,...state.entries.filter(x=>x.id!==record.id)];
+    saveMeta();
+
+    // Ein erfolgreich gespeicherter/geprüfter POV ist kein Warteschlangen-Eintrag mehr.
+    // Die IndexedDB-Datei bleibt erhalten, weil sie jetzt vom Archiv verwendet wird.
+    if(ctx.item){
+      ctx.item.file=namedFile;
+      ctx.item.finalName=finalName;
+      ctx.item.result={...ctx.item.result,...record};
+      ctx.item.status='Gespeichert';
+      ctx.item.progress=100;
+      ctx.item.editingDone=true;
+      ctx.item.cancelled=true;
+      state.queue=state.queue.filter(x=>x.id!==ctx.item.id);
+      renderQueue();
+    }
+
+    closeEditor();
+    renderArchive();
+    renderCases();
+    renderCsv();
+    toast('Gespeichert. YouTube-Titel und Dateiname sind identisch. POV ins Archiv verschoben.');
   }
   window.addEventListener('message',e=>{if(e.data?.type==='grandrp-manual-field'){applyManualField(e.data.field,e.data.value,e.data.time);}});
 
@@ -2176,7 +2291,7 @@
     $('#clientId').addEventListener('change',e=>{state.clientId=String(e.target.value||'').trim();localStorage.setItem('yt_client_id',state.clientId);});
     // YouTube buttons use the inline full-page redirect in index.html, so OAuth never depends on app.js loading.
     if($('#disconnectYoutube')) $('#disconnectYoutube').addEventListener('click',()=>{if(window.grandrpDisconnectYouTube)window.grandrpDisconnectYouTube();else{clearYoutubeToken();}});
-    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen?'))return;state.entries=[];state.queue=[];saveMeta();await clearDB();renderArchive();renderCases();renderCsv();renderQueue();toast('Lokale Daten gelöscht.');};
+    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen?'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];saveMeta();try{localStorage.removeItem(QUEUE_STORAGE_KEY);}catch{}await clearDB();renderArchive();renderCases();renderCsv();renderQueue();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }
 
@@ -2184,16 +2299,39 @@
     if(window.__grandrpAppBooted)return;
     try{const saved=JSON.parse(localStorage.getItem(PC_CUSTOM_KEY)||'[]');if(Array.isArray(saved))saved.filter(Boolean).forEach(v=>pcCheckerCustom.add(String(v)));}catch{}
     window.__grandrpAppBooted=true;
-    setupNav();setupUpload();setupEditor();setupSettings();renderQueue();updateYtStatus();void requestPersistentStorage();setInterval(()=>{if(authUser&&state.entries.length)saveMeta();},15000);
+    setupNav();setupUpload();setupEditor();setupSettings();updateYtStatus();void requestPersistentStorage();setInterval(()=>{if(authUser&&state.entries.length)saveMeta();},15000);
+    await loadQueue().catch(err=>{console.error('Warteschlange konnte nicht geladen werden',err);state.queue=[];});
+    renderQueue();
     const persistedRetry=youtubeRetryAt();
     if(persistedRetry>0){
       if(persistedRetry>Date.now())scheduleYoutubeRetryAt(persistedRetry);
       else {localStorage.removeItem(YT_RETRY_KEY);state.youtubeUploadBlocked=false;}
     }
+    for(const item of state.queue){
+      if(item.youtube && !item.result && !item.cancelled){
+        try{
+          const stored=await getVideo(item.id);
+          item.ocrProcessing=true;
+          item.processing=true;
+          item.uploading=false;
+          item.status='Upload fertig · OCR wird fortgesetzt';
+          item.progress=Math.max(60,Number(item.progress)||60);
+          item.ocrPromise=runOcrForUploadedItem(item,Number(item.sourceSize)||Number(item.file.size)||0,stored,Number(item.remoteSize)||0);
+        }catch(err){
+          item.status='Fehler: Lokale POV-Datei konnte nach Seitenaktualisierung nicht geladen werden: '+(err?.message||err);
+          item.ocrProcessing=false;
+          item.processing=false;
+          item.uploadFailed=true;
+          renderQueue();
+        }
+      }
+    }
+    renderQueue();
+    void pumpUploads();
     loadMeta().then(()=>{renderArchive();renderCases();renderCsv();}).catch(err=>{console.error('Archiv konnte nicht geladen werden',err);renderArchive();renderCases();renderCsv();});
     renderAuthUsers();
   }
-  window.addEventListener('beforeunload' ,()=>{try{state.worker?.terminate();}catch{};try{state.specialWorker?.terminate();}catch{};try{state.fastWorker?.terminate();}catch{}});
+  window.addEventListener('beforeunload' ,()=>{try{persistQueueNow();}catch{};try{state.worker?.terminate();}catch{};try{state.specialWorker?.terminate();}catch{};try{state.fastWorker?.terminate();}catch{}});
   setupAuthUI();
   authResume().then(ok=>{if(ok)bootApp();});
 })();
