@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V79';
+  const BUILD='V81';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -23,33 +23,46 @@
   try{const saved=JSON.parse(localStorage.getItem(PC_CUSTOM_KEY)||'[]');if(Array.isArray(saved))saved.filter(Boolean).forEach(v=>pcCheckerCustom.add(String(v)));}catch{}
 
   const ALLOWED_REASONS=[
-    'PC Check Positiv',
-    'PC Check Verweigert',
+    'PC-Check Verweigerung',
+    'PC-Check Verweigerung - Trolling',
     'PC-Check Positiv 4.1 (Discord)',
+    'PC-Check Positiv',
     'PC-Check Positiv 4.1 (Redux)',
-    'PC-Check Positiv (Banevading)',
-    'PC Check Positiv (Cleaning)',
-    'PC Check Trolling',
-    'Cheating',
-    'Acc 1.1',
-    'Acc 1.4',
-    'ACC 1.4 (Twink)',
-    'Event 1.7'
+    'PC-Check Positiv - Cleaning',
+    'Event 1.7 (NoPov in PC Check)',
+    'PC Check Positiv (Banevading)',
+    'PC Check Positiv (Covering Cheater)',
+    'Acc 1.4 (Twink)',
+    'Acc 1.4 (Main)'
   ];
   const REASON_ALIASES={
-    'PC Check Positiv':['pc check positiv','pc-check positiv','pccheck positiv','pccheckpositiv'],
-    'PC Check Verweigert':['pc check verweigert','pc-check verweigert','pc-check verweigerung','pc check verweigerung','pccheck verweigerung','pccheckverweigert'],
-    'PC-Check Positiv 4.1 (Discord)':['pc-check positiv 4.1 discord','pc check positiv 4.1 discord','pccheck positiv 4.1 discord'],
-    'PC-Check Positiv 4.1 (Redux)':['pc-check positiv 4.1 redux','pc check positiv 4.1 redux','pccheck positiv 4.1 redux'],
-    'PC-Check Positiv (Banevading)':['pc-check positiv banevading','pc check positiv banevading','pccheck positiv banevading'],
-    'PC Check Positiv (Cleaning)':['pc check positiv cleaning','pc-check positiv cleaning','pccheck positiv cleaning'],
-    'PC Check Trolling':['pc check trolling','pc-check trolling','pccheck trolling','pc trolling'],
-    'Cheating':['cheating'],
-    'Acc 1.1':['acc 1.1','acc1.1','acc 11'],
-    'Acc 1.4':['acc 1.4','acc1.4','acc 14'],
-    'ACC 1.4 (Twink)':['acc 1.4 twink','acc1.4 twink','acc 14 twink'],
-    'Event 1.7':['event 1.7','event1.7','event 17']
+    'PC-Check Verweigerung':['pc check verweigerung','pc-check verweigerung','pc check verweigert','pc-check verweigert','pc che k rwelg nn','pc che k verweig'],
+    'PC-Check Verweigerung - Trolling':['pc check verweigerung trolling','pc-check verweigerung trolling','pc check verweigert trolling','pc-check verweigert trolling','pc check trolling verweigerung','pc-check trolling verweigerung'],
+    'PC-Check Positiv 4.1 (Discord)':['pc check positiv 4.1 discord','pc-check positiv 4.1 discord','pccheck positiv 4.1 discord','pc check positiv 4 1 discord'],
+    'PC-Check Positiv':['pc check positiv','pc-check positiv','pccheck positiv','pccheckpositiv'],
+    'PC-Check Positiv 4.1 (Redux)':['pc check positiv 4.1 redux','pc-check positiv 4.1 redux','pccheck positiv 4.1 redux','pc check positiv 4 1 redux'],
+    'PC-Check Positiv - Cleaning':['pc check positiv cleaning','pc-check positiv cleaning','pccheck positiv cleaning','pc-check positiv - cleaning'],
+    'Event 1.7 (NoPov in PC Check)':['event 1.7 nopov in pc check','event1.7 nopov in pc check','event 17 nopov in pc check','event 1.7 no pov in pc check','event1.7 nopov'],
+    'PC Check Positiv (Banevading)':['pc check positiv banevading','pc-check positiv banevading','pccheck positiv banevading','pc check posiv banevading'],
+    'PC Check Positiv (Covering Cheater)':['pc check positiv covering cheater','pc-check positiv covering cheater','pc check covering cheater','covering cheater'],
+    'Acc 1.4 (Twink)':['acc 1.4 twink','acc1.4 twink','acc 14 twink','acc 1.4 (twink)','acc 14 twinkk'],
+    'Acc 1.4 (Main)':['acc 1.4 main','acc1.4 main','acc 14 main','acc 1.4 (main)','acc1.4']
   };
+  const AUTO_PERMA_TRUE=new Set([
+    'PC-Check Verweigerung - Trolling',
+    'PC-Check Positiv',
+    'PC Check Positiv (Banevading)',
+    'Acc 1.4 (Twink)'
+  ]);
+  const AUTO_PERMA_FALSE=new Set([
+    'PC-Check Positiv 4.1 (Discord)',
+    'PC-Check Positiv 4.1 (Redux)',
+    'PC-Check Positiv - Cleaning',
+    'Event 1.7 (NoPov in PC Check)',
+    'PC Check Positiv (Covering Cheater)',
+    'Acc 1.4 (Main)'
+  ]);
+
 
   function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
   function cleanText(s){return String(s||'').replace(/\r/g,'').replace(/[“”]/g,'"').replace(/[‘’]/g,"'").replace(/[‐‑‒–—]/g,'-').replace(/\u00a0/g,' ').split('\n').map(x=>x.replace(/[ \t]+/g,' ').trim()).filter(Boolean).join('\n');}
@@ -166,14 +179,17 @@
     const banWord=/\b(?:gebannt|gebanntt|gebant|banned|bannt|bann(?:ed)?)\b/i.test(tail);
     if(!banWord)return null;
 
-    // Reason is best read from the explicit Grund segment, otherwise from the ban sentence.
-    const reasonMatch=norm.match(/\bgrund\s*[:.\-]?\s*([^\n]{0,120})/i);
-    const reason=extractReasonStrict(reasonMatch?.[1]||norm)||parseReason(reasonMatch?.[1]||tail)||parseReason(norm.slice(0, Math.min(norm.length, 1200)))||'';
+    // Reason: the line beginning with Grund is authoritative. Never feed the whole
+    // flattened chat into the reason parser first, because earlier PC-check chatter
+    // can otherwise outrank the actual ban reason.
+    const rawReasonLine=raw.split('\n').find(line=>/(?:grund|grun[dti]|gru[nm]d)\s*[:.\-]/i.test(line));
+    const reasonText=rawReasonLine?rawReasonLine.replace(/^(?:.*?)(?:grund|grun[dti]|gru[nm]d)\s*[:.\-]?\s*/i,''):'';
+    const reason=extractReasonStrict(reasonText)||parseReason(reasonText)||extractReasonStrict(tail)||parseReason(tail)||'';
 
     let score=reason?90:72;
     if(/administrator/i.test(fullSegment))score+=3;
     if(/adam\s*[_-]?\s*byers/i.test(fullSegment))score+=8;
-    if(reasonMatch)score+=8;
+    if(rawReasonLine)score+=8;
     if(target!==BAN_ADMIN_ID)score+=5;
     return {
       targetId:target,
@@ -194,79 +210,76 @@
   function classifyReasonStrong(text){
     const c=compact(String(text||''));
     if(!c) return '';
-    if(/event17|event1l|eventi7/.test(c)) return 'Event 1.7';
-    if(/acc11/.test(c)) return 'Acc 1.1';
-    if(/acc14twink|acc1.4twink|acc14twnk|acc14twing|acc14twinck|acc14twinkk/.test(c)) return 'ACC 1.4 (Twink)';
-    if(/acc14/.test(c)) return 'Acc 1.4';
-    if(/cheat|cheats|cheating/.test(c)) return 'Cheating';
-    if(/pccheckverweig|pccheckverweigert|pccheckverweigerung|pccheckrwelg|pccheckrweig|pccheckwelig/.test(c)) return 'PC Check Verweigert';
-    if(/pc/.test(c)){
-      if(/verweig|rwelg|rweig|welig|weiger|refus|reject/.test(c) && /troll|trol|trowl|troling|trolling/.test(c)) return 'PC Check Trolling';
-      if(/troll|trol|trowl|troling|trolling/.test(c)) return 'PC Check Trolling';
-      if(/banevad|banvad|banevad/.test(c)) return 'PC-Check Positiv (Banevading)';
-      if(/clean|cleaning|cleann/.test(c)) return 'PC Check Positiv (Cleaning)';
-      if(/discord|discor/.test(c) && /41|4l|4i/.test(c)) return 'PC-Check Positiv 4.1 (Discord)';
-      if(/redux|reduc/.test(c) && /41|4l|4i/.test(c)) return 'PC-Check Positiv 4.1 (Redux)';
-      if(/verweig|verweig|rweig|rwelg|welg|weiger|refus|reject|rwel/.test(c)) return 'PC Check Verweigert';
-      if(/posit|posiv|p0sit|p0si|posi/.test(c)) return 'PC Check Positiv';
-      // Typical OCR corruption observed in the Grand-RP banner: "PC-Che K rwelg Nn".
-      if(/pcche/.test(c) && /rwel|welg|weig|nn/.test(c)) return 'PC Check Verweigert';
-    }
+    const hasPc=/pccheck|pcche|pcchec|pc/.test(c);
+    const hasTroll=/troll|trol|trowl|troling|trolling/.test(c);
+    const hasVerweig=/verweig|verweiger|rwelg|rweig|weiger|welig|refus|reject/.test(c);
+    const hasPosit=/posit|posiv|p0sit|p0si|posi/.test(c);
+    const hasDiscord=/discord|discor/.test(c);
+    const hasRedux=/redux|reduc/.test(c);
+    const hasClean=/clean|cleaning|cleann/.test(c);
+    const hasBane=/banevad|banvad/.test(c);
+    const hasCover=/covering|cheater/.test(c);
+    const hasNoPov=/nopov|nop0v|no.?pov/.test(c);
+    const has41=/41|4l|4i/.test(c);
+    if(hasPc && hasVerweig && hasTroll) return 'PC-Check Verweigerung - Trolling';
+    if(hasPc && hasPosit && hasDiscord && has41) return 'PC-Check Positiv 4.1 (Discord)';
+    if(hasPc && hasPosit && hasRedux && has41) return 'PC-Check Positiv 4.1 (Redux)';
+    if(hasPc && hasPosit && hasBane) return 'PC Check Positiv (Banevading)';
+    if(hasPc && hasPosit && hasCover) return 'PC Check Positiv (Covering Cheater)';
+    if(hasPc && hasPosit && hasClean) return 'PC-Check Positiv - Cleaning';
+    if(/event17|event1l|eventi7/.test(c) && hasNoPov && hasPc) return 'Event 1.7 (NoPov in PC Check)';
+    if(hasPc && hasPosit) return 'PC-Check Positiv';
+    if(hasPc && hasVerweig) return 'PC-Check Verweigerung';
+    if(/acc14twink|acc1\.4twink|acc14twnk|acc14twing|acc14twinck|acc14twinkk/.test(c)) return 'Acc 1.4 (Twink)';
+    if(/acc14main/.test(c) || /acc14/.test(c)) return 'Acc 1.4 (Main)';
     return '';
   }
   function extractReasonStrict(text){
     const raw=cleanText(text);
     if(!raw)return '';
-    const flat=raw.replace(/\s+/g,' ');
-    const reasonWindows=[];
-    // Explicit Grund: line is authoritative when present.
-    const gm=flat.match(/grund\s*[:.\-]?\s*([^\n]{0,120})/i);
-    if(gm)reasonWindows.push(gm[1]);
-    // Also inspect nearby fragments because OCR may miss the word "Grund" or
-    // place it on a separate line.
-    for(const line of raw.split('\n')){
-      if(/pc\s*-?\s*che|cheat|acc\s*1|event\s*1|grund|verweig|troll|banevad|cleaning|redux|discord/i.test(line)) reasonWindows.push(line);
+    const lines=raw.split('\n').map(x=>x.trim()).filter(Boolean);
+    const priority=[];
+    for(const line of lines){
+      const gm=line.match(/(?:grund|grun[dti]|gru[nm]d)\s*[:.\-]?\s*(.*)$/i);
+      if(gm&&gm[1]) priority.push(gm[1]);
     }
-    reasonWindows.push(flat.slice(Math.max(0,flat.search(/gebannt|gebant|banned/i)), Math.min(flat.length, flat.search(/gebannt|gebant|banned/i)+220)));
-    const normalized=[];
-    for(const w of reasonWindows){
-      if(!w)continue;
-      // Do NOT globally map I/l/1/O/0 here: doing that damages real words such as
-      // "Cleaning" and "Positiv". Reason recognition is word-based/fuzzy instead.
-      const x=String(w).replace(/[|¦]/g,' ').replace(/\s+/g,' ').trim();
-      normalized.push(x);
-      normalized.push(x
-        .replace(/pc\s*[-_]?\s*che\s*k?/ig,'PC Check')
-        .replace(/verweiger(?:ung|n|t|rung)/ig,'Verweigert'));
-    }
-    for(const w of [...normalized,...reasonWindows]){
-      const strong=classifyReasonStrong(w);
+    for(const p of priority){
+      const strong=classifyReasonStrong(p);
       if(strong)return strong;
-      const can=canonicalReason(w);
-      if(can?.value)return can.value;
+      const can=canonicalReason(p); if(can?.value)return can.value;
+    }
+    const windows=[];
+    for(let i=0;i<lines.length;i++){
+      const line=lines[i];
+      if(/pc\s*-?\s*che|cheat|acc\s*1|event|verweig|troll|banevad|clean|redux|discord|covering|nopov/i.test(line)){
+        windows.push(line);
+        if(lines[i+1])windows.push(`${line} ${lines[i+1]}`);
+      }
+    }
+    const joined=raw.replace(/\s+/g,' ');
+    windows.push(joined);
+    for(const w of windows){
+      const normalized=String(w).replace(/[|¦]/g,' ').replace(/\s+/g,' ').trim();
+      const strong=classifyReasonStrong(normalized);
+      if(strong)return strong;
+      const can=canonicalReason(normalized); if(can?.value)return can.value;
     }
     return '';
   }
   function parseReason(text){
     const raw=cleanText(text);
     if(!raw)return '';
-    // First pass over the whole OCR block. This is important when OCR misses the literal "Grund:".
-    const wholeStrong=classifyReasonStrong(raw);
-    if(wholeStrong)return wholeStrong;
+    const exact=extractReasonStrict(raw);
+    if(exact)return exact;
     const lines=raw.split('\n');
-    const candidates=[raw];
     for(let i=0;i<lines.length;i++){
       const line=lines[i];
-      const m=line.match(/Grund\s*[\:\.\-]?\s*(.*)$/i);
-      if(m){candidates.push(m[1]);if(lines[i+1])candidates.push(m[1]+' '+lines[i+1]);}
-      if(/\b(pc|cheat|acc|event)\b/i.test(line)) candidates.push(line);
+      if(/\b(pc|cheat|acc|event)\b/i.test(line)){
+        const strong=classifyReasonStrong(line+(lines[i+1]||''));
+        if(strong)return strong;
+      }
     }
-    for(const c of candidates){const strong=classifyReasonStrong(c);if(strong)return strong;}
-    let best=null,bestScore=0;
-    for(const c of candidates){
-      const r=canonicalReason(c);if(r&&r.score>bestScore){bestScore=r.score;best=r.value;}
-    }
-    return bestScore>=0.68?best:'';
+    return '';
   }
   function looksLikeIpish(s){
     const x=String(s||'').replace(/[‐‑‒–—]/g,'-');
@@ -932,7 +945,7 @@
     const chat=makeOcrChatCrop(video,1.55);
     try{return await readBanProbeCanvas(worker,chat);}finally{clearCanvas(chat);}
   }
-  const REASON_ROI={x:0.00,y:0.12,w:0.70,h:0.56};
+  const REASON_ROI={x:0.00,y:0.00,w:0.66,h:0.42};
   async function readReasonDirect(worker,video){
     const crop=makeCrop(video,REASON_ROI.x,REASON_ROI.y,REASON_ROI.w,REASON_ROI.h,3.25);
     const texts=[];let best='';
@@ -1176,8 +1189,9 @@
       media=await openLocalVideo(file,'Info-Foto');
       const duration=Number(media.video.duration||r.duration||0)||0;
       let t=Number(r.timestamps?.[field]??r.timestamps?.banner??NaN);
-      if(field==='banner'||field==='targetId'||field==='reason'){
-        // The automatic photo is anchored strictly to the verified last-5-second ban first.
+      if(field==='banner'){
+        // Only the Bannblock button performs the expensive last-5-second verification.
+        // All other info-photo buttons reuse this verified timestamp.
         const hit=await findVerifiedBanInLastFive(media.video);
         if(hit){
           t=hit.time;
@@ -1185,7 +1199,17 @@
           entry.timestamps={...(entry.timestamps||{}),banner:t,targetId:t,reason:t};
           if(hit.ban.targetId)entry.result.targetId=hit.ban.targetId;
           if(hit.ban.reason)entry.result.reason=hit.ban.reason;
+          if(hit.ban.targetId)$('#targetId').value=hit.ban.targetId;
+          if(hit.ban.reason&&ALLOWED_REASONS.includes(hit.ban.reason))$('#reason').value=hit.ban.reason;
+          renderTitlePreview(); setFieldStatus({result:entry.result});
         }else if(!Number.isFinite(t)) t=Math.max(0,duration-0.4);
+      }else if(field==='targetId'||field==='reason'){
+        // Reuse the verified ban time instead of rescanning. These buttons are now
+        // immediate and selectable even after OCR already finished.
+        t=Number(r.timestamps?.banner??r.timestamps?.targetId??r.timestamps?.reason??NaN);
+        if(!Number.isFinite(t)) t=Math.max(0,duration-0.4);
+        if(field==='targetId'&&r.targetId){$('#targetId').value=clampId(r.targetId);renderTitlePreview();}
+        if(field==='reason'&&ALLOWED_REASONS.includes(r.reason)){$('#reason').value=r.reason;renderTitlePreview();}
       }else if(field==='sc'){
         t=Math.max(0,duration-0.5);
       }else if(field==='pcCheck'){
@@ -1204,7 +1228,7 @@
       const c=canvas.getContext('2d');c.imageSmoothingEnabled=true;c.drawImage(video,sx,sy,sw,sh,0,0,canvas.width,canvas.height);
       if(field==='targetId'||field==='reason'||field==='banner'){
         c.save();c.fillStyle='rgba(255,47,139,.10)';c.strokeStyle='#ff2f8b';c.lineWidth=Math.max(2,canvas.width/700);
-        const guide=field==='reason'?[0.00,.10,.78,.44]:[0.00,.02,.90,.82];
+        const guide=field==='reason'?[0.00,.02,.76,.52]:field==='targetId'?[0.00,.02,.76,.52]:[0.00,.00,.82,.58];
         c.fillRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.strokeRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.restore();
       }
     }catch(err){canvas.width=1;canvas.height=1;meta.textContent=`Foto konnte nicht geladen werden: ${err.message}`;}
@@ -1385,10 +1409,19 @@
     if(input&&!input.dataset.bound){input.dataset.bound='1';input.addEventListener('keydown',e=>{if(e.key!=='Enter')return;e.preventDefault();const name=input.value.trim().replace(/\\s+/g,' ');if(!name)return;if(name===PC_CHECKER_LEAD||PC_CHECKER_POOL.includes(name)||pcCheckerCustom.has(name)){toast('Dieser PC Checker ist bereits vorhanden.');return;}pcCheckerCustom.add(name);input.value='';const vals=getPcCheckers();rebuildPcCheckerOptions(vals.slice(1));toast(`${name} zur PC-Checker-Auswahl hinzugefügt.`);});}
   }
 
+  function applyReasonPermaPolicy(reason,ask=true){
+    const perma=$('#perma'); if(!perma)return;
+    if(AUTO_PERMA_TRUE.has(reason)){perma.checked=true;return;}
+    if(AUTO_PERMA_FALSE.has(reason)){perma.checked=false;return;}
+    if(reason==='PC-Check Verweigerung'){
+      if(ask) perma.checked=window.confirm('PC-Check Verweigerung: Soll dieser Fall als Permabann markiert werden?');
+      return;
+    }
+  }
   function setupEditor(){
-    $('#closeModal').onclick=closeEditor;$('#cancelBtn').onclick=closeEditor;$('#entryForm').addEventListener('submit',saveEditor);['#targetId','#date'].forEach(s=>$(s).addEventListener('input',renderTitlePreview));$('#reason').addEventListener('change',()=>{renderTitlePreview();setFieldStatus(state.editing?.item||state.editing?.entry||{});});$('#targetId').addEventListener('input',()=>{$('#targetId').value=clampId($('#targetId').value);setFieldStatus(state.editing?.item||state.editing?.entry||{});});$('#sc').addEventListener('input',()=>setFieldStatus(state.editing?.item||state.editing?.entry||{}));
+    $('#closeModal').onclick=closeEditor;$('#cancelBtn').onclick=closeEditor;$('#entryForm').addEventListener('submit',saveEditor);['#targetId','#date'].forEach(s=>$(s).addEventListener('input',renderTitlePreview));$('#reason').addEventListener('change',()=>{applyReasonPermaPolicy($('#reason').value,true);renderTitlePreview();setFieldStatus(state.editing?.item||state.editing?.entry||{});});$('#targetId').addEventListener('input',()=>{$('#targetId').value=clampId($('#targetId').value);setFieldStatus(state.editing?.item||state.editing?.entry||{});});$('#sc').addEventListener('input',()=>setFieldStatus(state.editing?.item||state.editing?.entry||{}));
     $$('.chip').forEach(c=>c.onclick=()=>{const v=c.dataset.value;c.classList.toggle('active');if(c.classList.contains('active'))state.selectedTypes.add(v);else state.selectedTypes.delete(v);});
-    $$('.photo-field').forEach(b=>b.onclick=()=>showInfoPhoto(b.dataset.field));
+    $$('.photo-field').forEach(b=>b.onclick=()=>{$$('.photo-field').forEach(x=>x.classList.toggle('active',x===b));const field=b.dataset.field;showInfoPhoto(field);});
     $('#photoRefresh')?.addEventListener('click',()=>{const active=$('.photo-field.active');showInfoPhoto(active?.dataset.field||'banner');});
     $('#pcCheckCapture')?.addEventListener('click',()=>{
       const v=$('#editorVideoPreview'),ctx=state.editing;if(!v||!ctx)return;

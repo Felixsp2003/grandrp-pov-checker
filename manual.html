@@ -64,7 +64,7 @@
   const DB_NAME='grandrp_pov_db_v42', STORE='videos';
   const qs=new URLSearchParams(location.search);
   const job=qs.get('job')||''; const field=qs.get('field')||'view'; const start=Number(qs.get('t')||0)||0;
-  const ALLOWED=['PC Check Positiv','PC Check Verweigert','PC-Check Positiv 4.1 (Discord)','PC-Check Positiv 4.1 (Redux)','PC-Check Positiv (Banevading)','PC Check Positiv (Cleaning)','PC Check Trolling','Cheating','Acc 1.1','Acc 1.4','ACC 1.4 (Twink)','Event 1.7'];
+  const ALLOWED=['PC-Check Verweigerung','PC-Check Verweigerung - Trolling','PC-Check Positiv 4.1 (Discord)','PC-Check Positiv','PC-Check Positiv 4.1 (Redux)','PC-Check Positiv - Cleaning','Event 1.7 (NoPov in PC Check)','PC Check Positiv (Banevading)','PC Check Positiv (Covering Cheater)','Acc 1.4 (Twink)','Acc 1.4 (Main)'];
   const $=s=>document.querySelector(s), video=$('#video'), overlay=$('#overlay'), ctx=overlay.getContext('2d'), time=$('#time'), manual=$('#manual'), status=$('#status'), fieldTitle=$('#fieldTitle'), tip=$('#tip'), serverButtons=$('#serverButtons');
   let selection=null,drawing=false,sx=0,sy=0,file=null,drawMode=false;
   function setStatus(t,kind=''){status.textContent=t;status.className='status '+kind}
@@ -75,9 +75,22 @@
   function normalizeHexLoose(s){return String(s||'').toUpperCase().replace(/[OoQq]/g,'0').replace(/[IiLl|!]/g,'1').replace(/[Ss$]/g,'5').replace(/[Gg]/g,'6').replace(/[Zz]/g,'2').replace(/[Tt]/g,'7').replace(/[^0-9A-F]/g,'').toLowerCase();}
   function extractDate(text){const m=String(text||'').match(/\b(0?[1-9]|[12]\d|3[01])[\/\.\-](0?[1-9]|1[0-2])[\/\.\-](20\d{2})\b/);if(!m)return '';return `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;}
   function reasonFromText(text){
-    const c=String(text||'').toLowerCase().replace(/[^a-z0-9.() -]+/g,' ');
-    const tests=[['Event 1.7',['event 1.7','event17']],['ACC 1.4 (Twink)',['acc 1.4 twink','acc14 twink','acc14twink']],['Acc 1.4',['acc 1.4','acc14']],['Acc 1.1',['acc 1.1','acc11']],['Cheating',['cheating','cheat']],['PC-Check Positiv 4.1 (Discord)',['pc check positiv 4.1 discord','pc-check positiv 4.1 discord']],['PC-Check Positiv 4.1 (Redux)',['pc check positiv 4.1 redux','pc-check positiv 4.1 redux']],['PC-Check Positiv (Banevading)',['pc check positiv banevading']],['PC Check Positiv (Cleaning)',['pc check positiv cleaning']],['PC Check Trolling',['pc check trolling','pc-check trolling','pc trolling']],['PC Check Verweigert',['pc check verweigert','pc check verweigerung','pc che k rwelg nn','pc che k verweig']],['PC Check Positiv',['pc check positiv','pc-check positiv']]];
-    for(const [r,vs] of tests)for(const v of vs)if(c.includes(v))return r;return '';
+    const c=compact(text);
+    if(!c)return '';
+    const pc=/pccheck|pcche|pc/.test(c), ver=/verweig|verweiger|rwelg|rweig|welig|weiger|refus|reject/.test(c), troll=/troll|trol|trowl|troling|trolling/.test(c), pos=/posit|posiv|p0sit|posi/.test(c);
+    const dc=/discord|discor/.test(c), redux=/redux|reduc/.test(c), clean=/clean|cleaning|cleann/.test(c), bane=/banevad|banvad/.test(c), cover=/covering|cheater/.test(c), nopov=/nopov|no.?pov/.test(c);
+    if(pc&&ver&&troll)return 'PC-Check Verweigerung - Trolling';
+    if(pc&&pos&&dc&&/41|4l|4i/.test(c))return 'PC-Check Positiv 4.1 (Discord)';
+    if(pc&&pos&&redux&&/41|4l|4i/.test(c))return 'PC-Check Positiv 4.1 (Redux)';
+    if(pc&&pos&&bane)return 'PC Check Positiv (Banevading)';
+    if(pc&&pos&&cover)return 'PC Check Positiv (Covering Cheater)';
+    if(pc&&pos&&clean)return 'PC-Check Positiv - Cleaning';
+    if(/event17|event1l|eventi7/.test(c)&&nopov&&pc)return 'Event 1.7 (NoPov in PC Check)';
+    if(pc&&pos)return 'PC-Check Positiv';
+    if(pc&&ver)return 'PC-Check Verweigerung';
+    if(/acc14twink|acc1\.4twink|acc14twnk/.test(c))return 'Acc 1.4 (Twink)';
+    if(/acc14main/.test(c)||/acc14/.test(c))return 'Acc 1.4 (Main)';
+    return '';
   }
   function fieldLabel(){const map={sc:'SC / RID',server:'Server',targetId:'Ziel-ID',reason:'Grund',date:'Datum',discordId:'Discord ID',view:'POV ansehen'};return map[field]||field}
   function syncCanvas(){const r=video.getBoundingClientRect();overlay.width=Math.max(1,Math.round(r.width));overlay.height=Math.max(1,Math.round(r.height));overlay.style.width=r.width+'px';overlay.style.height=r.height+'px';draw()}
