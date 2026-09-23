@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V81';
+  const BUILD='V82';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -207,31 +207,59 @@
     const ban=extractBanEvent(text);
     return ban?.targetId&&/^\d{1,6}$/.test(ban.targetId)?ban.targetId:'';
   }
+  function reasonOcrNormalize(text){
+    return String(text||'').toLowerCase()
+      .replace(/[‐‑‒–—]/g,'-')
+      .replace(/[|¦]/g,'i')
+      .replace(/0/g,'o').replace(/5/g,'s').replace(/9/g,'g')
+      .replace(/4\s*[.,\-_ ]*\s*[il]/g,'41')
+      .replace(/\bpc\s*[-_]?\s*chek\b/g,'pc check')
+      .replace(/\bpcchec\b/g,'pc check')
+      .replace(/\bverweig(?:er|e|t|n|un|ung|rung|runq|rungn)[a-z0-9]*\b/g,'verweigerung')
+      .replace(/\bweiger[a-z0-9]*\b/g,'verweigerung')
+      .replace(/\brefus[a-z0-9]*\b/g,'verweigerung')
+      .replace(/\breject[a-z0-9]*\b/g,'verweigerung')
+      .replace(/\bposi(?:t|v)[a-z0-9]*\b/g,'positiv')
+      .replace(/\bdiscor[a-z0-9]*\b/g,'discord')
+      .replace(/\bredu[cx][a-z0-9]*\b/g,'redux')
+      .replace(/\bclean[a-z0-9]*\b/g,'cleaning')
+      .replace(/\btrol[a-z0-9]*\b/g,'trolling')
+      .replace(/\bcover[a-z0-9]*\b/g,'covering')
+      .replace(/\bbane[a-z0-9]*vad[a-z0-9]*\b/g,'banevading')
+      .replace(/\bn[o0]p[o0]v[a-z0-9]*\b/g,'nopov')
+      .replace(/\s+/g,' ').trim();
+  }
+  function reasonCompact(text){return reasonOcrNormalize(text).replace(/[^a-z0-9]+/g,'');}
   function classifyReasonStrong(text){
-    const c=compact(String(text||''));
-    if(!c) return '';
-    const hasPc=/pccheck|pcche|pcchec|pc/.test(c);
-    const hasTroll=/troll|trol|trowl|troling|trolling/.test(c);
-    const hasVerweig=/verweig|verweiger|rwelg|rweig|weiger|welig|refus|reject/.test(c);
-    const hasPosit=/posit|posiv|p0sit|p0si|posi/.test(c);
-    const hasDiscord=/discord|discor/.test(c);
-    const hasRedux=/redux|reduc/.test(c);
-    const hasClean=/clean|cleaning|cleann/.test(c);
-    const hasBane=/banevad|banvad/.test(c);
-    const hasCover=/covering|cheater/.test(c);
-    const hasNoPov=/nopov|nop0v|no.?pov/.test(c);
-    const has41=/41|4l|4i/.test(c);
-    if(hasPc && hasVerweig && hasTroll) return 'PC-Check Verweigerung - Trolling';
-    if(hasPc && hasPosit && hasDiscord && has41) return 'PC-Check Positiv 4.1 (Discord)';
-    if(hasPc && hasPosit && hasRedux && has41) return 'PC-Check Positiv 4.1 (Redux)';
-    if(hasPc && hasPosit && hasBane) return 'PC Check Positiv (Banevading)';
-    if(hasPc && hasPosit && hasCover) return 'PC Check Positiv (Covering Cheater)';
-    if(hasPc && hasPosit && hasClean) return 'PC-Check Positiv - Cleaning';
-    if(/event17|event1l|eventi7/.test(c) && hasNoPov && hasPc) return 'Event 1.7 (NoPov in PC Check)';
-    if(hasPc && hasPosit) return 'PC-Check Positiv';
-    if(hasPc && hasVerweig) return 'PC-Check Verweigerung';
-    if(/acc14twink|acc1\.4twink|acc14twnk|acc14twing|acc14twinck|acc14twinkk/.test(c)) return 'Acc 1.4 (Twink)';
-    if(/acc14main/.test(c) || /acc14/.test(c)) return 'Acc 1.4 (Main)';
+    const raw=String(text||'');
+    const c=reasonOcrNormalize(raw);
+    const n=reasonCompact(raw);
+    if(!n)return '';
+    const hasPc=/pccheck|pcchec|pcck|pchek/.test(n);
+    const hasTroll=/troll|trol/.test(n);
+    const hasVerweig=/verweig|weiger|refus|reject/.test(n);
+    const hasPosit=/posit|posiv/.test(n);
+    const hasDiscord=/discord|discor/.test(n);
+    const hasRedux=/redux|reduc/.test(n);
+    const hasClean=/clean|cleaning/.test(n);
+    const hasBane=/banevad|banvad/.test(n);
+    const hasCover=/covering|cheater/.test(n);
+    const hasNoPov=/nopov|no[pv]ov/.test(n);
+    const has41=/(?:41|4i|4l)/.test(n);
+    const hasAcc14=/acc\s*1?4|acc14/.test(c) || /acc14/.test(n);
+
+    if((hasPc||hasVerweig)&&hasVerweig&&hasTroll) return 'PC-Check Verweigerung - Trolling';
+    if(hasPosit&&hasDiscord&&has41) return 'PC-Check Positiv 4.1 (Discord)';
+    if(hasPosit&&hasRedux&&has41) return 'PC-Check Positiv 4.1 (Redux)';
+    if(hasPosit&&hasBane) return 'PC Check Positiv (Banevading)';
+    if(hasPosit&&hasCover) return 'PC Check Positiv (Covering Cheater)';
+    if(hasPosit&&hasClean) return 'PC-Check Positiv - Cleaning';
+    if(/event\s*1\s*[\.:_-]?\s*7/.test(c.replace(/[^a-z0-9.:-]/g,'')) && hasNoPov) return 'Event 1.7 (NoPov in PC Check)';
+    // A reason-only OCR selection may contain only "Verweigerung" or "Positiv".
+    if(hasPosit) return 'PC-Check Positiv';
+    if(hasVerweig) return 'PC-Check Verweigerung';
+    if(/acc\s*1[\.,_-]?\s*4\s*twink|acc14twink/.test(c)||/acc14twink/.test(n)) return 'Acc 1.4 (Twink)';
+    if(/acc\s*1[\.,_-]?\s*4\s*main|acc14main/.test(c)||/acc14main/.test(n)||hasAcc14) return 'Acc 1.4 (Main)';
     return '';
   }
   function extractReasonStrict(text){
@@ -906,9 +934,9 @@
   // Unified Grand-RP chat ROI. It intentionally covers the COMPLETE upper-left
   // chat but stops before the right HUD/player list. All automatic and manual OCR uses
   // the same geometry so there is no mismatch between detection and the preview.
-  const CHAT_ROI={x:0.00,y:0.015,w:0.66,h:0.41};
+  const CHAT_ROI={x:0.00,y:0.00,w:0.82,h:0.60};
   const FAST_BAN_ROI=CHAT_ROI;
-  const PHOTO_ROI={x:0.00,y:0.00,w:0.70,h:0.44};
+  const PHOTO_ROI={x:0.00,y:0.00,w:0.84,h:0.60};
 
   function makeOcrChatCrop(video,scale=2.6){
     return makeCrop(video,CHAT_ROI.x,CHAT_ROI.y,CHAT_ROI.w,CHAT_ROI.h,scale);
@@ -945,7 +973,7 @@
     const chat=makeOcrChatCrop(video,1.55);
     try{return await readBanProbeCanvas(worker,chat);}finally{clearCanvas(chat);}
   }
-  const REASON_ROI={x:0.00,y:0.00,w:0.66,h:0.42};
+  const REASON_ROI={x:0.00,y:0.00,w:0.82,h:0.60};
   async function readReasonDirect(worker,video){
     const crop=makeCrop(video,REASON_ROI.x,REASON_ROI.y,REASON_ROI.w,REASON_ROI.h,3.25);
     const texts=[];let best='';
@@ -1157,7 +1185,8 @@
     else if(field==='discordId'){return;}
     if(ctx.item){ctx.item.result={...ctx.item.result,[field]:v};ctx.item.result.timestamps={...(ctx.item.result.timestamps||{}),[field]:Number(time)||ctx.item.result.timestamps?.banner||0};if(field==='sc'&&v)ctx.item.result.offline=false;renderQueue();setEditorValues({...ctx.item.result,proof:ctx.item.youtube?.url||ctx.item.result.proof||''});setFieldStatus(ctx.item);}
     if(ctx.entry){ctx.entry[field]=v;ctx.entry.result={...(ctx.entry.result||{}),[field]:v};ctx.entry.timestamps={...(ctx.entry.timestamps||{}),[field]:Number(time)||ctx.entry.timestamps?.banner||0};if(field==='sc'&&v){ctx.entry.offline=false;ctx.entry.result.offline=false;}setEditorValues(ctx.entry);setFieldStatus({result:ctx.entry});}
-    if(field==='reason'||field==='targetId'||field==='date')renderTitlePreview();
+    if(field==='reason'){v=classifyReasonStrong(v)||canonicalReason(v)?.value||v;applyReasonPermaPolicy(v,false);if(ALLOWED_REASONS.includes(v))$('#reason').value=v;}
+    if(field==='reason'||field==='targetId'||field==='date'){renderTitlePreview();setTimeout(()=>setFieldStatus(state.editing?.item||state.editing?.entry||{}),0);}
     toast(`${field==='sc'?'SC':field==='server'?'Server':field==='reason'?'Grund':field==='targetId'?'Ziel-ID':field==='date'?'Datum':'Discord ID'} übernommen.`);
   }
   async function openVideoNewTab(entry,seconds=0){
@@ -1204,12 +1233,15 @@
           renderTitlePreview(); setFieldStatus({result:entry.result});
         }else if(!Number.isFinite(t)) t=Math.max(0,duration-0.4);
       }else if(field==='targetId'||field==='reason'){
-        // Reuse the verified ban time instead of rescanning. These buttons are now
-        // immediate and selectable even after OCR already finished.
-        t=Number(r.timestamps?.banner??r.timestamps?.targetId??r.timestamps?.reason??NaN);
-        if(!Number.isFinite(t)) t=Math.max(0,duration-0.4);
-        if(field==='targetId'&&r.targetId){$('#targetId').value=clampId(r.targetId);renderTitlePreview();}
-        if(field==='reason'&&ALLOWED_REASONS.includes(r.reason)){$('#reason').value=r.reason;renderTitlePreview();}
+        const hit=await findVerifiedBanInLastFive(media.video);
+        if(hit){
+          t=hit.time;
+          entry.result=entry.result||{}; entry.result.timestamps={...(entry.result.timestamps||{}),banner:t,targetId:t,reason:t};
+          entry.timestamps={...(entry.timestamps||{}),banner:t,targetId:t,reason:t};
+          if(hit.ban.targetId){entry.result.targetId=hit.ban.targetId;$('#targetId').value=hit.ban.targetId;}
+          if(hit.ban.reason){entry.result.reason=hit.ban.reason;if(ALLOWED_REASONS.includes(hit.ban.reason))$('#reason').value=hit.ban.reason;}
+          renderTitlePreview(); setFieldStatus({result:entry.result});
+        }else if(!Number.isFinite(t)) t=Math.max(0,duration-0.4);
       }else if(field==='sc'){
         t=Math.max(0,duration-0.5);
       }else if(field==='pcCheck'){
@@ -1228,7 +1260,7 @@
       const c=canvas.getContext('2d');c.imageSmoothingEnabled=true;c.drawImage(video,sx,sy,sw,sh,0,0,canvas.width,canvas.height);
       if(field==='targetId'||field==='reason'||field==='banner'){
         c.save();c.fillStyle='rgba(255,47,139,.10)';c.strokeStyle='#ff2f8b';c.lineWidth=Math.max(2,canvas.width/700);
-        const guide=field==='reason'?[0.00,.02,.76,.52]:field==='targetId'?[0.00,.02,.76,.52]:[0.00,.00,.82,.58];
+        const guide=field==='reason'?[0.00,.00,.82,.60]:field==='targetId'?[0.00,.00,.82,.60]:[0.00,.00,.86,.64];
         c.fillRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.strokeRect(canvas.width*guide[0],canvas.height*guide[1],canvas.width*guide[2],canvas.height*guide[3]);c.restore();
       }
     }catch(err){canvas.width=1;canvas.height=1;meta.textContent=`Foto konnte nicht geladen werden: ${err.message}`;}
@@ -1260,7 +1292,8 @@
     const r=item?.result||item||{};
     const missing=new Set(Array.isArray(r.missing)?r.missing:[]);
     const uiTarget=clampId($('#targetId')?.value||r.targetId||'');
-    const uiReason=canonicalReason($('#reason')?.value||r.reason||'')||($('#reason')?.value||r.reason||'');
+    const rawReason=String($('#reason')?.value||r.reason||'').trim();
+    const uiReason=ALLOWED_REASONS.includes(rawReason)?rawReason:(classifyReasonStrong(rawReason)||canonicalReason(rawReason)?.value||'');
     const uiSc=normalizeHexLoose($('#sc')?.value||r.sc||'');
     const statuses=[
       ['ID','Ziel-ID',/^\d{1,6}$/.test(uiTarget)],
@@ -1273,9 +1306,8 @@
     const result=editorState?.item?.result||editorState?.entry||r;
     $$('.jump').forEach(btn=>{
       const field=btn.dataset.field;
-      let show=!result?.[field];
-      // SC is ACP-driven and stays manually selectable; server/date are deterministic.
-      if(field==='sc') show=true;
+      let show=true;
+      // All editable OCR fields stay selectable so the reviewer can re-read the same field even when a value already exists.
       btn.classList.toggle('hidden',!show);
     });
     const warning=$('#ocrWarning');
@@ -1419,7 +1451,7 @@
     }
   }
   function setupEditor(){
-    $('#closeModal').onclick=closeEditor;$('#cancelBtn').onclick=closeEditor;$('#entryForm').addEventListener('submit',saveEditor);['#targetId','#date'].forEach(s=>$(s).addEventListener('input',renderTitlePreview));$('#reason').addEventListener('change',()=>{applyReasonPermaPolicy($('#reason').value,true);renderTitlePreview();setFieldStatus(state.editing?.item||state.editing?.entry||{});});$('#targetId').addEventListener('input',()=>{$('#targetId').value=clampId($('#targetId').value);setFieldStatus(state.editing?.item||state.editing?.entry||{});});$('#sc').addEventListener('input',()=>setFieldStatus(state.editing?.item||state.editing?.entry||{}));
+    $('#closeModal').onclick=closeEditor;$('#cancelBtn').onclick=closeEditor;$('#entryForm').addEventListener('submit',saveEditor);['#targetId','#date'].forEach(s=>$(s).addEventListener('input',renderTitlePreview));$('#reason').addEventListener('change',()=>{applyReasonPermaPolicy($('#reason').value,true);renderTitlePreview();setFieldStatus(state.editing?.item||state.editing?.entry||{});});$('#reason').addEventListener('input',()=>{renderTitlePreview();setFieldStatus(state.editing?.item||state.editing?.entry||{});});$('#targetId').addEventListener('input',()=>{$('#targetId').value=clampId($('#targetId').value);setFieldStatus(state.editing?.item||state.editing?.entry||{});});$('#sc').addEventListener('input',()=>setFieldStatus(state.editing?.item||state.editing?.entry||{}));
     $$('.chip').forEach(c=>c.onclick=()=>{const v=c.dataset.value;c.classList.toggle('active');if(c.classList.contains('active'))state.selectedTypes.add(v);else state.selectedTypes.delete(v);});
     $$('.photo-field').forEach(b=>b.onclick=()=>{$$('.photo-field').forEach(x=>x.classList.toggle('active',x===b));const field=b.dataset.field;showInfoPhoto(field);});
     $('#photoRefresh')?.addEventListener('click',()=>{const active=$('.photo-field.active');showInfoPhoto(active?.dataset.field||'banner');});
