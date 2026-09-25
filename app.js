@@ -1218,7 +1218,7 @@
       return [e.targetId,e.sc,e.reason,e.manualResult,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));
     });
     state.archiveSelected=new Set([...state.archiveSelected].filter(id=>list.some(e=>e.id===id)));
-    const bulk=$('#archiveBulkBar');if(bulk){bulk.classList.toggle('hidden',!list.length);const c=$('#archiveSelectedCount');if(c)c.textContent=String(state.archiveSelected.size);}
+    const bulk=$('#archiveBulkBar');if(bulk){bulk.classList.toggle('hidden',!list.length);const c=$('#archiveSelectedCount');if(c)c.textContent=String(state.archiveSelected.size);const csvBtn=$('#archiveCsvBtn');if(csvBtn)csvBtn.classList.toggle('hidden',filter!=='permaarchive');}
     const grid=$('#archiveGrid');
     grid.innerHTML=list.map(e=>{const duplicate=isDuplicateId(e);return `<article class="card ${duplicate?'duplicate-id':''}"><div class="thumb archive-thumb" data-thumb-id="${esc(e.id)}">${e.videoStored?`<img alt="POV Vorschau" loading="lazy" data-thumb-id="${esc(e.id)}">`:'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(String(e.id).slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span>${duplicate?'<span class="pill duplicate-tag">DOPPELTE ID</span>':''}${e.permaArchive?'<span class="pill perma-tag">POV ARCHIV</span>':''}</div><div class="card-body"><div class="card-title">${esc(e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div class="rid-cell"><span>SOC</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(formatDateDE(e.date)||'')}</div>${e.sourceSize?`<div><span>Dateigröße</span>${esc(formatSize(e.sourceSize))}<small class="size-bytes">${esc(formatBytesExact(e.sourceSize))}</small></div>`:''}<div><span>Ergebnis</span>${esc(e.manualResult||'')}</div><div><span>Grund</span>${esc(e.reason||'')}</div></div></div><div class="card-actions"><label class="archive-select"><input type="checkbox" data-archive-select="${esc(e.id)}" ${state.archiveSelected.has(e.id)?'checked':''}><span>Auswählen</span></label><button type="button" class="mini" data-action="open" data-id="${esc(e.id)}">Prüfen</button>${e.youtube?.url||e.proof?`<button type="button" class="mini primary" data-action="youtube" data-url="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}<button type="button" class="mini ${e.permaArchive?'danger':''}" data-action="perma" data-id="${esc(e.id)}">${e.permaArchive?'Aus Archiv':'POV-Archiv'}</button><button type="button" class="mini danger" data-action="delete" data-id="${esc(e.id)}">Löschen</button></div></article>`}).join('');
     $('#emptyState').classList.toggle('hidden',list.length>0);
@@ -1257,8 +1257,9 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     if(typeof v==='string'){const n=v.trim().toLowerCase();return ['true','1','yes','ja','perma','perma-ban','permaban'].includes(n);}
     return false;
   }
-  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:isPermaBanValue(e.permaArchive),Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
-  function csvRowsPermaBase(){return csvRowsBase(state.entries.filter(e=>isPermaBanValue(e.permaArchive)));}
+  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved&&!isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:isPermaBanValue(e.permaArchive),Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
+  function csvRowsArchiveBase(){return state.entries.filter(e=>e.saved&&isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:true,Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
+  function csvRowsPermaBase(){return csvRowsArchiveBase();}
   function csvRows(){const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();const reason=(($('#csvFilterReason')?.value)||'all');const sc=(($('#csvFilterSc')?.value)||'all');const perma=(($('#csvFilterPerma')?.value)||'all');return csvRowsBase().filter(r=>{if(reason!=='all'&&r.Grund!==reason)return false;if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;if(perma==='yes'&&r.Perma!==true)return false;if(perma==='no'&&r.Perma===true)return false;if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.Ergebnis,r.Grund].some(v=>String(v||'').toLowerCase().includes(q))))return false;return true;});}
 
   function renderCsv(){
@@ -1298,6 +1299,16 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if(ok)toast(`${rows.length} CSV-Einträge exportiert.`);
       return ok;
     }catch(err){console.error('CSV-Download fehlgeschlagen',err);toast('CSV-Download fehlgeschlagen: '+(err?.message||err));return false;}
+  }
+  function downloadArchiveCsv(){
+    try{
+      const rows=csvRowsArchiveBase();
+      if(!rows.length){toast('Keine POVs im POV-Archiv vorhanden.');return false;}
+      const blob=new Blob([csvTextFromRows(rows)],{type:'text/csv;charset=utf-8'});
+      const ok=triggerBrowserDownload(blob,`grandrp_pov-archiv-${new Date().toISOString().slice(0,10)}.csv`);
+      if(ok)toast(`${rows.length} POV-Archiv-Einträge exportiert.`);
+      return ok;
+    }catch(err){console.error('POV-Archiv-CSV-Download fehlgeschlagen',err);toast('POV-Archiv-CSV-Download fehlgeschlagen: '+(err?.message||err));return false;}
   }
   function downloadPermaCsv(){
     try{
@@ -1353,6 +1364,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     $('#search')?.addEventListener('input',renderArchive);
     $('#refreshCsvBtn')?.addEventListener('click',renderCsv);
     $('#downloadCsvBtn')?.addEventListener('click',downloadCsv);
+    $('#archiveCsvBtn')?.addEventListener('click',downloadArchiveCsv);
     $('#downloadPermaCsvBtn')?.addEventListener('click',downloadPermaCsv);
     $('#copyCsvBtn')?.addEventListener('click',copyCsv);
     ['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterPerma'].forEach(s=>{

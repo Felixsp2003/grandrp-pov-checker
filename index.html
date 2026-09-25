@@ -55,7 +55,7 @@
         <button class="filter" data-filter="negativ">Negativ <b id="countNeg">0</b></button>
         <button class="filter" data-filter="novideo">Ohne Video <b id="countNoVideo">0</b></button><button class="filter" data-filter="permaarchive">POV Archiv <b id="countPerma">0</b></button><button class="filter duplicate-filter" data-filter="duplicates">Doppelte IDs <b id="countDuplicates">0</b></button>
       </div>
-      <div class="archive-bulk hidden" id="archiveBulkBar"><strong><span id="archiveSelectedCount">0</span> POVs ausgewählt</strong><div><button type="button" class="ghost mini" id="archiveSelectAll">Alle auswählen</button><button type="button" class="ghost mini" id="archiveClearSelection">Auswahl löschen</button><button type="button" class="pink mini" id="archiveBulkPerma">Ausgewählte ins Archiv</button></div></div><div id="archiveGrid" class="grid"></div>
+      <div class="archive-bulk hidden" id="archiveBulkBar"><strong><span id="archiveSelectedCount">0</span> POVs ausgewählt</strong><div><button type="button" class="ghost mini" id="archiveSelectAll">Alle auswählen</button><button type="button" class="ghost mini" id="archiveClearSelection">Auswahl löschen</button><button type="button" class="pink mini" id="archiveBulkPerma">Ausgewählte ins Archiv</button><button type="button" class="ghost mini hidden" id="archiveCsvBtn">Archiv-CSV</button></div></div><div id="archiveGrid" class="grid"></div>
       <div id="emptyState" class="empty hidden"><div class="empty-icon">⊘</div><h2>Noch keine Einträge</h2><p>Lade mehrere POVs gleichzeitig hoch. Jede Aufnahme wird vollständig eingelesen und erst danach analysiert.</p><button class="pink" id="emptyUploadBtn">POVs hochladen</button></div>
     </section>
 
@@ -211,7 +211,7 @@
   }catch{}
 })();
 </script>
-<script src="app.js?v=133"></script>
+<script src="app.js?v=135"></script>
 
 
 </body>
