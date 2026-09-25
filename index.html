@@ -197,11 +197,11 @@
   });
 })();
 </script>
-<script src="app.js?v=114"></script>
+<script src="app.js?v=115"></script>
 <script>
 (function(){
   'use strict';
-  const KEY='grandrp_pending_backup_v114';
+  const KEY='grandrp_pending_backup_v115';
   const input=document.getElementById('archiveBackupFile');
   const status=document.getElementById('archiveBackupFileName');
   if(!input)return;
@@ -217,17 +217,23 @@
       if(!entries.length)throw new Error('Die Backup-Datei enthält keine Archiv-Einträge.');
       // Save the raw file BEFORE handing it to the app. This is the emergency fallback:
       // even if an application-side handler breaks, the next boot can recover this file.
-      localStorage.setItem(KEY,JSON.stringify({version:1,createdAt:Date.now(),name:file.name,raw:raw}));
-      localStorage.setItem('grandrp_archive_emergency_backup_v1',JSON.stringify({version:4,updatedAt:Date.now(),entries:entries}));
+      const stamp=Date.now();
+      localStorage.setItem(KEY,JSON.stringify({version:1,createdAt:stamp,name:file.name,raw:raw}));
+      localStorage.setItem('grandrp_archive_emergency_backup_v1',JSON.stringify({version:4,updatedAt:stamp,entries:entries}));
+      localStorage.setItem('grandrp_direct_restore_v115',JSON.stringify({version:1,updatedAt:stamp,name:file.name,entries:entries}));
       localStorage.setItem('grandrp_pov_meta_v42',JSON.stringify(entries));
-      localStorage.setItem('grandrp_pov_meta_updated_v1',String(Date.now()));
+      localStorage.setItem('grandrp_pov_meta_updated_v1',String(stamp));
       if(status)status.textContent='✓ Backup-Datei gelesen · '+entries.length+' Einträge · Wiederherstellung wird abgeschlossen …';
       window.dispatchEvent(new CustomEvent('grandrp-backup-file-ready',{detail:{raw:raw,name:file.name}}));
       // If app.js has not finished booting yet, reload once so the pending backup is
       // picked up during boot. When the app listener is active, no reload is needed.
       setTimeout(function(){
-        if(!window.__grandrpBackupReadyListener){location.reload();}
-      },800);
+        const visibleCards=document.querySelectorAll('#archiveGrid article').length;
+        if(visibleCards<entries.length){
+          try{status.textContent='Backup gespeichert · Seite lädt die wiederhergestellten Einträge …';}catch{}
+          location.reload();
+        }
+      },1800);
     }catch(err){
       console.error('Native Archiv-Backup-Import fehlgeschlagen',err);
       if(status)status.textContent='✕ Backup konnte nicht gelesen werden: '+(err&&err.message?err.message:String(err));

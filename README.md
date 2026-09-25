@@ -21,7 +21,7 @@ V111: Die Archiv-Wiederherstellung nutzt jetzt einen echten nativen Datei-Input 
 V111 fixes the missing renderCsv function and persists the selected website tab via URL hash + storage. Archive restore uses a native label/file input. ACP remains V93.
 
 
-## V114
+## V115
 - Fehlermeldung „renderCsv is not defined“ behoben; CSV-Rendering ist wieder vollständig vorhanden.
 - Backup-Wiederherstellung liest die ausgewählte JSON-Datei vollständig per `File.text()` ein, entfernt UTF-8-BOM und akzeptiert `entries`, `archive` sowie `data.entries`.
 - Das bisherige Recovery-Format `grandrp-recovery-backup` mit 35 Einträgen wird direkt unterstützt.
@@ -32,7 +32,10 @@ V111 fixes the missing renderCsv function and persists the selected website tab 
 - ACP bleibt V93 unverändert.
 
 
-V114: Archiv-Backup wird nach Dateiauswahl sofort eingelesen; Datei-Input wird zurückgesetzt, damit dieselbe JSON erneut gewählt werden kann. Cache-Busting auf app.js/styles.css V114. Aktiver Tab wird zusätzlich vor Seitenwechsel/Refresh persistiert. ACP bleibt V93.
+V115: Archiv-Backup wird nach Dateiauswahl sofort eingelesen; Datei-Input wird zurückgesetzt, damit dieselbe JSON erneut gewählt werden kann. Cache-Busting auf app.js/styles.css V115. Aktiver Tab wird zusätzlich vor Seitenwechsel/Refresh persistiert. ACP bleibt V93.
 
 
-V114: Native Backup-Import mit lokaler Pending-Sicherung; Wiederherstellung setzt Filter/Suche zurück, zeigt das Archiv sofort und verarbeitet ausstehende Backups beim Boot. ACP V93 unverändert.
+V115: Native Backup-Import mit lokaler Pending-Sicherung; Wiederherstellung setzt Filter/Suche zurück, zeigt das Archiv sofort und verarbeitet ausstehende Backups beim Boot. ACP V93 unverändert.
+
+
+V115: Backup-Import uses a dedicated direct-restore record with priority on startup; after import, filters are reset and the Archive view is opened automatically. ACP remains V93.
