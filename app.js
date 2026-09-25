@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V108';
+  const BUILD='V112';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -1042,7 +1042,21 @@
     const db=await openDB();
     return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});
   }
-  function showView(v,persist=true){if(!views[v])v='archive';$$('.view').forEach(x=>x.classList.remove('active'));$('#view-'+v).classList.add('active');$$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));$('#pageTitle').textContent=views[v][0];$('#pageSubtitle').textContent=views[v][1];if(persist)try{sessionStorage.setItem('grandrp_current_view',v);localStorage.setItem('grandrp_current_view',v);}catch{}if(v==='archive')renderArchive();if(v==='cases')renderCases();if(v==='csv')renderCsv();}
+  function showView(v,persist=true){
+    if(!views[v])v='archive';
+    $$('.view').forEach(x=>x.classList.remove('active'));
+    $('#view-'+v)?.classList.add('active');
+    $$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
+    if($('#pageTitle'))$('#pageTitle').textContent=views[v][0];
+    if($('#pageSubtitle'))$('#pageSubtitle').textContent=views[v][1];
+    if(persist){
+      try{sessionStorage.setItem('grandrp_current_view',v);localStorage.setItem('grandrp_current_view',v);}catch{}
+      try{history.replaceState(null,'',`${location.pathname}${location.search}#${v}`);}catch{try{location.hash=v;}catch{}}
+    }
+    if(v==='archive')renderArchive();
+    if(v==='cases')renderCases();
+    if(v==='csv')renderCsv();
+  }
   function duplicateIdMap(entries=state.entries){const map=new Map();for(const e of entries){const id=String(e?.targetId||'').trim();if(/^\d{1,6}$/.test(id))map.set(id,(map.get(id)||0)+1);}return map;}
   function duplicateIdCount(entries=state.entries){let n=0;for(const count of duplicateIdMap(entries).values())if(count>1)n++;return n;}
   function isDuplicateId(entry){const id=String(entry?.targetId||'').trim();return /^\d{1,6}$/.test(id)&&Number(duplicateIdMap().get(id)||0)>1;}
@@ -1088,6 +1102,24 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   function csvRowsPermaBase(){return csvRowsBase(state.entries.filter(e=>e.permaArchive));}
   function csvRows(){const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();const reason=(($('#csvFilterReason')?.value)||'all');const sc=(($('#csvFilterSc')?.value)||'all');const perma=(($('#csvFilterPerma')?.value)||'all');return csvRowsBase().filter(r=>{if(reason!=='all'&&r.Grund!==reason)return false;if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;if(perma==='yes'&&!r.Perma)return false;if(perma==='no'&&r.Perma)return false;if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.Ergebnis,r.Grund].some(v=>String(v||'').toLowerCase().includes(q))))return false;return true;});}
 
+  function renderCsv(){
+    const all=csvRowsBase();
+    const rows=csvRows();
+    const perma=csvRowsPermaBase();
+    const summary=$('#csvSummary');
+    if(summary)summary.textContent=`${rows.length} von ${all.length} Einträgen · ${perma.length} Perma-Archiv`;
+    const body=$('#csvPreviewBody');
+    if(!body)return;
+    body.innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.Proof)}</td><td>${esc(r.Datum)}</td><td>${esc(r.ID)}</td><td>${esc(r.SOC)}</td><td>${esc(r.RID)}</td><td>${esc(r.DiscordID)}</td><td>${esc(r.Familie)}</td><td>${esc(r.Ergebnis)}</td><td>${esc(r.Grund)}</td><td>${esc(r.Admin1)}</td><td>${esc(r.Admin2)}</td><td>${esc(r.Admin3)}</td><td>${esc(r.Admin4)}</td><td>${esc(r.Admin5)}</td><td><button type="button" class="mini" data-csv-open="${esc(r._id)}">Bearbeiten</button></td></tr>`).join(''):'<tr><td colspan=15 class="csv-empty">Keine Einträge passen zum Filter.</td></tr>';
+    body.onclick=async ev=>{
+      const b=ev.target.closest('[data-csv-open]');
+      if(!b)return;
+      const entry=state.entries.find(e=>e.id===b.dataset.csvOpen);
+      if(entry)await openEditorFromEntry(entry,{});
+    };
+    $('#csvEmpty')?.classList.toggle('hidden',all.length>0);
+  }
+
 
   let navDelegationInstalled=false;
   function installNavDelegation(){
@@ -1132,7 +1164,9 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       $$('.filter').forEach(x=>x.classList.toggle('active',x===b));
       renderArchive();
     }));
-    const savedView=sessionStorage.getItem('grandrp_current_view')||localStorage.getItem('grandrp_current_view');
+    let savedView='';
+    try{savedView=String(location.hash||'').replace(/^#/,'').trim();}catch{}
+    if(!savedView){try{savedView=sessionStorage.getItem('grandrp_current_view')||localStorage.getItem('grandrp_current_view')||'';}catch{}}
     if(savedView&&views[savedView])showView(savedView,false);
   }
 
@@ -2761,68 +2795,97 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     return [...merged.values()];
   }
 
-  function downloadArchiveBackup(){
+  function buildArchiveBackupPayload(entries){
+    return {
+      format:'grandrp-archive-backup',
+      version:4,
+      createdAt:new Date().toISOString(),
+      entries:sanitizeArchiveEntries(entries),
+      youtubeConnections:normalizeYoutubeConnections(state.ytConnections||[]),
+      settings:{...state.settings}
+    };
+  }
+  function triggerBrowserDownload(blob,filename){
+    const url=URL.createObjectURL(blob);
     try{
-      // Do not await anything before a.click(): browsers can discard the user
-      // activation after an async boundary and then silently block the download.
-      let entries=sanitizeArchiveEntries(state.entries||[]);
-      if(!entries.length){
-        try{
-          const emergency=JSON.parse(localStorage.getItem(ARCHIVE_BACKUP_KEY)||'null');
-          entries=sanitizeArchiveEntries(Array.isArray(emergency)?emergency:(emergency?.entries||[]));
-        }catch{}
-      }
-      if(!entries.length){
-        try{entries=sanitizeArchiveEntries(JSON.parse(localStorage.getItem(META_KEY)||'[]'));}catch{}
-      }
-      if(!entries.length){toast('Kein Archiv zum Sichern vorhanden.');return;}
-      const payload={format:'grandrp-archive-backup',version:3,createdAt:new Date().toISOString(),entries,youtubeConnections:state.ytConnections,settings:state.settings};
-      const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});
-      const url=URL.createObjectURL(blob);
       const a=document.createElement('a');
       a.href=url;
-      a.download=`grandrp-archiv-backup-${new Date().toISOString().slice(0,10)}.json`;
+      a.download=filename;
       a.rel='noopener';
-      a.style.position='fixed';
-      a.style.left='-10000px';
-      a.style.width='1px';
-      a.style.height='1px';
+      a.style.position='fixed';a.style.left='-99999px';a.style.top='-99999px';a.style.width='1px';a.style.height='1px';
       document.body.appendChild(a);
       a.click();
-      setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},2000);
-      toast(`${entries.length} Archiv-Einträge gesichert.`);
+      setTimeout(()=>{try{a.remove();}catch{};try{URL.revokeObjectURL(url);}catch{};},1500);
+      return true;
+    }catch(err){
+      try{URL.revokeObjectURL(url);}catch{}
+      throw err;
+    }
+  }
+  function downloadArchiveBackup(){
+    try{
+      const entries=sanitizeArchiveEntries(state.entries||[]);
+      if(!entries.length){toast('Kein Archiv zum Sichern vorhanden.');return;}
+      const payload=buildArchiveBackupPayload(entries);
+      const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+      const ok=triggerBrowserDownload(blob,`grandrp-archiv-backup-${new Date().toISOString().slice(0,10)}.json`);
+      if(ok)toast(`${entries.length} Archiv-Einträge gesichert.`);
     }catch(err){
       console.error('Archiv-Backup-Download fehlgeschlagen',err);
       toast('Backup konnte nicht heruntergeladen werden: '+(err?.message||err));
     }
   }
-
+  async function parseArchiveBackupFile(file){
+    if(!file)throw new Error('Keine Backup-Datei ausgewählt.');
+    const name=String(file.name||'').trim();
+    if(name && !/\.json$/i.test(name))throw new Error('Bitte eine JSON-Backup-Datei auswählen.');
+    let raw=await file.text();
+    raw=String(raw||'').replace(/^\uFEFF/,'').trim();
+    if(!raw)throw new Error('Die Backup-Datei ist leer.');
+    let parsed;
+    try{parsed=JSON.parse(raw);}catch(err){throw new Error('Die ausgewählte Datei enthält kein gültiges JSON.');}
+    const entries=Array.isArray(parsed)?parsed:(
+      Array.isArray(parsed?.entries)?parsed.entries:
+      Array.isArray(parsed?.archive)?parsed.archive:
+      Array.isArray(parsed?.data?.entries)?parsed.data.entries:[]
+    );
+    const clean=sanitizeArchiveEntries(entries);
+    if(!clean.length)throw new Error('Die Backup-Datei enthält keine gültigen Archiv-Einträge.');
+    return {parsed,entries:clean};
+  }
   async function restoreArchiveBackup(file){
-    if(!file)return;
     try{
-      const text=await file.text();
-      const parsed=JSON.parse(text);
-      const entries=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.entries)?parsed.entries:[]);
-      const clean=sanitizeArchiveEntries(entries);
-      if(!clean.length)throw new Error('Die Backup-Datei enthält keine Archiv-Einträge.');
-      if(!confirm(`Backup mit ${clean.length} Einträgen wiederherstellen?\n\nVorhandene Einträge werden nach ID zusammengeführt.`))return;
+      const {parsed,entries:clean}=await parseArchiveBackupFile(file);
+      const label=String(file?.name||'Backup');
+      if(!confirm(`„${label}“ enthält ${clean.length} Archiv-Einträge. Wiederherstellen?\n\nVorhandene Einträge werden nach ID zusammengeführt. Automatisch gelöscht wird nichts.`))return;
       try{await archiveReadyPromise;}catch{}
-      const byId=new Map((await collectDurableBackupEntries()).map(e=>[String(e.id),e]));
+      const durable=await collectDurableBackupEntries();
+      const byId=new Map(durable.map(e=>[String(e.id),e]));
       for(const e of clean)byId.set(String(e.id),e);
       state.entries=[...byId.values()];
+
       const stamp=Date.now();
-      try{localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:2,updatedAt:stamp,entries:sanitizeArchiveEntries(state.entries)}));}catch{}
-      try{localStorage.setItem(META_KEY,JSON.stringify(sanitizeArchiveEntries(state.entries)));localStorage.setItem(META_UPDATED_KEY,String(stamp));}catch{}
-      const ok=await saveMetaDb(state.entries,stamp,false);
+      const safe=sanitizeArchiveEntries(state.entries);
+      try{
+        localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:4,updatedAt:stamp,entries:safe}));
+        localStorage.setItem(META_KEY,JSON.stringify(safe));
+        localStorage.setItem(META_UPDATED_KEY,String(stamp));
+      }catch(err){console.warn('Backup localStorage-Sicherung fehlgeschlagen',err);}
+      if(parsed?.youtubeConnections)state.ytConnections=normalizeYoutubeConnections(parsed.youtubeConnections);
+      if(parsed?.settings&&typeof parsed.settings==='object')state.settings={...state.settings,...parsed.settings};
+      const ok=await saveMetaDb(safe,stamp,false);
       if(!ok)throw new Error('Das Archiv konnte nicht dauerhaft in IndexedDB gespeichert werden.');
-      renderArchive();renderCases();renderCsv();
-      toast(`Backup wiederhergestellt · ${state.entries.length} Einträge.`);
-    }catch(err){console.error(err);toast('Backup konnte nicht wiederhergestellt werden: '+(err?.message||err));}
+      saveYoutubeConnections();
+      void saveDurableAppState();
+      renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();
+      const nameEl=$('#archiveBackupFileName');
+      if(nameEl)nameEl.textContent=`Zuletzt eingelesen: ${label} · ${clean.length} Einträge`;
+      toast(`Backup eingelesen · ${clean.length} neue/überschriebene Einträge · insgesamt ${state.entries.length}.`);
+    }catch(err){
+      console.error('Archiv-Backup-Wiederherstellung fehlgeschlagen',err);
+      toast('Backup konnte nicht wiederhergestellt werden: '+(err?.message||err));
+    }
   }
-  // Expose backup operations immediately so the HTML controls remain functional
-  // even when another settings renderer throws before setupSettings() completes.
-  window.grandrpDownloadArchiveBackup=downloadArchiveBackup;
-  window.grandrpRestoreArchiveBackupFile=restoreArchiveBackup;
 
   function setupSettings(){
     state.settings.frames=Number(localStorage.getItem('v44_frames')||24);
@@ -2834,9 +2897,6 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v44_frames',state.settings.frames)};
     $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v44_window',state.settings.window)};
     $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v44_step',state.settings.step)};
-
-    // Backup controls are bound FIRST. A rendering error in another settings block
-    // must never prevent the archive backup buttons from working.
     for(let slot=1;slot<=YT_MAX_CONNECTIONS;slot++){
       const input=$(`#ytClientId${slot}`), connectBtn=$(`#ytConnect${slot}`), reauthBtn=$(`#ytReauth${slot}`), disconnectBtn=$(`#ytDisconnect${slot}`);
       input?.addEventListener('input',e=>setYoutubeConnectionClientId(slot,e.target.value));
@@ -2845,7 +2905,16 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       reauthBtn?.addEventListener('click',()=>reauthorizeYoutube(slot));
       disconnectBtn?.addEventListener('click',()=>disconnectYoutube(slot));
     }
-    try{renderYoutubeConnections();}catch(err){console.error('YouTube-Einstellungen konnten nicht gerendert werden',err);}
+    renderYoutubeConnections();
+    $('#downloadArchiveBackup')?.addEventListener('click',downloadArchiveBackup);
+    const backupFile=$('#archiveBackupFile');
+    backupFile?.addEventListener('change',e=>{
+      const f=e.target.files?.[0];
+      if(!f)return;
+      const nameEl=$('#archiveBackupFileName');
+      if(nameEl)nameEl.textContent=`Ausgewählt: ${f.name}`;
+      void restoreArchiveBackup(f);
+    });
     $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }
@@ -2889,6 +2958,10 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     renderQueue();
     void pumpUploads();
     renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();renderAuthUsers();
+    let savedView='';
+    try{savedView=String(location.hash||'').replace(/^#/,'').trim();}catch{}
+    if(!savedView){try{savedView=sessionStorage.getItem('grandrp_current_view')||localStorage.getItem('grandrp_current_view')||'';}catch{}}
+    if(savedView&&views[savedView])showView(savedView,false);
   }
   window.addEventListener('beforeunload' ,()=>{try{persistQueueNow();}catch{};try{saveYoutubeConnections();void saveDurableAppState();}catch{};try{state.worker?.terminate();}catch{};try{state.specialWorker?.terminate();}catch{};try{state.fastWorker?.terminate();}catch{}});
   setupAuthUI();

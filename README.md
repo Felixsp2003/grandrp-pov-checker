@@ -1,10 +1,32 @@
-Grand RP DC Checker V109
+# Grand RP DC Checker V107
 
-Website-Fix für Archiv-Backups:
-- Restore verwendet einen echten nativen input[type=file] innerhalb des sichtbaren Buttons. Dadurch öffnet Chrome direkt den Windows-Dateiauswahldialog.
-- Kein programmgesteuertes input.click() mehr für die Restore-Schaltfläche.
-- Backup-Download und Restore-Funktionen werden sofort global bereitgestellt und sind nicht von der restlichen Einstellungs-Initialisierung abhängig.
-- Download hat zusätzlich einen localStorage-Fallback, falls das Archivobjekt gerade noch nicht im UI geladen ist.
-- ACP bleibt auf V93 und wird nicht verändert.
+Webseite + ACP v93.
 
-Wichtig: Ein JSON-Backup enthält Archiv-Metadaten. Es kann lokale POV-Dateiblobs nicht neu erzeugen, falls Chrome diese bereits aus dem Browserprofil gelöscht hat.
+## V107 Änderungen
+- Fix für Archiv-Backup herunterladen/wiederherstellen.
+- `index.html` lädt die aktuelle `app.js?v=107`, damit kein alter Browser-Cache die Backup-Buttons blockiert.
+- Backup wartet auf das Laden des Archivs.
+- Backup sammelt die dauerhaft gespeicherten Archiv-Einträge aus IndexedDB/Recovery-Snapshots und localStorage.
+- Wiederherstellen öffnet die Dateiauswahl zuverlässig über `showPicker()` bzw. Fallback auf `click()`.
+- Wiederherstellung wird nach localStorage und IndexedDB geschrieben und anschließend direkt im Archiv angezeigt.
+- Automatische Löschungen des Archivs bleiben ausgeschlossen; Löschen erfolgt nur über die ausdrücklich vorhandenen Nutzeraktionen.
+
+### Hinweis
+Ein JSON-Backup enthält Archiv-Metadaten. Es kann lokale POV-Videodateien nicht neu erzeugen, wenn diese bereits vom Browser/Profil gelöscht wurden.
+
+
+V111: Die Archiv-Wiederherstellung nutzt jetzt einen echten nativen Datei-Input direkt über dem sichtbaren Button. Dadurch ist kein programmgesteuertes input.click() für den Datei-Dialog nötig. ACP V93 bleibt unverändert.
+
+
+V111 fixes the missing renderCsv function and persists the selected website tab via URL hash + storage. Archive restore uses a native label/file input. ACP remains V93.
+
+
+## V112
+- Fehlermeldung „renderCsv is not defined“ behoben; CSV-Rendering ist wieder vollständig vorhanden.
+- Backup-Wiederherstellung liest die ausgewählte JSON-Datei vollständig per `File.text()` ein, entfernt UTF-8-BOM und akzeptiert `entries`, `archive` sowie `data.entries`.
+- Das bisherige Recovery-Format `grandrp-recovery-backup` mit 35 Einträgen wird direkt unterstützt.
+- Wiederherstellung führt Einträge nach ID mit dem dauerhaft gespeicherten Archiv zusammen und löscht niemals automatisch bestehende Daten.
+- Der native Datei-Input liegt als transparente Fläche direkt über dem sichtbaren Wiederherstellen-Button; dadurch öffnet der normale Chrome-Dateidialog ohne `input.click()`-Workaround.
+- Nach Auswahl wird der Dateiname angezeigt; nach erfolgreicher Einlesung wird die Anzahl der eingelesenen Einträge gemeldet.
+- Der aktive Website-Tab wird über URL-Hash sowie Session-/Local-Storage wiederhergestellt.
+- ACP bleibt V93 unverändert.
