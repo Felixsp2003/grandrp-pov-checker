@@ -715,6 +715,9 @@
   const QUEUE_UPDATED_KEY='grandrp_pov_queue_updated_v1';
   const ARCHIVE_BACKUP_KEY='grandrp_archive_emergency_backup_v1';
   const ARCHIVE_AUTHORITATIVE_KEY='grandrp_archive_authoritative_v132';
+  // Explicit POV-Archiv placement is stored separately from archive snapshots.
+  // This prevents an older snapshot from moving a POV back to the normal list after refresh.
+  const ARCHIVE_PLACEMENT_KEY='grandrp_pov_archive_placement_v132';
   const PENDING_BACKUP_KEY='grandrp_pending_backup_v122';
   const DIRECT_RESTORE_KEY='grandrp_direct_restore_v122';
   const LEGACY_DIRECT_RESTORE_KEY='grandrp_direct_restore_v118';
@@ -726,6 +729,36 @@
   let archiveRestoreInProgress=false;
   function sanitizeArchiveEntries(entries){
     return (Array.isArray(entries)?entries:[]).filter(e=>e&&e.id).map(e=>({...e,file:undefined,videoUrl:undefined}));
+  }
+  function readArchivePlacement(){
+    try{
+      const raw=localStorage.getItem(ARCHIVE_PLACEMENT_KEY);
+      const parsed=raw?JSON.parse(raw):{};
+      return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:{};
+    }catch{return {};}
+  }
+  function saveArchivePlacement(entries=state.entries){
+    try{
+      const placement={};
+      for(const e of entries||[]){
+        if(e?.id && e.permaArchive===true)placement[String(e.id)]=true;
+      }
+      // Keep explicit removals too. Without them an old immutable snapshot can restore a POV
+      // to the archive after the user deliberately selected "Aus Archiv".
+      const current=readArchivePlacement();
+      for(const [id,value] of Object.entries(current)){
+        if(value===false)placement[id]=false;
+      }
+      localStorage.setItem(ARCHIVE_PLACEMENT_KEY,JSON.stringify(placement));
+    }catch(err){console.warn('POV-Archiv-Platzierung konnte nicht gespeichert werden',err);}
+  }
+  function applyArchivePlacement(entries){
+    const placement=readArchivePlacement();
+    return (entries||[]).map(e=>{
+      const id=String(e?.id||'');
+      if(id && Object.prototype.hasOwnProperty.call(placement,id))return {...e,permaArchive:placement[id]===true};
+      return e;
+    });
   }
   function readDirectRestorePayload(){
     const candidates=[];
@@ -984,28 +1017,14 @@
       return priority(b.source)-priority(a.source) || Number(b.updatedAt||0)-Number(a.updatedAt||0) || b.entries.length-a.entries.length;
     });
     const mergedById=new Map();
-    const permaIds=new Set();
-    // Perma/POV-Archiv is a one-way location flag. If ANY durable source still knows
-    // that an ID was moved into the POV archive, preserve that flag during recovery.
-    // This prevents an older snapshot/localStorage copy from moving the file back into
-    // the normal area after F5 / Ctrl+Shift+R.
-    for(const c of nonEmpty){
-      for(const e of sanitizeArchiveEntries(c.entries)){
-        if(e?.id && isPermaBanValue(e.permaArchive)) permaIds.add(String(e.id));
-      }
-    }
-    for(const c of [...nonEmpty].reverse()){
-      for(const e of sanitizeArchiveEntries(c.entries)){
-        if(e?.id) mergedById.set(String(e.id),e);
-      }
-    }
+    for(const c of [...nonEmpty].reverse()){for(const e of sanitizeArchiveEntries(c.entries)){if(e?.id)mergedById.set(String(e.id),e);}}
     const directFirst=nonEmpty.find(c=>c.source==='DIRECT-RESTORE');
     // Re-apply direct restore last so it wins deterministically for duplicate IDs.
     if(directFirst)for(const e of sanitizeArchiveEntries(directFirst.entries))if(e?.id)mergedById.set(String(e.id),e);
-    const recovered=[...mergedById.values()].map(e=>
-      permaIds.has(String(e.id)) ? {...e,permaArchive:true} : e
-    );
-    state.entries=recovered;
+    const recovered=[...mergedById.values()];
+    // Explicit archive placement always wins over recovered/older snapshots.
+    // This is the critical persistence layer for the POV-Archiv toggle.
+    state.entries=applyArchivePlacement(recovered);
 
     // If anything was recovered, immediately normalize both stores and create a fresh recovery snapshot.
     if(state.entries.length){
@@ -1033,6 +1052,7 @@
   }
   function saveMeta(options={}){
     const entries=sanitizeArchiveEntries(state.entries);
+    saveArchivePlacement(entries);
     const allowEmpty=!!options.allowEmpty&&options.explicitDelete===true;
     // Hard safety rule: normal code is NEVER allowed to overwrite an existing archive with [].
     if(!entries.length&&!allowEmpty){
@@ -1189,7 +1209,16 @@
       const b=ev.target.closest('button[data-action]');if(!b)return;const id=b.dataset.id;const e=state.entries.find(x=>x.id===id);if(!e)return;const action=b.dataset.action;
       if(action==='open'){await openEditorFromEntry(e,{});}
       else if(action==='youtube'){if(b.dataset.url)window.open(b.dataset.url,'_blank','noopener,noreferrer');}
-      else if(action==='perma'){e.permaArchive=!e.permaArchive;saveMeta();renderArchive();renderCsv();toast(e.permaArchive?'POV ins POV-Archiv verschoben.':'POV aus POV-Archiv entfernt.');}
+      else if(action==='perma'){
+        e.permaArchive=!e.permaArchive;
+        try{
+          const placement=readArchivePlacement();
+          placement[String(e.id)]=!!e.permaArchive;
+          localStorage.setItem(ARCHIVE_PLACEMENT_KEY,JSON.stringify(placement));
+        }catch(err){console.warn('POV-Archiv-Platzierung konnte nicht gespeichert werden',err);}
+        saveMeta();renderArchive();renderCsv();
+        toast(e.permaArchive?'POV ins POV-Archiv verschoben.':'POV aus POV-Archiv entfernt.');
+      }
       else if(action==='delete'){if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?
 
 Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==e.id);state.archiveSelected.delete(e.id);saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}}
@@ -1198,16 +1227,16 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   function setupArchiveBulk(){
     $('#archiveSelectAll')?.addEventListener('click',()=>{const ids=[...document.querySelectorAll('[data-archive-select]')].map(x=>x.dataset.archiveSelect);ids.forEach(id=>state.archiveSelected.add(id));renderArchive();});
     $('#archiveClearSelection')?.addEventListener('click',()=>{state.archiveSelected.clear();renderArchive();});
-    $('#archiveBulkPerma')?.addEventListener('click',()=>{const ids=[...state.archiveSelected];if(!ids.length){toast('Keine POVs ausgewählt.');return;}let n=0;for(const e of state.entries){if(ids.includes(e.id)&&!e.permaArchive){e.permaArchive=true;n++;}}state.archiveSelected.clear();saveMeta();renderArchive();renderCsv();toast(`${n} POV(s) ins Archiv verschoben.`);});
+    $('#archiveBulkPerma')?.addEventListener('click',()=>{const ids=[...state.archiveSelected];if(!ids.length){toast('Keine POVs ausgewählt.');return;}let n=0;const placement=readArchivePlacement();for(const e of state.entries){if(ids.includes(e.id)&&!e.permaArchive){e.permaArchive=true;placement[String(e.id)]=true;n++;}}try{localStorage.setItem(ARCHIVE_PLACEMENT_KEY,JSON.stringify(placement));}catch{}state.archiveSelected.clear();saveMeta();renderArchive();renderCsv();toast(`${n} POV(s) ins Archiv verschoben.`);});
   }
-  function renderCases(){const cases=state.entries.filter(e=>!e.complete&&!e.permaArchive);const box=$('#casesList');box.innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button type="button" class="mini" data-action="case-open" data-id="${esc(e.id)}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';box.onclick=async ev=>{const b=ev.target.closest('[data-action="case-open"]');if(!b)return;const e=state.entries.find(x=>x.id===b.dataset.id);if(e){await openEditorFromEntry(e,{});}};}
+  function renderCases(){const cases=state.entries.filter(e=>!e.complete);const box=$('#casesList');box.innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button type="button" class="mini" data-action="case-open" data-id="${esc(e.id)}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';box.onclick=async ev=>{const b=ev.target.closest('[data-action="case-open"]');if(!b)return;const e=state.entries.find(x=>x.id===b.dataset.id);if(e){await openEditorFromEntry(e,{});}};}
   function isPermaBanValue(v){
     if(v===true||v===1)return true;
     if(typeof v==='string'){const n=v.trim().toLowerCase();return ['true','1','yes','ja','perma','perma-ban','permaban'].includes(n);}
     return false;
   }
-  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved&&!e.permaArchive).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:isPermaBanValue(e.permaArchive),Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
-  function csvRowsPermaBase(){return state.entries.filter(e=>e.saved&&isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:true,Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
+  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:isPermaBanValue(e.permaArchive),Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
+  function csvRowsPermaBase(){return csvRowsBase(state.entries.filter(e=>isPermaBanValue(e.permaArchive)));}
   function csvRows(){const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();const reason=(($('#csvFilterReason')?.value)||'all');const sc=(($('#csvFilterSc')?.value)||'all');const perma=(($('#csvFilterPerma')?.value)||'all');return csvRowsBase().filter(r=>{if(reason!=='all'&&r.Grund!==reason)return false;if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;if(perma==='yes'&&r.Perma!==true)return false;if(perma==='no'&&r.Perma===true)return false;if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.Ergebnis,r.Grund].some(v=>String(v||'').toLowerCase().includes(q))))return false;return true;});}
 
   function renderCsv(){
