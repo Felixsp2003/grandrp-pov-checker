@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V106
+/* Grand RP DC Checker V114
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V112';
+  const BUILD='V114';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -705,6 +705,7 @@
   const META_UPDATED_KEY='grandrp_pov_meta_updated_v1';
   const QUEUE_UPDATED_KEY='grandrp_pov_queue_updated_v1';
   const ARCHIVE_BACKUP_KEY='grandrp_archive_emergency_backup_v1';
+  const PENDING_BACKUP_KEY='grandrp_pending_backup_v114';
   const ARCHIVE_SNAPSHOT_PREFIX='__grandrp_archive_snapshot_v106__';
   const ARCHIVE_ENTRY_PREFIX='__grandrp_archive_entry_v106__';
   const DESTRUCTIVE_TOKEN=Object.freeze({name:'explicit-user-delete'});
@@ -2918,20 +2919,33 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     renderYoutubeConnections();
     $('#downloadArchiveBackup')?.addEventListener('click',downloadArchiveBackup);
     const backupFile=$('#archiveBackupFile');
-    if(backupFile){
-      backupFile.addEventListener('change',e=>{
-        const f=e.target.files?.[0];
-        if(!f)return;
-        const nameEl=$('#archiveBackupFileName');
-        if(nameEl)nameEl.textContent=`Ausgewählt: ${f.name} · wird eingelesen …`;
-        void restoreArchiveBackup(f).finally(()=>{try{backupFile.value='';}catch{}});
-      });
-    }
+    window.__grandrpBackupReadyListener=true;
+    window.addEventListener('grandrp-backup-file-ready',ev=>{
+      const raw=String(ev.detail?.raw||'');
+      const name=String(ev.detail?.name||'Archiv-Backup.json');
+      if(!raw)return;
+      try{
+        const file=new File([raw],name,{type:'application/json'});
+        void restoreArchiveBackup(file);
+      }catch(err){console.error('Backup-Ereignis konnte nicht verarbeitet werden',err);toast('Backup konnte nicht verarbeitet werden: '+(err?.message||err));}
+      finally{try{if(backupFile)backupFile.value='';}catch{}}
+    });
     // Expose explicit handlers for debugging and for the native HTML control.
     window.grandrpRestoreArchiveBackup=restoreArchiveBackup;
     window.grandrpDownloadArchiveBackup=downloadArchiveBackup;
     $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
+  }
+
+  async function processPendingArchiveBackup(){
+    try{
+      const raw=localStorage.getItem(PENDING_BACKUP_KEY);
+      if(!raw)return;
+      let payload=JSON.parse(raw);
+      if(!payload||typeof payload.raw!=='string'||!payload.raw.trim())return;
+      const file=new File([payload.raw],String(payload.name||'grandrp-recovery-backup.json'),{type:'application/json'});
+      await restoreArchiveBackup(file);
+    }catch(err){console.error('Ausstehendes Archiv-Backup konnte nicht verarbeitet werden',err);}
   }
 
   async function bootApp(){
@@ -2974,6 +2988,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     void pumpUploads();
     renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();renderAuthUsers();
     restoreSavedView();
+    if(localStorage.getItem(PENDING_BACKUP_KEY))void processPendingArchiveBackup();
   }
   window.addEventListener('beforeunload' ,()=>{try{const active=document.querySelector('.view.active')?.id?.replace(/^view-/,'');if(active&&views[active])persistCurrentView(active);}catch{};try{persistQueueNow();}catch{};try{saveYoutubeConnections();void saveDurableAppState();}catch{};try{state.worker?.terminate();}catch{};try{state.specialWorker?.terminate();}catch{};try{state.fastWorker?.terminate();}catch{}});
   setupAuthUI();
