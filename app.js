@@ -710,7 +710,7 @@
   const META_DB_KEY='__grandrp_archive_meta__';
   const PERMA_DB_KEY='__grandrp_perma_archive__';
   const QUEUE_DB_KEY='__grandrp_upload_queue__';
-  const QUEUE_STORAGE_KEY='grandrp_pov_queue_v1';
+  const QUEUE_STORAGE_KEY='grandrp_pov_queue_v3';
   const META_UPDATED_KEY='grandrp_pov_meta_updated_v1';
   const QUEUE_UPDATED_KEY='grandrp_pov_queue_updated_v1';
   const ARCHIVE_BACKUP_KEY='grandrp_archive_emergency_backup_v1';
@@ -909,7 +909,8 @@
   function persistQueueNow(){
     const items=queueMetaSnapshot();
     const updatedAt=Date.now();
-    try{localStorage.setItem(QUEUE_STORAGE_KEY,JSON.stringify({version:2,updatedAt,items}));localStorage.setItem(QUEUE_UPDATED_KEY,String(updatedAt));}catch(err){console.warn('Warteschlange konnte nicht in localStorage gesichert werden',err);}
+    for(const item of items) item.updatedAt=updatedAt;
+    try{localStorage.setItem(QUEUE_STORAGE_KEY,JSON.stringify({version:3,updatedAt,items}));localStorage.setItem(QUEUE_UPDATED_KEY,String(updatedAt));}catch(err){console.warn('Warteschlange konnte nicht in localStorage gesichert werden',err);}
     void saveQueueDb(items,updatedAt);
   }
   function scheduleQueuePersist(){
@@ -925,8 +926,18 @@
       else if(raw&&Array.isArray(raw.items)){localItems=raw.items;localUpdatedAt=Math.max(localUpdatedAt,Number(raw.updatedAt)||0);}
     }catch{localItems=[];}
     const dbQueue=await getQueueDb();
-    let stored=localUpdatedAt>=Number(dbQueue.updatedAt||0)?localItems:(Array.isArray(dbQueue.items)?dbQueue.items:localItems);
-    if(!Array.isArray(stored)||!stored.length){state.queue=[];return;}
+    // The upload queue is append/merge persistent. Never let a newer-but-partial
+    // localStorage snapshot hide items that are still present in IndexedDB.
+    // This is especially important after a page refresh during/after an upload.
+    const mergedQueue=new Map();
+    for(const item of (Array.isArray(dbQueue.items)?dbQueue.items:[])){if(item?.id)mergedQueue.set(String(item.id),item);}
+    for(const item of localItems){
+      if(!item?.id)continue;
+      const key=String(item.id),prev=mergedQueue.get(key);
+      if(!prev || Number(item.updatedAt||0)>=Number(prev.updatedAt||0))mergedQueue.set(key,item);
+    }
+    let stored=[...mergedQueue.values()];
+    if(!stored.length){state.queue=[];return;}
     const restored=[];
     let changed=false;
     for(const meta of stored){
