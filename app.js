@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V102
+/* Grand RP DC Checker V103
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V102';
+  const BUILD='V103';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -792,21 +792,37 @@
   }
   async function requestPersistentStorage(){try{if(navigator.storage?.persist)await navigator.storage.persist();const persisted=await navigator.storage?.persisted?.();const el=$('#persistentStorageStatus');if(el){el.textContent=persisted?'● Dauerhafter Browser-Speicher aktiv':'● Browser-Speicher nicht garantiert';el.className='connection '+(persisted?'good':'warn');}return !!persisted;}catch{const el=$('#persistentStorageStatus');if(el){el.textContent='● Browser-Speicherstatus nicht verfügbar';el.className='connection warn';}return false;}}
   async function loadMeta(){
+    let localEntries=[];
+    let dbEntries=[];
+    let dbPerma=[];
     try{
       const dbData=await getMetaDb();
-      const dbEntries=Array.isArray(dbData?.entries)?dbData.entries:[];
-      const dbPerma=Array.isArray(dbData?.perma)?dbData.perma:[];
+      dbEntries=Array.isArray(dbData?.entries)?dbData.entries:[];
+      dbPerma=Array.isArray(dbData?.perma)?dbData.perma:[];
+    }catch(err){console.warn('IndexedDB-Archiv konnte nicht gelesen werden',err);}
+    try{
       let raw=localStorage.getItem(META_KEY);
       if(!raw) raw=localStorage.getItem('grandrp_pov_meta_v27')||localStorage.getItem('grandrp_pov_meta_v26')||localStorage.getItem('grandrp_pov_meta_v25')||'[]';
-      const localEntriesRaw=JSON.parse(raw)||[];
-      const localEntries=Array.isArray(localEntriesRaw)?localEntriesRaw:(localEntriesRaw?.entries||[]);
-      const localUpdatedAt=Math.max(Number(localStorage.getItem(META_UPDATED_KEY)||0),Number(localEntriesRaw?.updatedAt)||0);
-      const dbUpdatedAt=Number(dbData?.updatedAt||0);
-      state.entries=(localUpdatedAt>=dbUpdatedAt?localEntries:dbEntries);
-      if(!state.entries.length && dbPerma.length) state.entries=dbPerma;
-      else if(dbPerma.length){const ids=new Set(state.entries.map(e=>e.id));for(const e of dbPerma) if(!ids.has(e.id)) state.entries.push(e);}
-      if(state.entries.length){const stamp=Math.max(localUpdatedAt,dbUpdatedAt,Date.now());try{localStorage.setItem(META_KEY,JSON.stringify(state.entries.map(e=>({...e,file:undefined,videoUrl:undefined}))));localStorage.setItem(META_UPDATED_KEY,String(stamp));}catch{}if(stamp>dbUpdatedAt)void saveMetaDb(state.entries.map(e=>({...e,file:undefined,videoUrl:undefined})),stamp);}
-    }catch{state.entries=[];}
+      const parsed=JSON.parse(raw||'[]');
+      localEntries=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.entries)?parsed.entries:[]);
+    }catch(err){console.warn('localStorage-Archiv konnte nicht gelesen werden',err);}
+
+    // Archive is restored as a union instead of selecting one snapshot.
+    // localStorage is preferred for duplicate IDs because it is written synchronously;
+    // IndexedDB fills gaps when a previous save finished there first.
+    const byId=new Map();
+    for(const e of localEntries) if(e?.id) byId.set(String(e.id),e);
+    for(const e of dbEntries) if(e?.id&&!byId.has(String(e.id))) byId.set(String(e.id),e);
+    for(const e of dbPerma) if(e?.id&&!byId.has(String(e.id))) byId.set(String(e.id),e);
+    state.entries=[...byId.values()];
+
+    // Keep both stores synchronized, but never overwrite a non-empty archive with an empty one.
+    if(state.entries.length){
+      const clean=state.entries.map(e=>({...e,file:undefined,videoUrl:undefined}));
+      try{localStorage.setItem(META_KEY,JSON.stringify(clean));localStorage.setItem(META_UPDATED_KEY,String(Date.now()));}catch{}
+      void saveMetaDb(clean,Date.now());
+    }
+
     await loadYoutubeConnections();
     renderYoutubeConnections();
     try{
@@ -876,7 +892,7 @@
     }
   }
   async function clearDB(){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
-  function showView(v,persist=true){if(!views[v])v='archive';$$('.view').forEach(x=>x.classList.remove('active'));$('#view-'+v).classList.add('active');$$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));$('#pageTitle').textContent=views[v][0];$('#pageSubtitle').textContent=views[v][1];if(persist)try{sessionStorage.setItem('grandrp_current_view',v);localStorage.setItem('grandrp_current_view',v);}catch{}if(v==='archive')renderArchive();if(v==='cases')renderCases();if(v==='csv')renderCsv();}
+  function showView(v,persist=true){if(!views[v])v='archive';$$('.view').forEach(x=>x.classList.remove('active'));const viewEl=$('#view-'+v);if(!viewEl)return;viewEl.classList.add('active');$$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));if($('#pageTitle'))$('#pageTitle').textContent=views[v][0];if($('#pageSubtitle'))$('#pageSubtitle').textContent=views[v][1];if(persist)try{sessionStorage.setItem('grandrp_current_view',v);localStorage.setItem('grandrp_current_view',v);}catch{}if(v==='archive')renderArchive();if(v==='cases')renderCases();if(v==='csv')renderCsv();}
   function duplicateIdMap(entries=state.entries){const map=new Map();for(const e of entries){const id=String(e?.targetId||'').trim();if(/^\d{1,6}$/.test(id))map.set(id,(map.get(id)||0)+1);}return map;}
   function duplicateIdCount(entries=state.entries){let n=0;for(const count of duplicateIdMap(entries).values())if(count>1)n++;return n;}
   function isDuplicateId(entry){const id=String(entry?.targetId||'').trim();return /^\d{1,6}$/.test(id)&&Number(duplicateIdMap().get(id)||0)>1;}
@@ -921,6 +937,50 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
   function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:!!e.perma,PermaArchiv:!!e.permaArchive,Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
   function csvRowsPermaBase(){return csvRowsBase(state.entries.filter(e=>e.permaArchive));}
   function csvRows(){const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();const reason=(($('#csvFilterReason')?.value)||'all');const sc=(($('#csvFilterSc')?.value)||'all');const perma=(($('#csvFilterPerma')?.value)||'all');return csvRowsBase().filter(r=>{if(reason!=='all'&&r.Grund!==reason)return false;if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;if(perma==='yes'&&!r.Perma)return false;if(perma==='no'&&r.Perma)return false;if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.Ergebnis,r.Grund].some(v=>String(v||'').toLowerCase().includes(q))))return false;return true;});}
+
+
+  function setupNav(){
+    setupArchiveBulk();
+    $$('.nav-item').forEach(b=>{
+      b.onclick=(e)=>{
+        e.preventDefault();
+        e.stopPropagation();
+        showView(b.dataset.view);
+      };
+    });
+    $('#headerUploadBtn')?.addEventListener('click',()=>showView('upload'));
+    $('#emptyUploadBtn')?.addEventListener('click',()=>showView('upload'));
+    $('#headerCsvBtn')?.addEventListener('click',()=>showView('csv'));
+    $('#reloadBtn')?.addEventListener('click',()=>renderArchive());
+    $('#casesRefresh')?.addEventListener('click',renderCases);
+    $('#search')?.addEventListener('input',renderArchive);
+    $('#refreshCsvBtn')?.addEventListener('click',renderCsv);
+    $('#downloadCsvBtn')?.addEventListener('click',downloadCsv);
+    $('#downloadPermaCsvBtn')?.addEventListener('click',downloadPermaCsv);
+    $('#copyCsvBtn')?.addEventListener('click',copyCsv);
+    ['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterPerma'].forEach(s=>{
+      const el=$(s);
+      if(el)el.addEventListener(el.tagName==='SELECT'?'change':'input',renderCsv);
+    });
+    $('#csvFilterClear')?.addEventListener('click',()=>{
+      if($('#csvFilterSearch'))$('#csvFilterSearch').value='';
+      if($('#csvFilterReason'))$('#csvFilterReason').value='all';
+      if($('#csvFilterSc'))$('#csvFilterSc').value='all';
+      if($('#csvFilterPerma'))$('#csvFilterPerma').value='all';
+      if($('#csvFilterDiscord'))$('#csvFilterDiscord').value='all';
+      renderCsv();
+    });
+    $$('.filter').forEach(b=>{
+      b.onclick=()=>{
+        state.filter=b.dataset.filter;
+        $$('.filter').forEach(x=>x.classList.toggle('active',x===b));
+        renderArchive();
+      };
+    });
+    const savedView=sessionStorage.getItem('grandrp_current_view')||localStorage.getItem('grandrp_current_view');
+    if(savedView&&views[savedView])showView(savedView,false);
+    else showView('archive',false);
+  }
 
 
   const dropzone=$('#dropzone'), input=$('#fileInput');

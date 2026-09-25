@@ -1,2 +1,5 @@
-Grand RP DC Checker V102
-CSV filter for Perma-Ban plus live OCR progress / lighter last-five-second first pass. ACP unchanged from V93.
+Grand RP DC Checker V103
+- Fix: linkes Menü wieder klickbar.
+- Fix: Archiv-Wiederherstellung nutzt robuste Zusammenführung aus localStorage und IndexedDB und verliert keinen nicht-leeren Bestand.
+- Perma-Ban-CSV-Filter bleibt enthalten.
+- ACP V93 unverändert.
