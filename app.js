@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V107';
+  const BUILD='V108';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -2761,21 +2761,31 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     return [...merged.values()];
   }
 
-  async function downloadArchiveBackup(){
-    try{await archiveReadyPromise;}catch{}
-    const entries=await collectDurableBackupEntries();
-    if(!entries.length){toast('Kein Archiv zum Sichern vorhanden.');return;}
-    const payload={format:'grandrp-archive-backup',version:2,createdAt:new Date().toISOString(),entries,youtubeConnections:state.ytConnections,settings:state.settings};
-    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url;
-    a.download=`grandrp-archiv-backup-${new Date().toISOString().slice(0,10)}.json`;
-    a.rel='noopener';
-    a.style.display='none';
-    document.body.appendChild(a);
-    try{a.click();}finally{setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},1500);}
-    toast(`${entries.length} Archiv-Einträge gesichert.`);
+  function downloadArchiveBackup(){
+    try{
+      // Do not await anything before a.click(): browsers can discard the user
+      // activation after an async boundary and then silently block the download.
+      const entries=sanitizeArchiveEntries(state.entries||[]);
+      if(!entries.length){toast('Kein Archiv zum Sichern vorhanden.');return;}
+      const payload={format:'grandrp-archive-backup',version:3,createdAt:new Date().toISOString(),entries,youtubeConnections:state.ytConnections,settings:state.settings};
+      const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url;
+      a.download=`grandrp-archiv-backup-${new Date().toISOString().slice(0,10)}.json`;
+      a.rel='noopener';
+      a.style.position='fixed';
+      a.style.left='-10000px';
+      a.style.width='1px';
+      a.style.height='1px';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},2000);
+      toast(`${entries.length} Archiv-Einträge gesichert.`);
+    }catch(err){
+      console.error('Archiv-Backup-Download fehlgeschlagen',err);
+      toast('Backup konnte nicht heruntergeladen werden: '+(err?.message||err));
+    }
   }
 
   async function restoreArchiveBackup(file){
@@ -2820,14 +2830,23 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       disconnectBtn?.addEventListener('click',()=>disconnectYoutube(slot));
     }
     renderYoutubeConnections();
-    $('#downloadArchiveBackup')?.addEventListener('click',()=>{void downloadArchiveBackup();});
-    $('#restoreArchiveBackup')?.addEventListener('click',()=>{
-      const input=$('#archiveBackupFile');
-      if(!input)return;
-      try{if(typeof input.showPicker==='function')input.showPicker();else input.click();}
-      catch(err){console.warn('Dateiauswahl konnte nicht geöffnet werden',err);try{input.click();}catch{toast('Dateiauswahl konnte nicht geöffnet werden. Bitte die Seite einmal neu laden.');}}
+    $('#downloadArchiveBackup')?.addEventListener('click',downloadArchiveBackup);
+    const backupFile=$('#archiveBackupFile');
+    $('#restoreArchiveBackup')?.addEventListener('click',e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      if(!backupFile){toast('Backup-Dateifeld wurde nicht gefunden.');return;}
+      // Keep the file input in the DOM (not display:none/hidden) so Chrome's
+      // native file chooser can always be opened from the trusted click event.
+      try{backupFile.value='';}catch{}
+      try{backupFile.click();}
+      catch(err){console.error('Dateiauswahl konnte nicht geöffnet werden',err);toast('Dateiauswahl konnte nicht geöffnet werden: '+(err?.message||err));}
     });
-    $('#archiveBackupFile')?.addEventListener('change',e=>{const f=e.target.files?.[0];if(f)void restoreArchiveBackup(f);e.target.value='';});
+    backupFile?.addEventListener('change',e=>{
+      const f=e.target.files?.[0];
+      if(!f)return;
+      void restoreArchiveBackup(f);
+    });
     $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }
