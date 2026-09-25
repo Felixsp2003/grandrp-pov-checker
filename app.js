@@ -26,8 +26,8 @@
   const YT_OAUTH_PENDING_KEY='grandrp_youtube_oauth_pending_v89';
   const YT_MAX_CONNECTIONS=3;
   const DRIVE_OAUTH_PENDING_KEY='grandrp_youtube_oauth_pending_v89';
-  const DRIVE_STATE_KEY='grandrp_drive_oauth_state_v120';
-  const DRIVE_RESULT_KEY='grandrp_drive_oauth_result_v120';
+  const DRIVE_STATE_KEY='grandrp_drive_oauth_state_v122';
+  const DRIVE_RESULT_KEY='grandrp_drive_oauth_result_v122';
   const DRIVE_FOLDER_NAME='GrandRP DC Checker';
   const DRIVE_MANIFEST_NAME='grandrp-archive-manifest.json';
   const DRIVE_FOLDER_MIME='application/vnd.google-apps.folder';
@@ -714,8 +714,8 @@
   const META_UPDATED_KEY='grandrp_pov_meta_updated_v1';
   const QUEUE_UPDATED_KEY='grandrp_pov_queue_updated_v1';
   const ARCHIVE_BACKUP_KEY='grandrp_archive_emergency_backup_v1';
-  const PENDING_BACKUP_KEY='grandrp_pending_backup_v120';
-  const DIRECT_RESTORE_KEY='grandrp_direct_restore_v120';
+  const PENDING_BACKUP_KEY='grandrp_pending_backup_v122';
+  const DIRECT_RESTORE_KEY='grandrp_direct_restore_v122';
   const LEGACY_DIRECT_RESTORE_KEY='grandrp_direct_restore_v118';
   const ARCHIVE_SNAPSHOT_PREFIX='__grandrp_archive_snapshot_v106__';
   const ARCHIVE_ENTRY_PREFIX='__grandrp_archive_entry_v106__';
@@ -2167,6 +2167,10 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     }
     state.entries=[record,...state.entries.filter(x=>x.id!==record.id)];
     saveMeta();
+    // Sobald der POV vollständig gespeichert ist, sofort die Cloud-Sicherung anstoßen.
+    // Falls Google Drive nicht verbunden ist, bleibt der Aufruf folgenlos; nach dem Verbinden
+    // bzw. beim nächsten Upload greift die automatische Sicherung erneut.
+    void syncDriveBackup();
 
     // Ein erfolgreich gespeicherter/geprüfter POV ist kein Warteschlangen-Eintrag mehr.
     // Die IndexedDB-Datei bleibt erhalten, weil sie jetzt vom Archiv verwendet wird.
@@ -2964,6 +2968,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if(!payload)return 0;
       const clean=sanitizeArchiveEntries(payload?.entries);
       if(!clean.length)return 0;
+      const activeBefore=document.querySelector('.view.active')?.id?.replace(/^view-/,'');
       // A restore is authoritative: use the selected backup as the complete archive.
       // Do this AFTER normal startup/loading so no older IndexedDB snapshot can replace it.
       state.entries=clean.map(e=>({...e,file:undefined,videoUrl:undefined}));
@@ -2985,8 +2990,11 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       try{renderCases();}catch(err){console.error('Verdachtsfälle konnten nach Restore nicht gerendert werden',err);}
       try{renderCsv();}catch(err){console.error('CSV konnte nach Restore nicht gerendert werden',err);}
       try{renderQueue();}catch(err){console.error('Warteschlange konnte nach Restore nicht gerendert werden',err);}
-      try{showView('archive',false);}catch(err){console.error('Archiv-Ansicht konnte nach Restore nicht geöffnet werden',err);}
-      try{persistCurrentView('archive');}catch{}
+      try{
+        const target=(options.forceArchive===true?'archive':activeBefore);
+        if(target&&views[target])showView(target,false);
+      }catch(err){console.error('Ansicht konnte nach Restore nicht wiederhergestellt werden',err);}
+      if(options.forceArchive===true){try{persistCurrentView('archive');}catch{}}
       const status=$('#archiveBackupFileName');
       if(status && options.showStatus!==false)status.textContent=`✓ Archiv wiederhergestellt · ${state.entries.length} Einträge · ${String(payload?.name||'Backup')}`;
       return state.entries.length;
@@ -3017,7 +3025,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       // be resolving in parallel with the file-input change event.
       let count=0;
       try{count=window.grandrpSetArchiveEntries?window.grandrpSetArchiveEntries(clean,{replace:true}):0;}catch(err){console.error('Direkter UI-Archivsetter fehlgeschlagen',err);}
-      const forced=await forceApplyDirectRestore({showStatus:false});
+      const forced=await forceApplyDirectRestore({showStatus:false,forceArchive:true});
       count=Math.max(count,forced);
       if(count<clean.length)throw new Error(`Restore-Prüfung fehlgeschlagen (${count}/${clean.length} Einträge übernommen).`);
       // Make the UI authoritative as well: clear filters/search and render the exact imported

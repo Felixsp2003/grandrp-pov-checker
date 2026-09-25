@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=120">
+<link rel="stylesheet" href="styles.css?v=122">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -37,7 +37,7 @@
     <header class="topbar">
       <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V120</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V122</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -103,7 +103,7 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V120</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V122</span></div>
           <p class="hint">POVs bis 2 Minuten werden vollständig in 250-ms-Schritten durchsucht. Längere Videos werden adaptiv gescannt und bei Treffern verdichtet. Das Info-Foto kommt aus einem verifizierten Bann-Cluster; der Bannblock wird für das Info-Foto bevorzugt in den letzten 5 Sekunden verifiziert. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
@@ -221,7 +221,7 @@
   }catch{}
 })();
 </script>
-<script src="app.js?v=120"></script>
+<script src="app.js?v=122"></script>
 <script>
 (function(){
   'use strict';
@@ -230,7 +230,7 @@
   const META_DB_KEY='__grandrp_archive_meta__';
   const PERMA_DB_KEY='__grandrp_perma_archive__';
   const EMERGENCY_KEY='grandrp_archive_emergency_backup_v1';
-  const DIRECT_KEY='grandrp_direct_restore_v120';
+  const DIRECT_KEY='grandrp_direct_restore_v122';
   const LEGACY_KEYS=['grandrp_direct_restore_v118','grandrp_direct_restore_v117'];
   const status=document.getElementById('archiveBackupFileName');
   const input=document.getElementById('archiveBackupFile');
@@ -277,7 +277,6 @@
     const idCounts={};list.forEach(e=>{const id=String(e.targetId||'');if(id)idCounts[id]=(idCounts[id]||0)+1;});count('countDuplicates',Object.values(idCounts).filter(n=>n>1).length);
     g.innerHTML=list.map(e=>`<article class="card ${idCounts[String(e.targetId||'')] > 1?'duplicate-id':''}"><div class="thumb archive-thumb">${e.videoStored?'<div>POV</div>':'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(String(e.id).slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span>${e.permaArchive?'<span class="pill perma-tag">POV ARCHIV</span>':''}</div><div class="card-body"><div class="card-title">${esc(e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div><span>SOC</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(fmtDate(e.date))}</div><div><span>Ergebnis</span>${esc(e.manualResult||'')}</div><div><span>Grund</span>${esc(e.reason||'')}</div></div></div><div class="card-actions"><button type="button" class="mini danger" data-repair-delete="${esc(e.id)}">Löschen</button>${e.youtube?.url||e.proof?`<button type="button" class="mini primary" data-repair-open="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}</div></article>`).join('');
     if(empty())empty().classList.toggle('hidden',list.length>0);
-    const view=document.getElementById('view-archive'); if(view)view.classList.add('active');
   }
   async function importBackup(file){
     if(!file)throw new Error('Keine Backup-Datei ausgewählt.');
@@ -288,7 +287,7 @@
     const current=readLocalEntries(); const map=new Map(current.map(e=>[String(e.id),e])); backup.forEach(e=>map.set(String(e.id),e));
     const merged=[...map.values()]; const stamp=Date.now();
     persistLocal(merged,stamp); await persistDb(merged,stamp);
-    // Tell the application state immediately when the V120 bridge exists.
+    // Tell the application state immediately when the V122 bridge exists.
     try{if(window.grandrpSetArchiveEntries)window.grandrpSetArchiveEntries(merged,{replace:true});}catch(err){console.warn('App-Bridge konnte Archiv nicht setzen',err);}
     renderStandalone(merged);
     if(status)status.textContent=`✓ Archiv wiederhergestellt · ${backup.length} Backup-Einträge · ${merged.length} insgesamt`;
@@ -329,7 +328,7 @@
   },true);
   input?.addEventListener('change',async()=>{const file=input.files?.[0];if(!file)return;try{if(status)status.textContent=`Backup-Datei wird eingelesen: ${file.name} …`;await importBackup(file);}catch(err){console.error(err);if(status)status.textContent='✕ '+(err?.message||String(err));}finally{try{input.value='';}catch{}}});
   // Restore the current tab and a direct backup at the end of startup as well.
-  window.addEventListener('load',()=>{setTimeout(()=>{const rows=readLocalEntries();if(rows.length)renderStandalone(rows);try{const saved=location.hash?.slice(1)||sessionStorage.getItem('grandrp_current_view')||localStorage.getItem('grandrp_current_view');if(saved&&document.querySelector(`#view-${saved}`)){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.querySelector(`#view-${saved}`).classList.add('active');document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view===saved));}}catch{}},250);});
+  window.addEventListener('load',()=>{setTimeout(()=>{const rows=readLocalEntries();if(rows.length)renderStandalone(rows);try{const saved=location.hash?.slice(1)||sessionStorage.getItem('grandrp_current_view')||localStorage.getItem('grandrp_current_view')||'archive';document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view===saved));const target=document.querySelector(`#view-${saved}`)||document.querySelector('#view-archive');if(target)target.classList.add('active');const actual=target?.id?.replace(/^view-/,'')||'archive';if(actual!==saved){try{localStorage.setItem('grandrp_current_view',actual);sessionStorage.setItem('grandrp_current_view',actual);history.replaceState(null,'',`${location.pathname}${location.search}#${actual}`);}catch{}}const ttl=target?.querySelector('h1,h2')?.textContent;if(ttl&&document.getElementById('pageTitle'))document.getElementById('pageTitle').textContent=ttl;}catch{}},250);});
 })();
 </script>
 
