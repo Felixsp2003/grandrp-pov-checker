@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V103
+/* Grand RP DC Checker V105
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V103';
+  const BUILD='V105';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -703,9 +703,85 @@
   const QUEUE_STORAGE_KEY='grandrp_pov_queue_v1';
   const META_UPDATED_KEY='grandrp_pov_meta_updated_v1';
   const QUEUE_UPDATED_KEY='grandrp_pov_queue_updated_v1';
+  const ARCHIVE_BACKUP_KEY='grandrp_archive_emergency_backup_v1';
+  const ARCHIVE_SNAPSHOT_PREFIX='__grandrp_archive_snapshot_v105__';
+  const ARCHIVE_SNAPSHOT_COUNT=20;
   let queuePersistTimer=0;
-  async function getMetaDb(){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const os=tx.objectStore(STORE);const r=os.get(META_DB_KEY);const p=os.get(PERMA_DB_KEY);tx.oncomplete=()=>{const val=r.result;const parsed=Array.isArray(val)?{entries:val,updatedAt:0}:((val&&Array.isArray(val.entries))?{entries:val.entries,updatedAt:Number(val.updatedAt)||0}:{entries:[],updatedAt:0});res({entries:parsed.entries,updatedAt:parsed.updatedAt,perma:Array.isArray(p.result)?p.result:[]});};tx.onerror=()=>rej(tx.error);});}catch{return {entries:[],updatedAt:0,perma:[]};}}
-  async function saveMetaDb(entries,updatedAt=Date.now()){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');const os=tx.objectStore(STORE);os.put({version:2,updatedAt,entries},META_DB_KEY);os.put(entries.filter(e=>e.permaArchive),PERMA_DB_KEY);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}catch(err){console.warn('Archiv-Metadaten konnten nicht in IndexedDB gesichert werden',err);}}
+  function sanitizeArchiveEntries(entries){
+    return (Array.isArray(entries)?entries:[]).filter(e=>e&&e.id).map(e=>({...e,file:undefined,videoUrl:undefined}));
+  }
+  async function getArchiveSnapshotsDb(){
+    try{
+      const db=await openDB();
+      return await new Promise((res,rej)=>{
+        const tx=db.transaction(STORE,'readonly');
+        const os=tx.objectStore(STORE);
+        const keysReq=os.getAllKeys();
+        keysReq.onerror=()=>rej(keysReq.error);
+        keysReq.onsuccess=()=>{
+          const keys=(keysReq.result||[]).filter(k=>String(k).startsWith(ARCHIVE_SNAPSHOT_PREFIX));
+          if(!keys.length){res([]);return;}
+          const out=[];let left=keys.length;
+          for(const key of keys){
+            const r=os.get(key);
+            r.onsuccess=()=>{const v=r.result;if(v&&Array.isArray(v.entries)&&v.entries.length)out.push({entries:v.entries,updatedAt:Number(v.updatedAt)||0,source:'snapshot:'+key});if(--left===0)res(out);};
+            r.onerror=()=>{if(--left===0)res(out);};
+          }
+        };
+        tx.onerror=()=>rej(tx.error);
+      });
+    }catch{return [];}
+  }
+  async function trimArchiveSnapshotsDb(){
+    try{
+      const db=await openDB();
+      await new Promise((res,rej)=>{
+        const tx=db.transaction(STORE,'readwrite');
+        const os=tx.objectStore(STORE);const req=os.getAllKeys();
+        req.onsuccess=()=>{
+          const keys=(req.result||[]).filter(k=>String(k).startsWith(ARCHIVE_SNAPSHOT_PREFIX));
+          keys.sort((a,b)=>String(a).localeCompare(String(b)));
+          const remove=keys.slice(0,Math.max(0,keys.length-ARCHIVE_SNAPSHOT_COUNT));
+          for(const k of remove)os.delete(k);
+        };
+        tx.oncomplete=res;tx.onerror=()=>rej(tx.error);
+      });
+    }catch(err){console.warn('Archiv-Snapshots konnten nicht bereinigt werden',err);}
+  }
+  async function getMetaDb(){
+    try{
+      const db=await openDB();
+      return await new Promise((res,rej)=>{
+        const tx=db.transaction(STORE,'readonly');
+        const os=tx.objectStore(STORE);const r=os.get(META_DB_KEY);const p=os.get(PERMA_DB_KEY);
+        tx.oncomplete=()=>{
+          const val=r.result;
+          const parsed=Array.isArray(val)?{entries:val,updatedAt:0}:((val&&Array.isArray(val.entries))?{entries:val.entries,updatedAt:Number(val.updatedAt)||0}:{entries:[],updatedAt:0});
+          res({entries:parsed.entries,updatedAt:parsed.updatedAt,perma:Array.isArray(p.result)?p.result:[]});
+        };
+        tx.onerror=()=>rej(tx.error);
+      });
+    }catch{return {entries:[],updatedAt:0,perma:[]};}
+  }
+  async function saveMetaDb(entries,updatedAt=Date.now(),allowEmpty=false){
+    const clean=sanitizeArchiveEntries(entries);
+    if(!clean.length && !allowEmpty) return false;
+    try{
+      const db=await openDB();
+      const snapshotKey=`${ARCHIVE_SNAPSHOT_PREFIX}${String(updatedAt).padStart(16,'0')}_${Math.random().toString(36).slice(2,8)}`;
+      await new Promise((res,rej)=>{
+        const tx=db.transaction(STORE,'readwrite');
+        const os=tx.objectStore(STORE);
+        // Main archive, perma subset and an immutable recovery snapshot are committed together.
+        os.put({version:3,updatedAt,entries:clean},META_DB_KEY);
+        os.put(clean.filter(e=>e.permaArchive),PERMA_DB_KEY);
+        if(clean.length) os.put({version:1,updatedAt,entries:clean},snapshotKey);
+        tx.oncomplete=res;tx.onerror=()=>rej(tx.error);
+      });
+      void trimArchiveSnapshotsDb();
+      return true;
+    }catch(err){console.warn('Archiv-Metadaten konnten nicht in IndexedDB gesichert werden',err);return false;}
+  }
   async function getQueueDb(){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const r=tx.objectStore(STORE).get(QUEUE_DB_KEY);tx.oncomplete=()=>{const val=r.result;res(Array.isArray(val)?{items:val,updatedAt:0}:((val&&Array.isArray(val.items))?{items:val.items,updatedAt:Number(val.updatedAt)||0}:{items:[],updatedAt:0}));};tx.onerror=()=>rej(tx.error);});}catch{return {items:[],updatedAt:0};}}
   async function saveQueueDb(items,updatedAt=Date.now()){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put({version:2,updatedAt,items},QUEUE_DB_KEY);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}catch(err){console.warn('Warteschlange konnte nicht in IndexedDB gesichert werden',err);}}
   function queueMetaSnapshot(){
@@ -792,35 +868,42 @@
   }
   async function requestPersistentStorage(){try{if(navigator.storage?.persist)await navigator.storage.persist();const persisted=await navigator.storage?.persisted?.();const el=$('#persistentStorageStatus');if(el){el.textContent=persisted?'● Dauerhafter Browser-Speicher aktiv':'● Browser-Speicher nicht garantiert';el.className='connection '+(persisted?'good':'warn');}return !!persisted;}catch{const el=$('#persistentStorageStatus');if(el){el.textContent='● Browser-Speicherstatus nicht verfügbar';el.className='connection warn';}return false;}}
   async function loadMeta(){
-    let localEntries=[];
-    let dbEntries=[];
-    let dbPerma=[];
+    const candidates=[];
     try{
       const dbData=await getMetaDb();
-      dbEntries=Array.isArray(dbData?.entries)?dbData.entries:[];
-      dbPerma=Array.isArray(dbData?.perma)?dbData.perma:[];
+      if(dbData.entries?.length)candidates.push({entries:dbData.entries,updatedAt:Number(dbData.updatedAt)||0,source:'IndexedDB'});
+      if(dbData.perma?.length)candidates.push({entries:dbData.perma,updatedAt:Number(dbData.updatedAt)||0,source:'IndexedDB perma'});
+      const snaps=await getArchiveSnapshotsDb();
+      candidates.push(...snaps);
     }catch(err){console.warn('IndexedDB-Archiv konnte nicht gelesen werden',err);}
+
+    // Read every relevant localStorage archive snapshot. This also recovers data from older builds.
     try{
-      let raw=localStorage.getItem(META_KEY);
-      if(!raw) raw=localStorage.getItem('grandrp_pov_meta_v27')||localStorage.getItem('grandrp_pov_meta_v26')||localStorage.getItem('grandrp_pov_meta_v25')||'[]';
-      const parsed=JSON.parse(raw||'[]');
-      localEntries=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.entries)?parsed.entries:[]);
-    }catch(err){console.warn('localStorage-Archiv konnte nicht gelesen werden',err);}
+      for(let i=0;i<localStorage.length;i++){
+        const key=localStorage.key(i)||'';
+        if(!/grandrp.*(?:pov_meta|archive.*backup|archive.*snapshot)/i.test(key))continue;
+        const raw=localStorage.getItem(key);if(!raw)continue;
+        let parsed;try{parsed=JSON.parse(raw);}catch{continue;}
+        const rows=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.entries)?parsed.entries:[]);
+        if(rows.length)candidates.push({entries:rows,updatedAt:Number(parsed?.updatedAt)||Number(localStorage.getItem(META_UPDATED_KEY)||0),source:'localStorage:'+key});
+      }
+    }catch(err){console.warn('localStorage-Archiv konnte nicht vollständig durchsucht werden',err);}
 
-    // Archive is restored as a union instead of selecting one snapshot.
-    // localStorage is preferred for duplicate IDs because it is written synchronously;
-    // IndexedDB fills gaps when a previous save finished there first.
-    const byId=new Map();
-    for(const e of localEntries) if(e?.id) byId.set(String(e.id),e);
-    for(const e of dbEntries) if(e?.id&&!byId.has(String(e.id))) byId.set(String(e.id),e);
-    for(const e of dbPerma) if(e?.id&&!byId.has(String(e.id))) byId.set(String(e.id),e);
-    state.entries=[...byId.values()];
+    // Prefer the newest non-empty dataset. An empty current store can NEVER hide a valid archive.
+    const nonEmpty=candidates.filter(c=>Array.isArray(c.entries)&&c.entries.length);
+    nonEmpty.sort((a,b)=>Number(b.updatedAt||0)-Number(a.updatedAt||0)||b.entries.length-a.entries.length);
+    let recovered=nonEmpty[0]?.entries||[];
+    state.entries=recovered;
 
-    // Keep both stores synchronized, but never overwrite a non-empty archive with an empty one.
+    // If anything was recovered, immediately normalize both stores and create a fresh recovery snapshot.
     if(state.entries.length){
-      const clean=state.entries.map(e=>({...e,file:undefined,videoUrl:undefined}));
-      try{localStorage.setItem(META_KEY,JSON.stringify(clean));localStorage.setItem(META_UPDATED_KEY,String(Date.now()));}catch{}
-      void saveMetaDb(clean,Date.now());
+      try{
+        const clean=sanitizeArchiveEntries(state.entries);const stamp=Math.max(Date.now(),...candidates.map(c=>Number(c.updatedAt)||0));
+        localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:1,updatedAt:stamp,entries:clean}));
+        localStorage.setItem(META_KEY,JSON.stringify(clean));
+        localStorage.setItem(META_UPDATED_KEY,String(stamp));
+        await saveMetaDb(clean,stamp);
+      }catch(err){console.warn('Archiv-Recovery konnte nicht vollständig abgeschlossen werden',err);}
     }
 
     await loadYoutubeConnections();
@@ -836,12 +919,29 @@
       if(changed)saveMeta();
     }catch(err){console.warn('Archivgrößen konnten nicht synchronisiert werden',err);}
   }
-  function saveMeta(){
-    const entries=state.entries.map(e=>({...e,file:undefined,videoUrl:undefined}));
+  function saveMeta(options={}){
+    const entries=sanitizeArchiveEntries(state.entries);
+    const allowEmpty=!!options.allowEmpty;
+    // Hard safety rule: normal code is NEVER allowed to overwrite an existing archive with [].
+    if(!entries.length&&!allowEmpty){
+      console.warn('Archiv-Schutz: Leerer Archivstand wurde nicht gespeichert. Bestehende Daten bleiben unangetastet.');
+      return false;
+    }
     const updatedAt=Date.now();
-    try{localStorage.setItem(META_KEY,JSON.stringify(entries));localStorage.setItem(META_UPDATED_KEY,String(updatedAt));}catch(err){console.warn('Archiv-Metadaten konnten nicht lokal gespeichert werden',err);}
-    void saveMetaDb(entries,updatedAt);
+    if(entries.length){
+      try{
+        const previous=localStorage.getItem(META_KEY);
+        if(previous && previous!=='[]')localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:1,updatedAt,raw:previous}));
+        localStorage.setItem(META_KEY,JSON.stringify(entries));
+        localStorage.setItem(META_UPDATED_KEY,String(updatedAt));
+      }catch(err){console.warn('Archiv-Metadaten konnten nicht lokal gespeichert werden',err);}
+      void saveMetaDb(entries,updatedAt,allowEmpty);
+    }else if(allowEmpty){
+      try{localStorage.setItem(META_KEY,'[]');localStorage.setItem(META_UPDATED_KEY,String(updatedAt));}catch{}
+      void saveMetaDb([],updatedAt,true);
+    }
     void saveDurableAppState();
+    return true;
   }
   const DB_VERSION=3;
   async function openDB(){return new Promise((res,rej)=>{
@@ -892,7 +992,7 @@
     }
   }
   async function clearDB(){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
-  function showView(v,persist=true){if(!views[v])v='archive';$$('.view').forEach(x=>x.classList.remove('active'));const viewEl=$('#view-'+v);if(!viewEl)return;viewEl.classList.add('active');$$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));if($('#pageTitle'))$('#pageTitle').textContent=views[v][0];if($('#pageSubtitle'))$('#pageSubtitle').textContent=views[v][1];if(persist)try{sessionStorage.setItem('grandrp_current_view',v);localStorage.setItem('grandrp_current_view',v);}catch{}if(v==='archive')renderArchive();if(v==='cases')renderCases();if(v==='csv')renderCsv();}
+  function showView(v,persist=true){if(!views[v])v='archive';$$('.view').forEach(x=>x.classList.remove('active'));$('#view-'+v).classList.add('active');$$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));$('#pageTitle').textContent=views[v][0];$('#pageSubtitle').textContent=views[v][1];if(persist)try{sessionStorage.setItem('grandrp_current_view',v);localStorage.setItem('grandrp_current_view',v);}catch{}if(v==='archive')renderArchive();if(v==='cases')renderCases();if(v==='csv')renderCsv();}
   function duplicateIdMap(entries=state.entries){const map=new Map();for(const e of entries){const id=String(e?.targetId||'').trim();if(/^\d{1,6}$/.test(id))map.set(id,(map.get(id)||0)+1);}return map;}
   function duplicateIdCount(entries=state.entries){let n=0;for(const count of duplicateIdMap(entries).values())if(count>1)n++;return n;}
   function isDuplicateId(entry){const id=String(entry?.targetId||'').trim();return /^\d{1,6}$/.test(id)&&Number(duplicateIdMap().get(id)||0)>1;}
@@ -925,7 +1025,7 @@
       else if(action==='perma'){e.permaArchive=!e.permaArchive;saveMeta();renderArchive();renderCsv();toast(e.permaArchive?'POV ins POV-Archiv verschoben.':'POV aus POV-Archiv entfernt.');}
       else if(action==='delete'){if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?
 
-Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.entries=state.entries.filter(x=>x.id!==e.id);state.archiveSelected.delete(e.id);saveMeta();renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}}
+Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.entries=state.entries.filter(x=>x.id!==e.id);state.archiveSelected.delete(e.id);saveMeta({allowEmpty:state.entries.length===0});renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}}
     };
   }
   function setupArchiveBulk(){
@@ -939,15 +1039,23 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
   function csvRows(){const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();const reason=(($('#csvFilterReason')?.value)||'all');const sc=(($('#csvFilterSc')?.value)||'all');const perma=(($('#csvFilterPerma')?.value)||'all');return csvRowsBase().filter(r=>{if(reason!=='all'&&r.Grund!==reason)return false;if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;if(perma==='yes'&&!r.Perma)return false;if(perma==='no'&&r.Perma)return false;if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.Ergebnis,r.Grund].some(v=>String(v||'').toLowerCase().includes(q))))return false;return true;});}
 
 
-  function setupNav(){
-    setupArchiveBulk();
-    $$('.nav-item').forEach(b=>{
-      b.onclick=(e)=>{
-        e.preventDefault();
-        e.stopPropagation();
-        showView(b.dataset.view);
-      };
+  let navDelegationInstalled=false;
+  function installNavDelegation(){
+    if(navDelegationInstalled)return;
+    navDelegationInstalled=true;
+    document.addEventListener('click',ev=>{
+      const b=ev.target?.closest?.('.nav-item');
+      if(!b)return;
+      const view=b.dataset.view;
+      if(!view)return;
+      ev.preventDefault();
+      try{showView(view);}catch(err){console.error('Navigation failed',err);}
     });
+  }
+  function setupNav(){
+    installNavDelegation();
+    setupArchiveBulk();
+    $$('.nav-item').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();showView(b.dataset.view);}));
     $('#headerUploadBtn')?.addEventListener('click',()=>showView('upload'));
     $('#emptyUploadBtn')?.addEventListener('click',()=>showView('upload'));
     $('#headerCsvBtn')?.addEventListener('click',()=>showView('csv'));
@@ -959,8 +1067,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
     $('#downloadPermaCsvBtn')?.addEventListener('click',downloadPermaCsv);
     $('#copyCsvBtn')?.addEventListener('click',copyCsv);
     ['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterPerma'].forEach(s=>{
-      const el=$(s);
-      if(el)el.addEventListener(el.tagName==='SELECT'?'change':'input',renderCsv);
+      const el=$(s); if(el) el.addEventListener(el.tagName==='SELECT'?'change':'input',renderCsv);
     });
     $('#csvFilterClear')?.addEventListener('click',()=>{
       if($('#csvFilterSearch'))$('#csvFilterSearch').value='';
@@ -970,16 +1077,13 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
       if($('#csvFilterDiscord'))$('#csvFilterDiscord').value='all';
       renderCsv();
     });
-    $$('.filter').forEach(b=>{
-      b.onclick=()=>{
-        state.filter=b.dataset.filter;
-        $$('.filter').forEach(x=>x.classList.toggle('active',x===b));
-        renderArchive();
-      };
-    });
+    $$('.filter').forEach(b=>b.addEventListener('click',()=>{
+      state.filter=b.dataset.filter;
+      $$('.filter').forEach(x=>x.classList.toggle('active',x===b));
+      renderArchive();
+    }));
     const savedView=sessionStorage.getItem('grandrp_current_view')||localStorage.getItem('grandrp_current_view');
     if(savedView&&views[savedView])showView(savedView,false);
-    else showView('archive',false);
   }
 
 
@@ -1839,7 +1943,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
     if(!window.confirm('Diesen POV wirklich löschen? Die lokale Datei wird gelöscht. Das YouTube-Video bleibt erhalten.'))return false;
     try{
       if(ctx.item){ctx.item.cancelled=true;ctx.item.editingDone=true;ctx.item.processing=false;ctx.item.ocrProcessing=false;await delVideo(ctx.item.id);state.queue=state.queue.filter(x=>x.id!==ctx.item.id);state.archiveSelected?.delete(ctx.item.id);persistQueueNow();}
-      else{await delVideo(ctx.entry.id);state.entries=state.entries.filter(x=>x.id!==ctx.entry.id);state.archiveSelected?.delete(ctx.entry.id);saveMeta();}
+      else{await delVideo(ctx.entry.id);state.entries=state.entries.filter(x=>x.id!==ctx.entry.id);state.archiveSelected?.delete(ctx.entry.id);saveMeta({allowEmpty:state.entries.length===0});}
       closeEditor();renderQueue();renderArchive();renderCases();renderCsv();toast('POV gelöscht. YouTube bleibt erhalten.');return true;
     }catch(err){console.error('Direktes Löschen fehlgeschlagen',err);toast('Löschen fehlgeschlagen: '+(err?.message||err));return false;}
   }
@@ -2590,6 +2694,30 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
     if(actual!==desiredTitle)throw new Error(`YouTube-Titel weicht ab: erwartet „${desiredTitle}“ · erhalten „${actual}“`);
   }
 
+  function downloadArchiveBackup(){
+    const entries=sanitizeArchiveEntries(state.entries);
+    if(!entries.length){toast('Kein Archiv zum Sichern vorhanden.');return;}
+    const payload={format:'grandrp-archive-backup',version:1,createdAt:new Date().toISOString(),entries,youtubeConnections:state.ytConnections,settings:state.settings};
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`grandrp-archiv-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast(`${entries.length} Archiv-Einträge gesichert.`);
+  }
+  async function restoreArchiveBackup(file){
+    if(!file)return;
+    try{
+      const parsed=JSON.parse(await file.text());
+      const entries=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.entries)?parsed.entries:[]);
+      if(!entries.length)throw new Error('Die Backup-Datei enthält keine Archiv-Einträge.');
+      if(!confirm(`Backup mit ${entries.length} Einträgen wiederherstellen?
+
+Vorhandene Einträge werden nach ID zusammengeführt.`))return;
+      const byId=new Map(state.entries.map(e=>[String(e.id),e]));
+      for(const e of entries)if(e?.id)byId.set(String(e.id),e);
+      state.entries=[...byId.values()];
+      saveMeta();
+      renderArchive();renderCases();renderCsv();
+      toast(`Backup wiederhergestellt · ${state.entries.length} Einträge.`);
+    }catch(err){console.error(err);toast('Backup konnte nicht wiederhergestellt werden: '+(err?.message||err));}
+  }
   function setupSettings(){
     state.settings.frames=Number(localStorage.getItem('v44_frames')||24);
     state.settings.window=Number(localStorage.getItem('v44_window')||4.5);
@@ -2609,7 +2737,10 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
       disconnectBtn?.addEventListener('click',()=>disconnectYoutube(slot));
     }
     renderYoutubeConnections();
-    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen?'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];saveMeta();try{localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB();renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
+    $('#downloadArchiveBackup')?.addEventListener('click',downloadArchiveBackup);
+    $('#restoreArchiveBackup')?.addEventListener('click',()=>$('#archiveBackupFile')?.click());
+    $('#archiveBackupFile')?.addEventListener('change',e=>{const f=e.target.files?.[0];if(f)void restoreArchiveBackup(f);e.target.value='';});
+    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB();renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }
 
@@ -2617,7 +2748,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
     if(window.__grandrpAppBooted)return;
     try{const saved=JSON.parse(localStorage.getItem(PC_CUSTOM_KEY)||'[]');if(Array.isArray(saved))saved.filter(Boolean).forEach(v=>pcCheckerCustom.add(String(v)));}catch{}
     window.__grandrpAppBooted=true;
-    setupNav();setupUpload();setupEditor();setupSettings();updateYtStatus();void requestPersistentStorage();setInterval(()=>{if(authUser&&state.entries.length)saveMeta();},15000);
+    setupNav();setupUpload();setupEditor();setupSettings();updateYtStatus();void requestPersistentStorage();setInterval(()=>{if(authUser&&state.entries.length)saveMeta();},30000);
     await loadQueue().catch(err=>{console.error('Warteschlange konnte nicht geladen werden',err);state.queue=[];});
     try{await loadMeta();}catch(err){console.error('Archiv konnte nicht geladen werden',err);}
     renderYoutubeConnections();
