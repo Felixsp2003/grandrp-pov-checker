@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V97';
+  const BUILD='V99';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -1773,6 +1773,16 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
     scheduleQueuePersist();
     return item;
   }
+  async function deleteEditingCurrent(){
+    const ctx=state.editing;const base=ctx?.item||ctx?.entry;if(!base)return false;
+    if(ctx.item?.uploading){toast('YouTube-Upload läuft noch.');return false;}
+    if(!window.confirm('Diesen POV wirklich löschen? Die lokale Datei wird gelöscht. Das YouTube-Video bleibt erhalten.'))return false;
+    try{
+      if(ctx.item){ctx.item.cancelled=true;ctx.item.editingDone=true;ctx.item.processing=false;ctx.item.ocrProcessing=false;await delVideo(ctx.item.id);state.queue=state.queue.filter(x=>x.id!==ctx.item.id);state.archiveSelected?.delete(ctx.item.id);persistQueueNow();}
+      else{await delVideo(ctx.entry.id);state.entries=state.entries.filter(x=>x.id!==ctx.entry.id);state.archiveSelected?.delete(ctx.entry.id);saveMeta();}
+      closeEditor();renderQueue();renderArchive();renderCases();renderCsv();toast('POV gelöscht. YouTube bleibt erhalten.');return true;
+    }catch(err){console.error('Direktes Löschen fehlgeschlagen',err);toast('Löschen fehlgeschlagen: '+(err?.message||err));return false;}
+  }
   async function nextQueueItem(itemId){
     const item=state.queue.find(x=>x.id===itemId);if(!item)return false;
     if(item.uploading||item.processing||item.ocrProcessing){toast('Diese POV wird noch verarbeitet.');return false;}
@@ -1874,7 +1884,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
   window.addEventListener('message',e=>{if(e.data?.type==='grandrp-manual-field'){applyManualField(e.data.field,e.data.value,e.data.time);}});
 
   const ACP_ORIGIN='https://admin.gta5grand.com';
-  const ACP_EXTENSION_TOKEN='grandrp-acp-v91';
+  const ACP_EXTENSION_TOKEN='grandrp-acp-v93';
   let acpWindow=null;
   let acpTimeout=null;
   let acpReasonWindow=null;
@@ -1893,6 +1903,12 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
     const id=String(characterId||'').replace(/\D/g,'');
     const nonce=buildAcpNonce();
     return `${ACP_ORIGIN}/de/3/character/info/${encodeURIComponent(id)}?grandrpBridge=1&bridgeMode=reason&bridgeToken=${encodeURIComponent(nonce)}`;
+  }
+  function requestAcpTabOpen(url,bridgeToken,bridgeMode){
+    try{window.postMessage({type:'GRANDRP_OPEN_ACP_TAB',url:String(url||''),bridgeToken:String(bridgeToken||''),bridgeMode:String(bridgeMode||'sc')},location.origin);return true;}catch(err){console.warn('ACP-Tab-Bridge nicht verfügbar',err);return false;}
+  }
+  function openNormalTabFallback(url){
+    try{const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener';a.style.display='none';document.body.appendChild(a);a.click();a.remove();return true;}catch{return false;}
   }
   function setScValueFromAcp(sc,characterId){
     const value=normalizeHexLoose(sc);
@@ -1934,66 +1950,41 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
     try{if(acpReasonWindow&&!acpReasonWindow.closed)acpReasonWindow.close();}catch{}
     acpReasonWindow=null;
   }
-  function preopenAcpReasonWindow(characterId){
-    const id=clampId(characterId||'');
-    if(!/^\d{1,6}$/.test(id))return null;
-    try{
-      const old=acpReasonWindow;
-      if(old&&!old.closed)return old;
-      const w=window.open('about:blank','grandrp-acp-reason','width=1200,height=900');
-      if(w)acpReasonWindow=w;
-      return w||null;
-    }catch(err){console.warn('ACP reason popup konnte nicht vorbereitet werden',err);return null;}
-  }
-  function openAcpReasonForCurrentId(preopenedWindow=null){
+  function openAcpReasonForCurrentId(){
     const id=clampId($('#targetId')?.value||state.editing?.item?.result?.targetId||state.editing?.item?.targetId||state.editing?.entry?.targetId||'');
     if(!/^\d{1,6}$/.test(id)){toast('Zuerst eine gültige Ziel-ID eintragen.');return false;}
     const url=buildAcpReasonUrl(id);
+    const token=new URL(url).searchParams.get('bridgeToken')||'';
     const status=$('#reasonStatus');
-    if(status){status.textContent=`Adminpanel lädt BannGrund für ID ${id} … (2,5 s)`;status.className='acp-status warn';}
-    let w=preopenedWindow||acpReasonWindow;
-    try{
-      if(w&&!w.closed)w.location.href=url;
-      else w=window.open(url,'grandrp-acp-reason','width=1200,height=900');
-      if(!w){if(status){status.textContent='Popup blockiert · BannGrund konnte nicht geladen werden.';status.className='acp-status error';}toast('Chrome blockiert das Adminpanel-Popup. Bitte Popups für die Website erlauben.');return false;}
-      acpReasonWindow=w;
-      clearTimeout(acpReasonTimeout);
-      acpReasonTimeout=setTimeout(()=>{if(status){status.textContent='Kein BannGrund im roten Adminpanel-Bereich gefunden.';status.className='acp-status warn';}closeAcpReasonWindow();},45000);
-      return true;
-    }catch(err){console.error(err);if(status){status.textContent='Adminpanel für BannGrund konnte nicht geöffnet werden.';status.className='acp-status error';}return false;}
+    if(status){status.textContent=`Adminpanel wird in einem neuen Tab geöffnet · BannGrund für ID ${id} · 2,5 s Ladezeit …`;status.className='acp-status warn';}
+    clearTimeout(acpReasonTimeout);acpReasonWindow=null;
+    acpReasonTimeout=setTimeout(()=>{if(status){status.textContent='Kein BannGrund im roten Adminpanel-Bereich gefunden.';status.className='acp-status warn';}},45000);
+    if(!requestAcpTabOpen(url,token,'reason'))openNormalTabFallback(url);
+    return true;
   }
   function startAcpSequence(){
     const id=clampId($('#targetId')?.value||state.editing?.item?.result?.targetId||state.editing?.item?.targetId||'');
     if(!/^\d{1,6}$/.test(id)){toast('Zuerst eine gültige Ziel-ID eintragen.');return false;}
     acpReasonAfterSc=true;
     closeAcpReasonWindow();
-    openAcpForCurrentId(null);
-    return true;
+    return openAcpForCurrentId();
   }
   function renderAcpStatus(text,kind=''){const el=$('#acpStatus');if(!el)return;el.textContent=text;el.className=`acp-status ${kind}`;}
   function closeAcpWindow(){clearTimeout(acpTimeout);try{if(acpWindow&&!acpWindow.closed)acpWindow.close();}catch{}acpWindow=null;}
-  function openAcpForCurrentId(preopenedReasonWindow=null){
+  function openAcpForCurrentId(){
     const id=clampId($('#targetId')?.value||state.editing?.item?.result?.targetId||state.editing?.item?.targetId||'');
     if(!/^\d{1,6}$/.test(id)){toast('Zuerst eine gültige Ziel-ID eintragen.');return false;}
     const url=buildAcpUrl(id);
-    renderAcpStatus(`ACP lädt SC für ID ${id} …`,'warn');
-    if(preopenedReasonWindow){acpReasonWindow=preopenedReasonWindow;}
-    try{
-      let w=window.open(url,'grandrp-acp-sc','width=1200,height=900');
-      if(!w){
-        // Some browsers block a newly opened second window. Reuse a window only when it was prepared by the click.
-        if(acpWindow&&!acpWindow.closed)w=acpWindow;
-      }
-      if(!w){renderAcpStatus('Popup blockiert · bitte Popups für die Website erlauben.','error');toast('Chrome blockiert das Adminpanel-Popup. Bitte Popups für die Website erlauben.');return false;}
-      acpWindow=w;
-      const started=Date.now();
-      clearTimeout(acpTimeout);
-      acpTimeout=setTimeout(()=>{renderAcpStatus('Kein SC im ACP gefunden.','warn');closeAcpWindow();acpReasonAfterSc=false;closeAcpReasonWindow();},45000);
-      return true;
-    }catch(err){console.error(err);renderAcpStatus('ACP konnte nicht geöffnet werden.','error');return false;}
+    const token=new URL(url).searchParams.get('bridgeToken')||'';
+    renderAcpStatus(`ACP wird in einem neuen Tab geöffnet · SC für ID ${id} …`,'warn');
+    clearTimeout(acpTimeout);acpWindow=null;
+    acpTimeout=setTimeout(()=>{renderAcpStatus('Kein SC im ACP gefunden.','warn');acpReasonAfterSc=false;},45000);
+    if(!requestAcpTabOpen(url,token,'sc'))openNormalTabFallback(url);
+    return true;
   }
   window.addEventListener('message',e=>{
-    if(e.origin!==ACP_ORIGIN||!e.data)return;
+    if(e.source!==window||!e.data)return;
+    if(e.origin!==location.origin && e.origin!==ACP_ORIGIN)return;
     if(e.data.type==='GRANDRP_ACP_STATUS'){
       const msg=String(e.data.message||'ACP lädt …');
       // Reason status belongs to the reason card; other status messages belong to SC.
@@ -2093,7 +2084,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
     }
   }
   function setupEditor(){
-    $('#closeModal').onclick=closeEditor;$('#cancelBtn').onclick=closeEditor;$('#entryForm').addEventListener('submit',saveEditor);$('#nextQueueBtn')?.addEventListener('click',async()=>{const item=state.editing?.item;if(!item){toast('Nächste POV ist nur aus der Verarbeitungswarteschlange verfügbar.');return;}await nextQueueItem(item.id);});['#targetId','#date'].forEach(s=>$(s).addEventListener('input',renderTitlePreview));$('#result')?.addEventListener('input',()=>{delete $('#result').dataset.autoResult;if(state.editing?.item)syncEditorDraftToQueueItem();});$('#reason').addEventListener('change',()=>{applyAutomaticResultForReason($('#reason').value,true);applyReasonPermaPolicy($('#reason').value,true);renderTitlePreview();setFieldStatus(state.editing?.item||state.editing?.entry||{});if(state.editing?.item)syncEditorDraftToQueueItem();});$('#reason').addEventListener('input',()=>{applyAutomaticResultForReason($('#reason').value,true);renderTitlePreview();setFieldStatus(state.editing?.item||state.editing?.entry||{});if(state.editing?.item)syncEditorDraftToQueueItem();});$('#targetId').addEventListener('input',()=>{$('#targetId').value=clampId($('#targetId').value);setFieldStatus(state.editing?.item||state.editing?.entry||{});if(state.editing?.item)syncEditorDraftToQueueItem();});$('#sc').addEventListener('input',()=>{setFieldStatus(state.editing?.item||state.editing?.entry||{});if(state.editing?.item)syncEditorDraftToQueueItem();});
+    $('#closeModal').onclick=closeEditor;$('#cancelBtn').onclick=closeEditor;$('#deleteCurrentBtn')?.addEventListener('click',deleteEditingCurrent);$('#entryForm').addEventListener('submit',saveEditor);$('#nextQueueBtn')?.addEventListener('click',async()=>{const item=state.editing?.item;if(!item){toast('Nächste POV ist nur aus der Verarbeitungswarteschlange verfügbar.');return;}await nextQueueItem(item.id);});['#targetId','#date'].forEach(s=>$(s).addEventListener('input',renderTitlePreview));$('#result')?.addEventListener('input',()=>{delete $('#result').dataset.autoResult;if(state.editing?.item)syncEditorDraftToQueueItem();});$('#reason').addEventListener('change',()=>{applyAutomaticResultForReason($('#reason').value,true);applyReasonPermaPolicy($('#reason').value,true);renderTitlePreview();setFieldStatus(state.editing?.item||state.editing?.entry||{});if(state.editing?.item)syncEditorDraftToQueueItem();});$('#reason').addEventListener('input',()=>{applyAutomaticResultForReason($('#reason').value,true);renderTitlePreview();setFieldStatus(state.editing?.item||state.editing?.entry||{});if(state.editing?.item)syncEditorDraftToQueueItem();});$('#targetId').addEventListener('input',()=>{$('#targetId').value=clampId($('#targetId').value);setFieldStatus(state.editing?.item||state.editing?.entry||{});if(state.editing?.item)syncEditorDraftToQueueItem();});$('#sc').addEventListener('input',()=>{setFieldStatus(state.editing?.item||state.editing?.entry||{});if(state.editing?.item)syncEditorDraftToQueueItem();});
     $$('.chip').forEach(c=>c.onclick=()=>{const v=c.dataset.value;c.classList.toggle('active');if(c.classList.contains('active'))state.selectedTypes.add(v);else state.selectedTypes.delete(v);});
     $$('.photo-field').forEach(b=>b.onclick=()=>{$$('.photo-field').forEach(x=>x.classList.toggle('active',x===b));const field=b.dataset.field;showInfoPhoto(field);});
     $('#photoRefresh')?.addEventListener('click',()=>{const active=$('.photo-field.active');showInfoPhoto(active?.dataset.field||'banner');});

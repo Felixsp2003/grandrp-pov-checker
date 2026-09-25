@@ -1,3 +1,1 @@
-Grand RP DC Checker V97
-
-Website V97 + ACP Bridge V91. Multiple POV uploads, durable local storage, CSV result editing, bulk POV archive, ACP SC->close->Reason->close sequence, exact reason handling including Trolling/Cheater.
+Grand RP DC Checker V99 + ACP Bridge V93. Adminpanel wird als neuer Tab geöffnet; Prüf-Fenster hat direkten Löschen-Button.

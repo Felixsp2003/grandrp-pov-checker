@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=97">
+<link rel="stylesheet" href="styles.css?v=98">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -37,7 +37,7 @@
     <header class="topbar">
       <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V97</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V99</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -102,7 +102,7 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V97</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V99</span></div>
           <p class="hint">POVs bis 2 Minuten werden vollständig in 250-ms-Schritten durchsucht. Längere Videos werden adaptiv gescannt und bei Treffern verdichtet. Das Info-Foto kommt aus einem verifizierten Bann-Cluster; der Bannblock wird für das Info-Foto bevorzugt in den letzten 5 Sekunden verifiziert. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
@@ -181,7 +181,7 @@
     <div class="switches"><label>Perma-Bann<input id="perma" type="checkbox"><span class="switch"></span></label><label>Archiv: in Perma eingetragen<input id="permaArchive" type="checkbox"><span class="switch"></span></label><label>Nicht gebannt<input id="notBanned" type="checkbox"><span class="switch"></span></label></div>
     <div class="field" style="margin-top:12px"><label>Im Dokument</label><select id="documentStatus"><option value="nicht eingetragen">Nicht eingetragen</option><option value="eingetragen">Eingetragen</option></select></div>
     <div id="ocrWarning" class="ocr-warning hidden"></div><div class="modal-tools"><button type="button" class="ghost mini hidden" id="reanalyzeBtn">OCR erneut ausführen</button></div>
-    <div class="modal-actions"><button type="button" class="ghost" id="cancelBtn">Abbrechen</button><button type="button" class="ghost" id="nextQueueBtn">Nächste POV</button><button type="submit" class="pink" id="saveBtn">Speichern & YouTube hochladen</button></div>
+    <div class="modal-actions"><button type="button" class="ghost" id="cancelBtn">Abbrechen</button><button type="button" class="ghost danger" id="deleteCurrentBtn">Löschen</button><button type="button" class="ghost" id="nextQueueBtn">Nächste POV</button><button type="submit" class="pink" id="saveBtn">Speichern & YouTube hochladen</button></div>
   </form>
 </div></div>
 
@@ -196,6 +196,6 @@
   });
 })();
 </script>
-<script src="app.js?v=97"></script>
+<script src="app.js?v=99"></script>
 </body>
 </html>
