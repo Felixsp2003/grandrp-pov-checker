@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V129';
+  const BUILD='V130';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -25,9 +25,9 @@
   const YT_CONNECTIONS_DB_KEY='__grandrp_youtube_connections_v89__';
   const YT_OAUTH_PENDING_KEY='grandrp_youtube_oauth_pending_v89';
   const YT_MAX_CONNECTIONS=3;
-  const DRIVE_OAUTH_PENDING_KEY='grandrp_drive_oauth_pending_v129';
-  const DRIVE_STATE_KEY='grandrp_drive_oauth_state_v129';
-  const DRIVE_RESULT_KEY='grandrp_drive_oauth_result_v129';
+  const DRIVE_OAUTH_PENDING_KEY='grandrp_drive_oauth_pending_v130';
+  const DRIVE_STATE_KEY='grandrp_drive_oauth_state_v130';
+  const DRIVE_RESULT_KEY='grandrp_drive_oauth_result_v130';
   const DRIVE_FOLDER_NAME='GrandRP DC Checker';
   const DRIVE_MANIFEST_NAME='grandrp-archive-manifest.json';
   const DRIVE_FOLDER_MIME='application/vnd.google-apps.folder';
@@ -2672,21 +2672,64 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   function setYoutubeButton(text,disabled=false,slot=state.activeYoutubeSlot){const btn=$(`#ytConnect${slot}`);if(btn){btn.disabled=disabled;btn.textContent=text;}}
   function showYoutubeHelp(text,kind='',slot=state.activeYoutubeSlot){const help=$(`#ytHelp${slot}`)||$('#ytConnectHelp');if(help){help.textContent=text;help.style.color=kind==='error'?'#ff8ebd':kind==='good'?'#69e1af':kind==='warn'?'#f0ca70':'';}}
   function configureYoutubeClient(clientId,slot=state.activeYoutubeSlot){setYoutubeConnectionClientId(slot,clientId);return !!connection(slot)?.clientId;}
-  function oauthRedirectUri(){return new URL('/oauth-callback.html',location.origin).href;}
   function randomState(){const bytes=new Uint8Array(24);crypto.getRandomValues(bytes);return [...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');}
-  function startRedirectOAuth(slot,forceConsent=false){
-    const c=connection(slot);if(!c?.clientId)throw new Error('Bitte zuerst die Google OAuth Client-ID eintragen.');
-    if(!validClientId(c.clientId))throw new Error('Die Google OAuth Client-ID sieht ungültig aus.');
-    const stateValue='yt-'+randomState();
-    const pending={purpose:'youtube',slot:Number(slot),clientId:c.clientId,state:stateValue,createdAt:Date.now()};
-    localStorage.setItem(YT_OAUTH_PENDING_KEY,JSON.stringify(pending));sessionStorage.setItem(YT_OAUTH_PENDING_KEY,JSON.stringify(pending));
-    setYoutubeButton('Google wird geöffnet…',true,slot);showYoutubeHelp('Google-Anmeldung wird geöffnet…','',slot);
-    const params=new URLSearchParams({client_id:c.clientId,redirect_uri:oauthRedirectUri(),response_type:'token',scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl',include_granted_scopes:'false',state:stateValue});
-    params.set('prompt',forceConsent?'consent':'select_account');
-    location.assign('https://accounts.google.com/o/oauth2/v2/auth?'+params.toString());
+  async function waitForGoogleGIS(){
+    if(window.google?.accounts?.oauth2)return true;
+    const started=Date.now();
+    while(Date.now()-started<8000){
+      await new Promise(r=>setTimeout(r,100));
+      if(window.google?.accounts?.oauth2)return true;
+    }
+    return false;
   }
-  function initYoutube(slot){try{startRedirectOAuth(Number(slot)||1,false);}catch(err){showYoutubeHelp(err?.message||String(err),'error',slot);setYoutubeButton('Mit YouTube verbinden',false,slot);toast(err?.message||String(err));}}
-  function reauthorizeYoutube(slot){try{startRedirectOAuth(Number(slot)||1,true);}catch(err){showYoutubeHelp(err?.message||String(err),'error',slot);toast(err?.message||String(err));}}
+  function requestYoutubeTokenPopup(slot,prompt){
+    const c=connection(slot);
+    if(!c?.clientId)throw new Error('Bitte zuerst die Google OAuth Client-ID eintragen.');
+    if(!validClientId(c.clientId))throw new Error('Die Google OAuth Client-ID sieht ungültig aus.');
+    if(!window.google?.accounts?.oauth2)throw new Error('Google-Anmeldung ist noch nicht geladen. Bitte kurz warten und erneut klicken.');
+    return new Promise((resolve,reject)=>{
+      let finished=false;
+      const done=(fn,v)=>{if(finished)return;finished=true;fn(v);};
+      try{
+        const client=window.google.accounts.oauth2.initTokenClient({
+          client_id:c.clientId,
+          scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl',
+          include_granted_scopes:false,
+          callback:resp=>{
+            if(resp?.error)return done(reject,new Error(resp.error_description||resp.error));
+            if(!resp?.access_token)return done(reject,new Error('Google hat kein YouTube-Zugriffstoken zurückgegeben.'));
+            persistYoutubeToken(resp.access_token,Number(resp.expires_in||3600),slot);
+            done(resolve,String(resp.access_token));
+          },
+          error_callback:e=>done(reject,new Error(e?.message||e?.type||'Google YouTube OAuth fehlgeschlagen.'))
+        });
+        client.requestAccessToken({prompt});
+      }catch(err){done(reject,err instanceof Error?err:new Error(String(err)));}
+      setTimeout(()=>done(reject,new Error('Zeitüberschreitung bei der YouTube-Anmeldung.')),20000);
+    });
+  }
+  async function startYoutubeOAuth(slot,forceConsent=false){
+    const ready=window.google?.accounts?.oauth2 || await waitForGoogleGIS();
+    if(!ready)throw new Error('Google-Anmeldung ist nicht verfügbar. Bitte die Seite einmal neu laden.');
+    setYoutubeButton('Google wird geöffnet…',true,slot);
+    showYoutubeHelp('Google-Anmeldung wird geöffnet…','',slot);
+    try{
+      await requestYoutubeTokenPopup(Number(slot)||1,forceConsent?'consent':'select_account');
+      setYoutubeButton('YouTube verbunden',false,slot);
+      showYoutubeHelp(`✓ YouTube-Verbindung ${slot} erfolgreich verbunden.`, 'good', slot);
+      toast(`YouTube-Verbindung ${slot} verbunden.`);
+    }catch(err){
+      const msg=err?.message||String(err);
+      showYoutubeHelp(msg,'error',slot);
+      toast(msg);
+      throw err;
+    }finally{
+      const c=connection(slot);
+      setYoutubeButton(c?.connected?'YouTube verbunden':'Mit YouTube verbinden',false,slot);
+    }
+  }
+  function initYoutube(slot){void startYoutubeOAuth(Number(slot)||1,false).catch(err=>console.warn('YouTube OAuth',err));}
+  function reauthorizeYoutube(slot){void startYoutubeOAuth(Number(slot)||1,true).catch(err=>console.warn('YouTube Reauth',err));}
   function disconnectYoutube(slot){clearYoutubeToken(Number(slot)||1);showYoutubeHelp('YouTube-Verbindung entfernt.','good',slot);toast(`YouTube-Verbindung ${slot} entfernt.`);}
   window.grandrpPrepareYouTubeAuth=(slot,force)=>{if(typeof slot==='boolean'){force=slot;slot=1;}return (force?reauthorizeYoutube:initYoutube)(Number(slot)||1);};
   window.grandrpDisconnectYouTube=()=>{for(let i=1;i<=YT_MAX_CONNECTIONS;i++)clearYoutubeToken(i);renderYoutubeConnections();};
@@ -2702,17 +2745,37 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     let st=driveState();
     if(st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+120000)return st.accessToken;
     if(!st.clientId){const c=state.ytConnections.find(x=>String(x?.clientId||'').trim())||connection(1)||state.ytConnections[0];st.clientId=String(c?.clientId||'').trim();}
-    if(!st.clientId)throw new Error('Für Google Drive ist noch keine Google OAuth Client-ID in Verbindung 1 hinterlegt.');
-    const ready=await waitForGoogleGIS(); if(!ready)throw new Error('Google Identity Services konnte nicht geladen werden.');
+    if(!st.clientId)throw new Error('Für Google Drive ist noch keine Google OAuth Client-ID hinterlegt.');
+    const ready=window.google?.accounts?.oauth2 || await waitForGoogleGIS(); if(!ready)throw new Error('Google Identity Services konnte nicht geladen werden.');
     return await new Promise((resolve,reject)=>{
       let finished=false; const done=(fn,v)=>{if(finished)return;finished=true;fn(v);};
       try{
-        const client=google.accounts.oauth2.initTokenClient({client_id:st.clientId,scope:DRIVE_SCOPE,include_granted_scopes:false,callback:resp=>{if(resp?.error)return done(reject,new Error(resp.error_description||resp.error));const ns={...st,clientId:st.clientId,accessToken:String(resp.access_token||''),tokenExpiresAt:Date.now()+Math.max(60,Number(resp.expires_in||3600)-30)*1000,connected:true};if(!ns.accessToken)return done(reject,new Error('Google hat kein Drive-Zugriffstoken zurückgegeben.'));saveDriveState(ns);renderDriveStatus();done(resolve,ns.accessToken);},error_callback:e=>done(reject,new Error(e?.message||e?.type||'Google Drive OAuth fehlgeschlagen.'))});
+        const client=window.google.accounts.oauth2.initTokenClient({client_id:st.clientId,scope:DRIVE_SCOPE,include_granted_scopes:false,callback:resp=>{if(resp?.error)return done(reject,new Error(resp.error_description||resp.error));const ns={...st,clientId:st.clientId,accessToken:String(resp.access_token||''),tokenExpiresAt:Date.now()+Math.max(60,Number(resp.expires_in||3600)-30)*1000,connected:true};if(!ns.accessToken)return done(reject,new Error('Google hat kein Drive-Zugriffstoken zurückgegeben.'));saveDriveState(ns);renderDriveStatus();done(resolve,ns.accessToken);},error_callback:e=>done(reject,new Error(e?.message||e?.type||'Google Drive OAuth fehlgeschlagen.'))});
         client.requestAccessToken({prompt:forceConsent?'consent':'none'});
       }catch(err){done(reject,err);} setTimeout(()=>done(reject,new Error('Zeitüberschreitung beim Erneuern des Google-Drive-Zugriffs.')),15000);
     });
   }
-  function startDriveOAuth(){const c=state.ytConnections.find(x=>String(x?.clientId||'').trim())||connection(1)||state.ytConnections[0];const clientId=String(c?.clientId||'').trim();if(!clientId)throw new Error('Bitte zuerst eine Google OAuth Client-ID in einer YouTube-Verbindung eintragen.');if(!validClientId(clientId))throw new Error('Die Google OAuth Client-ID sieht ungültig aus.');const stateValue='drive-'+randomState();const pending={purpose:'drive',clientId,state:stateValue,createdAt:Date.now()};localStorage.setItem(DRIVE_OAUTH_PENDING_KEY,JSON.stringify(pending));sessionStorage.setItem(DRIVE_OAUTH_PENDING_KEY,JSON.stringify(pending));const params=new URLSearchParams({client_id:clientId,redirect_uri:oauthRedirectUri(),response_type:'token',scope:DRIVE_SCOPE,include_granted_scopes:'false',state:stateValue,prompt:'select_account'});location.assign('https://accounts.google.com/o/oauth2/v2/auth?'+params.toString());}
+  function startDriveOAuth(){
+    const c=state.ytConnections.find(x=>String(x?.clientId||'').trim())||connection(1)||state.ytConnections[0];
+    const clientId=String(c?.clientId||'').trim();
+    if(!clientId)throw new Error('Bitte zuerst die Google OAuth Client-ID in YouTube-Verbindung 1 eintragen.');
+    if(!validClientId(clientId))throw new Error('Die Google OAuth Client-ID sieht ungültig aus.');
+    if(!window.google?.accounts?.oauth2)throw new Error('Google-Anmeldung ist noch nicht geladen. Bitte kurz warten und erneut klicken.');
+    const st={purpose:'drive',clientId,createdAt:Date.now()};
+    return new Promise((resolve,reject)=>{
+      let finished=false;const done=(fn,v)=>{if(finished)return;finished=true;fn(v);};
+      try{
+        const client=window.google.accounts.oauth2.initTokenClient({client_id:clientId,scope:DRIVE_SCOPE,include_granted_scopes:false,callback:resp=>{
+          if(resp?.error)return done(reject,new Error(resp.error_description||resp.error));
+          const token=String(resp?.access_token||'');if(!token)return done(reject,new Error('Google hat kein Drive-Zugriffstoken zurückgegeben.'));
+          const ns={version:4,updatedAt:Date.now(),clientId,accessToken:token,tokenExpiresAt:Date.now()+Math.max(60,Number(resp.expires_in||3600)-30)*1000,connected:true,accountHint:'same-as-youtube-1'};
+          saveDriveState(ns);renderDriveStatus();const h=$('#driveHelp');if(h)h.textContent='✓ Google Drive verbunden. Es wird nur das JSON-Archiv gesichert.';toast('Google Drive verbunden.');done(resolve,token);
+        },error_callback:e=>done(reject,new Error(e?.message||e?.type||'Google Drive OAuth fehlgeschlagen.'))});
+        client.requestAccessToken({prompt:'select_account'});
+      }catch(err){done(reject,err instanceof Error?err:new Error(String(err)));}
+      setTimeout(()=>done(reject,new Error('Zeitüberschreitung bei der Google-Drive-Anmeldung.')),20000);
+    });
+  }
   async function driveApi(url,options={}){let token=await driveTokenFresh(false);let r=await fetch(url,{...options,headers:{...(options.headers||{}),Authorization:`Bearer ${token}`}});if(r.status===401){token=await driveTokenFresh(true);r=await fetch(url,{...options,headers:{...(options.headers||{}),Authorization:`Bearer ${token}`}});}if(!r.ok){const body=(await r.text()).slice(0,1200);throw new Error(`Google Drive API ${r.status}: ${body}`);}return r;}
   async function driveEnsureFolder(){const q=encodeURIComponent(`name='${DRIVE_FOLDER_NAME.replace(/'/g,"\\'")}' and mimeType='${DRIVE_FOLDER_MIME}' and trashed=false`);const r=await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&pageSize=10&fields=files(id,name,mimeType)`);const d=await r.json();if(d.files?.[0]?.id)return d.files[0].id;const cr=await driveApi('https://www.googleapis.com/drive/v3/files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:DRIVE_FOLDER_NAME,mimeType:DRIVE_FOLDER_MIME})});return (await cr.json()).id;}
   async function driveFindFile(name,folderId){const q=encodeURIComponent(`name='${String(name).replace(/'/g,"\\'")}' and '${folderId}' in parents and trashed=false`);const r=await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=modifiedTime desc&pageSize=20&fields=files(id,name,size,mimeType,modifiedTime,appProperties)`);return (await r.json()).files?.[0]||null;}

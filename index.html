@@ -37,7 +37,7 @@
     <header class="topbar">
       <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V129</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V130</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -103,7 +103,7 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V129</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V130</span></div>
           <p class="hint">POVs bis 2 Minuten werden vollständig in 250-ms-Schritten durchsucht. Längere Videos werden adaptiv gescannt und bei Treffern verdichtet. Das Info-Foto kommt aus einem verifizierten Bann-Cluster; der Bannblock wird für das Info-Foto bevorzugt in den letzten 5 Sekunden verifiziert. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
@@ -119,7 +119,7 @@
             <div class="yt-connection-card"><div class="yt-connection-head"><strong>YouTube-Verbindung 3</strong><span id="ytStatus3" class="connection">● Nicht verbunden</span></div><label>Google OAuth Client-ID<input id="ytClientId3" placeholder="...apps.googleusercontent.com" autocomplete="off"></label><div class="settings-actions"><button type="button" class="pink" id="ytConnect3">Mit YouTube verbinden</button><button type="button" class="ghost" id="ytReauth3">Berechtigung erneut</button><button type="button" class="ghost" id="ytDisconnect3">Trennen</button></div><div id="ytHelp3" class="hint yt-help"></div></div>
           </div>
           <div id="ytConnectHelp" class="hint" style="margin-top:10px"></div>
-          <div class="setting-note" style="margin-top:10px"><b>OAuth-Weiterleitung:</b> <code id="ytRedirectUriText"></code><br><span>Diese URL einmal in Google Cloud unter „Autorisierte Weiterleitungs-URIs“ eintragen. Jede Verbindung kann ein anderes Google-Konto verwenden.</span></div>
+          <div class="setting-note" style="margin-top:10px"><b>Google OAuth:</b> YouTube und Google Drive verwenden den sicheren Google-Popup-Flow. Eine OAuth-Weiterleitungs-URI ist dafür nicht erforderlich. In Google Cloud muss als <b>autorisierter JavaScript-Ursprung</b> exakt <code>https://felixsp2003.github.io</code> eingetragen sein.</div>
         </div>
         <div class="settings-card">
           <div class="card-title">Browser / Chrome ACP</div><p class="hint">Für SC und BannGrund wird Chrome mit dem Grand-RP-Adminpanel verwendet. Die Begleit-Erweiterung wartet auf die geladenen Daten und übernimmt Social Club sowie BannGrund zur Ziel-ID.</p><div class="setting-note">ACP-Erkennung: SC bis zu 30 Sekunden; BannGrund mit mindestens 2,5 Sekunden Ladezeit vor dem Auslesen des roten Bannbereichs.</div>
@@ -200,16 +200,6 @@
 <div id="toast" class="toast"></div>
 <script>
 (function(){
-  'use strict';
-  function callbackUrl(){ return new URL('oauth-callback.html', location.href).href; }
-  const uri=callbackUrl();
-  window.addEventListener('DOMContentLoaded',function(){
-    const out=document.getElementById('ytRedirectUriText'); if(out) out.textContent=uri;
-  });
-})();
-</script>
-<script>
-(function(){
   try{
     var allowed={archive:1,cases:1,upload:1,csv:1,settings:1};
     var hash=String(location.hash||'').replace(/^#/,'');
@@ -287,7 +277,7 @@
     const current=readLocalEntries(); const map=new Map(current.map(e=>[String(e.id),e])); backup.forEach(e=>map.set(String(e.id),e));
     const merged=[...map.values()]; const stamp=Date.now();
     persistLocal(merged,stamp); await persistDb(merged,stamp);
-    // Tell the application state immediately when the V129 bridge exists.
+    // Tell the application state immediately when the V130 bridge exists.
     try{if(window.grandrpSetArchiveEntries)window.grandrpSetArchiveEntries(merged,{replace:true});}catch(err){console.warn('App-Bridge konnte Archiv nicht setzen',err);}
     renderStandalone(merged);
     if(status)status.textContent=`✓ Archiv wiederhergestellt · ${backup.length} Backup-Einträge · ${merged.length} insgesamt`;
