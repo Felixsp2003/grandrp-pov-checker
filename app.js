@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V129
+/* Grand RP DC Checker V132
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V131';
+  const BUILD='V132';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -714,6 +714,7 @@
   const META_UPDATED_KEY='grandrp_pov_meta_updated_v1';
   const QUEUE_UPDATED_KEY='grandrp_pov_queue_updated_v1';
   const ARCHIVE_BACKUP_KEY='grandrp_archive_emergency_backup_v1';
+  const ARCHIVE_AUTHORITATIVE_KEY='grandrp_archive_authoritative_v132';
   const PENDING_BACKUP_KEY='grandrp_pending_backup_v122';
   const DIRECT_RESTORE_KEY='grandrp_direct_restore_v122';
   const LEGACY_DIRECT_RESTORE_KEY='grandrp_direct_restore_v118';
@@ -927,6 +928,17 @@
   async function requestPersistentStorage(){try{if(navigator.storage?.persist)await navigator.storage.persist();const persisted=await navigator.storage?.persisted?.();const el=$('#persistentStorageStatus');if(el){el.textContent=persisted?'● Dauerhafter Browser-Speicher aktiv':'● Browser-Speicher nicht garantiert';el.className='connection '+(persisted?'good':'warn');}return !!persisted;}catch{const el=$('#persistentStorageStatus');if(el){el.textContent='● Browser-Speicherstatus nicht verfügbar';el.className='connection warn';}return false;}}
   async function loadMeta(){
     const candidates=[];
+    // The authoritative synchronous archive copy is the first local source consulted on every
+    // page load. This prevents an empty/stale IndexedDB state from making a valid archive appear
+    // to disappear after refresh or a hard reload.
+    try{
+      const raw=localStorage.getItem(ARCHIVE_AUTHORITATIVE_KEY);
+      if(raw){
+        const parsed=JSON.parse(raw);
+        const rows=sanitizeArchiveEntries(parsed?.entries||parsed);
+        if(rows.length)candidates.push({entries:rows,updatedAt:Number(parsed?.updatedAt)||0,source:'AUTHORITATIVE-LOCAL'});
+      }
+    }catch(err){console.warn('Autoritativer Archivstand konnte nicht gelesen werden',err);}
     // An explicit restore is isolated from normal startup. If a user has just selected
     // a backup, do not allow a concurrent load to replace it with an older store.
     if(archiveRestoreInProgress)return;
@@ -968,8 +980,8 @@
     }
     const nonEmpty=candidates.filter(c=>Array.isArray(c.entries)&&c.entries.length);
     nonEmpty.sort((a,b)=>{
-      const ap=a.source==='DIRECT-RESTORE'?1:0, bp=b.source==='DIRECT-RESTORE'?1:0;
-      return bp-ap || Number(b.updatedAt||0)-Number(a.updatedAt||0) || b.entries.length-a.entries.length;
+      const priority=source=>source==='AUTHORITATIVE-LOCAL'?2:(source==='DIRECT-RESTORE'?1:0);
+      return priority(b.source)-priority(a.source) || Number(b.updatedAt||0)-Number(a.updatedAt||0) || b.entries.length-a.entries.length;
     });
     const mergedById=new Map();
     for(const c of [...nonEmpty].reverse()){for(const e of sanitizeArchiveEntries(c.entries)){if(e?.id)mergedById.set(String(e.id),e);}}
@@ -1014,6 +1026,9 @@
     const updatedAt=Date.now();
     if(entries.length){
       try{
+        localStorage.setItem(ARCHIVE_AUTHORITATIVE_KEY,JSON.stringify({version:1,updatedAt,entries}));
+      }catch(err){console.warn('Autoritativer Archivstand konnte nicht lokal gespeichert werden',err);}
+      try{
         const previous=localStorage.getItem(META_KEY);
         if(previous && previous!=='[]')localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:1,updatedAt,raw:previous}));
         localStorage.setItem(META_KEY,JSON.stringify(entries));
@@ -1021,7 +1036,12 @@
       }catch(err){console.warn('Archiv-Metadaten konnten nicht lokal gespeichert werden',err);}
       void saveMetaDb(entries,updatedAt,allowEmpty);
     }else if(allowEmpty){
-      try{localStorage.setItem(META_KEY,'[]');localStorage.setItem(META_UPDATED_KEY,String(updatedAt));}catch{}
+      try{
+        localStorage.setItem(META_KEY,'[]');
+        localStorage.setItem(META_UPDATED_KEY,String(updatedAt));
+        localStorage.removeItem(ARCHIVE_AUTHORITATIVE_KEY);
+        localStorage.removeItem(DIRECT_RESTORE_KEY);
+      }catch{}
       void saveMetaDb([],updatedAt,true);
     }
     void saveDurableAppState();
@@ -1099,7 +1119,11 @@
   function persistCurrentView(v){
     const view=views[v]?v:'archive';
     try{sessionStorage.setItem('grandrp_current_view',view);localStorage.setItem('grandrp_current_view',view);}catch{}
-    try{history.replaceState(null,'',`${location.pathname}${location.search}#${view}`);}catch{try{location.hash=view;}catch{}}
+    try{
+      if(location.hash!==`#${view}`) location.hash=view;
+    }catch{
+      try{history.replaceState(null,'',`${location.pathname}${location.search}#${view}`);}catch{}
+    }
   }
   function restoreSavedView(){
     let saved='';
@@ -2781,7 +2805,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   async function driveFindFile(name,folderId){const q=encodeURIComponent(`name='${String(name).replace(/'/g,"\\'")}' and '${folderId}' in parents and trashed=false`);const r=await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=modifiedTime desc&pageSize=20&fields=files(id,name,size,mimeType,modifiedTime,appProperties)`);return (await r.json()).files?.[0]||null;}
   async function driveUploadJson(name,folderId,payload,existingId){const boundary='----grandrpDrive'+Math.random().toString(16).slice(2);const meta=existingId?{name}:{name,parents:[folderId],mimeType:'application/json'};const body=`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(payload)}\r\n--${boundary}--`;const url=existingId?`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(existingId)}?uploadType=multipart&fields=id,name,modifiedTime`:'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime';return (await driveApi(url,{method:existingId?'PATCH':'POST',headers:{'Content-Type':`multipart/related; boundary=${boundary}`},body})).json();}
   async function syncDriveBackup(){if(driveSyncInProgress)return;driveSyncInProgress=true;renderDriveStatus();const help=$('#driveHelp');try{const token=await driveTokenFresh(false);if(!token)throw new Error('Drive-Zugriff fehlt.');const folder=await driveEnsureFolder();const entries=sanitizeArchiveEntries(state.entries||[]).map(e=>{const copy={...e};delete copy.driveFileId;delete copy.file;delete copy.videoUrl;return copy;});const manifest={format:'grandrp-cloud-archive',version:2,backupType:'metadata-only',createdAt:new Date().toISOString(),note:'Nur Archiv-Metadaten und Proof-/YouTube-Links. Keine POV-Videodateien werden in Google Drive gespeichert.',entries};const mf=await driveFindFile(DRIVE_MANIFEST_NAME,folder);await driveUploadJson(DRIVE_MANIFEST_NAME,folder,manifest,mf?.id||'');saveDriveState({...driveState(),connected:true,clientId:driveState().clientId});if(help)help.textContent=`✓ Archiv-Backup gesichert · ${entries.length} Einträge · nur JSON`;toast(`Archiv-Backup gesichert · ${entries.length} Einträge.`);}catch(err){console.error('Google-Drive-Backup fehlgeschlagen',err);if(help)help.textContent='✕ Cloud-Backup fehlgeschlagen: '+(err?.message||err);toast('Cloud-Backup fehlgeschlagen: '+(err?.message||err));}finally{driveSyncInProgress=false;renderDriveStatus();}}
-  async function restoreDriveBackup(){if(driveSyncInProgress)return;driveSyncInProgress=true;renderDriveStatus();const help=$('#driveHelp');try{const folder=await driveEnsureFolder();const mf=await driveFindFile(DRIVE_MANIFEST_NAME,folder);if(!mf)throw new Error('Kein Cloud-Archiv gefunden.');const token=await driveTokenFresh(false);const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(mf.id)}?alt=media`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw new Error(`Cloud-Manifest ${r.status}`);const manifest=await r.json();const entries=sanitizeArchiveEntries(manifest?.entries||[]);if(!entries.length)throw new Error('Cloud-Archiv enthält keine Einträge.');const restored=entries.map(e=>{const copy={...e};delete copy.driveFileId;return copy;});state.entries=restored;state.filter='all';state.archiveSelected.clear();if($('#search'))$('#search').value='';const stamp=Date.now();localStorage.setItem(DIRECT_RESTORE_KEY,JSON.stringify({version:8,updatedAt:stamp,name:DRIVE_MANIFEST_NAME,entries:restored}));localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:8,updatedAt:stamp,entries:restored}));localStorage.setItem(META_KEY,JSON.stringify(restored));localStorage.setItem(META_UPDATED_KEY,String(stamp));await saveMetaDb(restored,stamp,false);renderArchive();renderCases();renderCsv();renderQueue();showView('archive',false);persistCurrentView('archive');if(help)help.textContent=`✓ Archiv-Backup wiederhergestellt · ${restored.length} Einträge · keine POV-Videos aus Drive`;toast(`Archiv-Backup wiederhergestellt · ${restored.length} Einträge.`);}catch(err){console.error('Cloud-Backup-Wiederherstellung fehlgeschlagen',err);if(help)help.textContent='✕ Cloud-Backup-Wiederherstellung fehlgeschlagen: '+(err?.message||err);toast('Cloud-Backup-Wiederherstellung fehlgeschlagen: '+(err?.message||err));}finally{driveSyncInProgress=false;renderDriveStatus();}}
+  async function restoreDriveBackup(){if(driveSyncInProgress)return;driveSyncInProgress=true;renderDriveStatus();const help=$('#driveHelp');try{const folder=await driveEnsureFolder();const mf=await driveFindFile(DRIVE_MANIFEST_NAME,folder);if(!mf)throw new Error('Kein Cloud-Archiv gefunden.');const token=await driveTokenFresh(false);const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(mf.id)}?alt=media`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw new Error(`Cloud-Manifest ${r.status}`);const manifest=await r.json();const entries=sanitizeArchiveEntries(manifest?.entries||[]);if(!entries.length)throw new Error('Cloud-Archiv enthält keine Einträge.');const restored=entries.map(e=>{const copy={...e};delete copy.driveFileId;return copy;});state.entries=restored;state.filter='all';state.archiveSelected.clear();if($('#search'))$('#search').value='';const stamp=Date.now();localStorage.setItem(DIRECT_RESTORE_KEY,JSON.stringify({version:8,updatedAt:stamp,name:DRIVE_MANIFEST_NAME,entries:restored}));localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:8,updatedAt:stamp,entries:restored}));localStorage.setItem(ARCHIVE_AUTHORITATIVE_KEY,JSON.stringify({version:1,updatedAt:stamp,entries:restored}));localStorage.setItem(META_KEY,JSON.stringify(restored));localStorage.setItem(META_UPDATED_KEY,String(stamp));await saveMetaDb(restored,stamp,false);renderArchive();renderCases();renderCsv();renderQueue();showView('archive',false);persistCurrentView('archive');if(help)help.textContent=`✓ Archiv-Backup wiederhergestellt · ${restored.length} Einträge · keine POV-Videos aus Drive`;toast(`Archiv-Backup wiederhergestellt · ${restored.length} Einträge.`);}catch(err){console.error('Cloud-Backup-Wiederherstellung fehlgeschlagen',err);if(help)help.textContent='✕ Cloud-Backup-Wiederherstellung fehlgeschlagen: '+(err?.message||err);toast('Cloud-Backup-Wiederherstellung fehlgeschlagen: '+(err?.message||err));}finally{driveSyncInProgress=false;renderDriveStatus();}}
   function scheduleDriveRecoveryIfEmpty(){
     if(driveSyncInProgress)return;
     try{const st=driveState();const explicitlyCleared=!!localStorage.getItem(LOCAL_CLEAR_MARKER_KEY);if(!st?.accessToken||!st?.clientId||state.entries.length||explicitlyCleared)return;}catch{return;}
@@ -3097,6 +3121,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if($('#search'))$('#search').value='';
       const stamp=Number(payload?.updatedAt)||Date.now();
       localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:5,updatedAt:stamp,entries:state.entries}));
+      localStorage.setItem(ARCHIVE_AUTHORITATIVE_KEY,JSON.stringify({version:1,updatedAt:stamp,entries:state.entries}));
       localStorage.setItem(META_KEY,JSON.stringify(state.entries));
       localStorage.setItem(META_UPDATED_KEY,String(stamp));
       // UI-first restore: IndexedDB persistence must never block the visible restore.
@@ -3192,7 +3217,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     };
     window.grandrpClearLocalData=async()=>{
       state.entries=[];state.queue=[];
-      try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(DIRECT_RESTORE_KEY);localStorage.removeItem(LEGACY_DIRECT_RESTORE_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);}catch{}
+      try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(ARCHIVE_AUTHORITATIVE_KEY);localStorage.removeItem(DIRECT_RESTORE_KEY);localStorage.removeItem(LEGACY_DIRECT_RESTORE_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);}catch{}
       await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();return true;
     };
     window.grandrpForceArchiveRender=()=>{renderArchive();return state.entries.length;};
@@ -3224,7 +3249,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     // Public handlers are assigned even when an optional settings renderer failed.
     window.grandrpRestoreArchiveBackup=restoreArchiveBackup;
     window.grandrpDownloadArchiveBackup=downloadArchiveBackup;
-    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.setItem(LOCAL_CLEAR_MARKER_KEY,String(Date.now()));localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
+    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.setItem(LOCAL_CLEAR_MARKER_KEY,String(Date.now()));localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(ARCHIVE_AUTHORITATIVE_KEY);localStorage.removeItem(DIRECT_RESTORE_KEY);localStorage.removeItem(LEGACY_DIRECT_RESTORE_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }
 
@@ -3292,6 +3317,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   document.addEventListener('visibilitychange',persistActiveViewNow);
   window.addEventListener('pagehide',persistActiveViewNow);
   window.addEventListener('hashchange',()=>{try{const v=String(location.hash||'').slice(1);if(views[v]){localStorage.setItem('grandrp_current_view',v);sessionStorage.setItem('grandrp_current_view',v);}}catch{}});
+  window.addEventListener('pageshow',()=>{try{if(authUser)restoreSavedView();}catch(err){console.warn('Ansicht nach Reload konnte nicht wiederhergestellt werden',err);}});
   window.addEventListener('beforeunload' ,()=>{persistActiveViewNow();try{const active=document.querySelector('.view.active')?.id?.replace(/^view-/,'');if(active&&views[active])persistCurrentView(active);}catch{};try{persistQueueNow();}catch{};try{saveYoutubeConnections();void saveDurableAppState();}catch{};try{state.worker?.terminate();}catch{};try{state.specialWorker?.terminate();}catch{};try{state.fastWorker?.terminate();}catch{}});
   setupAuthUI();
   authResume().then(ok=>{if(ok)bootApp();});

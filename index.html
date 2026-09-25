@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=129">
+<link rel="stylesheet" href="styles.css?v=132">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -37,7 +37,7 @@
     <header class="topbar">
       <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V131</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V132</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -103,7 +103,7 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V131</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V132</span></div>
           <p class="hint">POVs bis 2 Minuten werden vollständig in 250-ms-Schritten durchsucht. Längere Videos werden adaptiv gescannt und bei Treffern verdichtet. Das Info-Foto kommt aus einem verifizierten Bann-Cluster; der Bannblock wird für das Info-Foto bevorzugt in den letzten 5 Sekunden verifiziert. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
@@ -207,120 +207,12 @@
     if(!allowed[saved])saved='archive';
     document.documentElement.dataset.initialView=saved;
     document.body?.setAttribute('data-initial-view',saved);
-    if(!location.hash || !allowed[hash]) history.replaceState(null,'',location.pathname+location.search+'#'+saved);
+    if(location.hash !== '#'+saved){try{location.hash=saved;}catch{try{history.replaceState(null,'',location.pathname+location.search+'#'+saved);}catch{}}}
   }catch{}
 })();
 </script>
-<script src="app.js?v=129"></script>
-<script>
-(function(){
-  'use strict';
-  const DB_NAME='grandrp_pov_db_v42', STORE='videos';
-  const META_KEY='grandrp_pov_meta_v42';
-  const META_DB_KEY='__grandrp_archive_meta__';
-  const PERMA_DB_KEY='__grandrp_perma_archive__';
-  const EMERGENCY_KEY='grandrp_archive_emergency_backup_v1';
-  const DIRECT_KEY='grandrp_direct_restore_v122';
-  const LEGACY_KEYS=['grandrp_direct_restore_v118','grandrp_direct_restore_v117'];
-  const status=document.getElementById('archiveBackupFileName');
-  const input=document.getElementById('archiveBackupFile');
-  const grid=()=>document.getElementById('archiveGrid');
-  const empty=()=>document.getElementById('emptyState');
-  const search=()=>document.getElementById('search');
-  const esc=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-  const cleanEntries=rows=>Array.isArray(rows)?rows.filter(e=>e&&e.id).map(e=>{const x={...e};delete x.file;delete x.videoUrl;return x;}):[];
-  function readLocalEntries(){
-    const out=[];
-    const keys=[DIRECT_KEY,...LEGACY_KEYS,EMERGENCY_KEY,META_KEY];
-    for(const key of keys){try{const raw=localStorage.getItem(key);if(!raw)continue;const p=JSON.parse(raw);const rows=Array.isArray(p)?p:(Array.isArray(p?.entries)?p.entries:[]);out.push(...cleanEntries(rows));}catch{}}
-    const map=new Map(); for(const e of out)map.set(String(e.id),e); return [...map.values()];
-  }
-  function persistLocal(rows,stamp=Date.now()){
-    const clean=cleanEntries(rows);
-    const wrapper=JSON.stringify({version:7,updatedAt:stamp,entries:clean});
-    localStorage.setItem(DIRECT_KEY,wrapper);
-    localStorage.setItem(EMERGENCY_KEY,wrapper);
-    localStorage.setItem(META_KEY,JSON.stringify(clean));
-    localStorage.setItem('grandrp_pov_meta_updated_v1',String(stamp));
-    return clean;
-  }
-  function openArchiveDb(){
-    return new Promise((resolve,reject)=>{
-      let req;
-      try{req=indexedDB.open(DB_NAME);}catch(err){reject(err);return;}
-      req.onupgradeneeded=()=>{try{if(!req.result.objectStoreNames.contains(STORE))req.result.createObjectStore(STORE);}catch(err){reject(err);}};
-      req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error||new Error('IndexedDB konnte nicht geöffnet werden.'));
-    });
-  }
-  async function persistDb(rows,stamp){
-    try{const db=await openArchiveDb();await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');const os=tx.objectStore(STORE);os.put({version:7,updatedAt:stamp,entries:cleanEntries(rows)},META_DB_KEY);os.put(cleanEntries(rows).filter(e=>e.permaArchive),PERMA_DB_KEY);for(const e of cleanEntries(rows))os.put({version:1,updatedAt:stamp,entry:e},`__grandrp_archive_entry_v106__${e.id}`);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}catch(err){console.warn('Backup-DB-Sicherung fehlgeschlagen',err);}
-  }
-  function fmtDate(v){const m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}.${m[2]}.${m[1]}`:String(v||'');}
-  function renderStandalone(rows){
-    const list=cleanEntries(rows);
-    const g=grid(); if(!g)return;
-    if(search())search().value='';
-    document.querySelectorAll('.filter').forEach(b=>b.classList.toggle('active',b.dataset.filter==='all'));
-    const normal=list.filter(e=>!e.permaArchive);
-    const count=(sel,val)=>{const el=document.getElementById(sel);if(el)el.textContent=String(val);};
-    count('countAll',normal.length); count('countBan',normal.filter(e=>!e.notBanned).length); count('countPc',normal.filter(e=>e.types?.includes('pccheck')).length); count('countSoc',normal.filter(e=>e.types?.includes('socban')).length); count('countHard',normal.filter(e=>e.types?.includes('hardban')).length); count('countCheat',normal.filter(e=>e.types?.includes('cheater')).length); count('countNeg',normal.filter(e=>e.types?.includes('negativ')).length); count('countNoVideo',normal.filter(e=>!e.videoStored).length); count('countPerma',list.filter(e=>e.permaArchive).length);
-    const idCounts={};list.forEach(e=>{const id=String(e.targetId||'');if(id)idCounts[id]=(idCounts[id]||0)+1;});count('countDuplicates',Object.values(idCounts).filter(n=>n>1).length);
-    g.innerHTML=list.map(e=>`<article class="card ${idCounts[String(e.targetId||'')] > 1?'duplicate-id':''}"><div class="thumb archive-thumb">${e.videoStored?'<div>POV</div>':'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(String(e.id).slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span>${e.permaArchive?'<span class="pill perma-tag">POV ARCHIV</span>':''}</div><div class="card-body"><div class="card-title">${esc(e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div><span>SOC</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(fmtDate(e.date))}</div><div><span>Ergebnis</span>${esc(e.manualResult||'')}</div><div><span>Grund</span>${esc(e.reason||'')}</div></div></div><div class="card-actions"><button type="button" class="mini danger" data-repair-delete="${esc(e.id)}">Löschen</button>${e.youtube?.url||e.proof?`<button type="button" class="mini primary" data-repair-open="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}</div></article>`).join('');
-    if(empty())empty().classList.toggle('hidden',list.length>0);
-  }
-  async function importBackup(file){
-    if(!file)throw new Error('Keine Backup-Datei ausgewählt.');
-    const raw=(await file.text()).replace(/^\uFEFF/,'').trim(); if(!raw)throw new Error('Die Backup-Datei ist leer.');
-    let parsed; try{parsed=JSON.parse(raw);}catch{throw new Error('Die Datei enthält kein gültiges JSON.');}
-    const rows=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.entries)?parsed.entries:(Array.isArray(parsed?.archive)?parsed.archive:[]));
-    const backup=cleanEntries(rows); if(!backup.length)throw new Error('Keine gültigen Archiv-Einträge in der Backup-Datei.');
-    const current=readLocalEntries(); const map=new Map(current.map(e=>[String(e.id),e])); backup.forEach(e=>map.set(String(e.id),e));
-    const merged=[...map.values()]; const stamp=Date.now();
-    persistLocal(merged,stamp); await persistDb(merged,stamp);
-    // Tell the application state immediately when the V131 bridge exists.
-    try{if(window.grandrpSetArchiveEntries)window.grandrpSetArchiveEntries(merged,{replace:true});}catch(err){console.warn('App-Bridge konnte Archiv nicht setzen',err);}
-    renderStandalone(merged);
-    if(status)status.textContent=`✓ Archiv wiederhergestellt · ${backup.length} Backup-Einträge · ${merged.length} insgesamt`;
-    try{history.replaceState(null,'',`${location.pathname}${location.search}#archive`);}catch{}
-    try{sessionStorage.setItem('grandrp_current_view','archive');localStorage.setItem('grandrp_current_view','archive');}catch{}
-    if(window.toast){};
-  }
-  async function readDurableEntries(){
-    const local=readLocalEntries();
-    try{
-      const db=await openArchiveDb();
-      const rows=await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const r=tx.objectStore(STORE).get(META_DB_KEY);tx.oncomplete=()=>{const v=r.result;res(Array.isArray(v)?v:(Array.isArray(v?.entries)?v.entries:[]));};tx.onerror=()=>rej(tx.error);});
-      const map=new Map(local.map(e=>[String(e.id),e])); cleanEntries(rows).forEach(e=>map.set(String(e.id),e));
-      return [...map.values()];
-    }catch{return local;}
-  }
-  async function downloadBackup(){
-    const rows=await readDurableEntries();
-    if(!rows.length){if(status)status.textContent='✕ Kein Archiv zum Sichern vorhanden.';return;}
-    const payload={format:'grandrp-archive-backup',version:7,createdAt:new Date().toISOString(),entries:rows};
-    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
-    const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`grandrp-archiv-backup-${new Date().toISOString().slice(0,10)}.json`; a.style.display='none'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
-    if(status)status.textContent=`✓ Backup heruntergeladen · ${rows.length} Einträge`;
-  }
-  async function clearAll(){
-    if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;
-    try{for(const k of [META_KEY,EMERGENCY_KEY,DIRECT_KEY,...LEGACY_KEYS,'grandrp_pov_meta_updated_v1'])localStorage.removeItem(k);}catch{}
-    try{const db=await openArchiveDb();await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}catch(err){console.error(err);}
-    renderStandalone([]); if(status)status.textContent='✓ Lokales Archiv gelöscht.';
-    try{location.hash='archive';}catch{}
-  }
-  // Capture handlers make the three local-data controls work even if another app initializer fails.
-  document.addEventListener('click',async ev=>{
-    const dl=ev.target.closest?.('#downloadArchiveBackup'); if(dl){ev.preventDefault();ev.stopImmediatePropagation();await downloadBackup();return;}
-    const clr=ev.target.closest?.('#clearLocal'); if(clr){ev.preventDefault();ev.stopImmediatePropagation();await clearAll();return;}
-    const del=ev.target.closest?.('[data-repair-delete]'); if(del){ev.preventDefault();ev.stopImmediatePropagation();const id=del.dataset.repairDelete;const rows=readLocalEntries().filter(e=>String(e.id)!==String(id));if(window.grandrpDeleteArchiveEntry){try{await window.grandrpDeleteArchiveEntry(id);}catch(err){console.error(err);persistLocal(rows);persistDb(rows,Date.now());}}else{persistLocal(rows);await persistDb(rows,Date.now());}renderStandalone(rows);return;}
-    const open=ev.target.closest?.('[data-repair-open]'); if(open){ev.preventDefault();ev.stopImmediatePropagation();window.open(open.dataset.repairOpen,'_blank','noopener,noreferrer');return;}
-  },true);
-  input?.addEventListener('change',async()=>{const file=input.files?.[0];if(!file)return;try{if(status)status.textContent=`Backup-Datei wird eingelesen: ${file.name} …`;await importBackup(file);}catch(err){console.error(err);if(status)status.textContent='✕ '+(err?.message||String(err));}finally{try{input.value='';}catch{}}});
-  // Restore the current tab and a direct backup at the end of startup as well.
-  window.addEventListener('load',()=>{setTimeout(()=>{const rows=readLocalEntries();if(rows.length)renderStandalone(rows);try{const saved=location.hash?.slice(1)||sessionStorage.getItem('grandrp_current_view')||localStorage.getItem('grandrp_current_view')||'archive';document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view===saved));const target=document.querySelector(`#view-${saved}`)||document.querySelector('#view-archive');if(target)target.classList.add('active');const actual=target?.id?.replace(/^view-/,'')||'archive';if(actual!==saved){try{localStorage.setItem('grandrp_current_view',actual);sessionStorage.setItem('grandrp_current_view',actual);history.replaceState(null,'',`${location.pathname}${location.search}#${actual}`);}catch{}}const ttl=target?.querySelector('h1,h2')?.textContent;if(ttl&&document.getElementById('pageTitle'))document.getElementById('pageTitle').textContent=ttl;}catch{}},250);});
-})();
-</script>
+<script src="app.js?v=132"></script>
+
 
 </body>
 </html>
