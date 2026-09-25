@@ -1042,6 +1042,17 @@
     const db=await openDB();
     return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});
   }
+  function persistCurrentView(v){
+    const view=views[v]?v:'archive';
+    try{sessionStorage.setItem('grandrp_current_view',view);localStorage.setItem('grandrp_current_view',view);}catch{}
+    try{history.replaceState(null,'',`${location.pathname}${location.search}#${view}`);}catch{try{location.hash=view;}catch{}}
+  }
+  function restoreSavedView(){
+    let saved='';
+    try{saved=String(location.hash||'').replace(/^#/,'').trim();}catch{}
+    if(!saved){try{saved=sessionStorage.getItem('grandrp_current_view')||localStorage.getItem('grandrp_current_view')||'';}catch{}}
+    if(saved&&views[saved])showView(saved,false); else showView('archive',false);
+  }
   function showView(v,persist=true){
     if(!views[v])v='archive';
     $$('.view').forEach(x=>x.classList.remove('active'));
@@ -1049,10 +1060,7 @@
     $$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
     if($('#pageTitle'))$('#pageTitle').textContent=views[v][0];
     if($('#pageSubtitle'))$('#pageSubtitle').textContent=views[v][1];
-    if(persist){
-      try{sessionStorage.setItem('grandrp_current_view',v);localStorage.setItem('grandrp_current_view',v);}catch{}
-      try{history.replaceState(null,'',`${location.pathname}${location.search}#${v}`);}catch{try{location.hash=v;}catch{}}
-    }
+    if(persist)persistCurrentView(v);
     if(v==='archive')renderArchive();
     if(v==='cases')renderCases();
     if(v==='csv')renderCsv();
@@ -1164,10 +1172,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       $$('.filter').forEach(x=>x.classList.toggle('active',x===b));
       renderArchive();
     }));
-    let savedView='';
-    try{savedView=String(location.hash||'').replace(/^#/,'').trim();}catch{}
-    if(!savedView){try{savedView=sessionStorage.getItem('grandrp_current_view')||localStorage.getItem('grandrp_current_view')||'';}catch{}}
-    if(savedView&&views[savedView])showView(savedView,false);
+    restoreSavedView();
   }
 
 
@@ -2857,7 +2862,8 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     try{
       const {parsed,entries:clean}=await parseArchiveBackupFile(file);
       const label=String(file?.name||'Backup');
-      if(!confirm(`„${label}“ enthält ${clean.length} Archiv-Einträge. Wiederherstellen?\n\nVorhandene Einträge werden nach ID zusammengeführt. Automatisch gelöscht wird nichts.`))return;
+      const nameEl=$('#archiveBackupFileName');
+      if(nameEl)nameEl.textContent=`Lese Backup ein: ${label} …`;
       try{await archiveReadyPromise;}catch{}
       const durable=await collectDurableBackupEntries();
       const byId=new Map(durable.map(e=>[String(e.id),e]));
@@ -2877,9 +2883,13 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if(!ok)throw new Error('Das Archiv konnte nicht dauerhaft in IndexedDB gespeichert werden.');
       saveYoutubeConnections();
       void saveDurableAppState();
-      renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();
-      const nameEl=$('#archiveBackupFileName');
-      if(nameEl)nameEl.textContent=`Zuletzt eingelesen: ${label} · ${clean.length} Einträge`;
+      try{renderArchive();}catch(err){console.error('Archiv-Anzeige konnte nach Backup nicht aktualisiert werden',err);}
+      try{renderCases();}catch(err){console.error('Verdachtsfälle-Anzeige konnte nach Backup nicht aktualisiert werden',err);}
+      try{renderCsv();}catch(err){console.error('CSV-Anzeige konnte nach Backup nicht aktualisiert werden',err);}
+      try{renderQueue();}catch(err){console.error('Warteschlangen-Anzeige konnte nach Backup nicht aktualisiert werden',err);}
+      try{renderYoutubeConnections();}catch(err){console.error('YouTube-Anzeige konnte nach Backup nicht aktualisiert werden',err);}
+      const finalNameEl=$('#archiveBackupFileName');
+      if(finalNameEl)finalNameEl.textContent=`✓ Backup eingelesen: ${label} · ${clean.length} Einträge · Archiv gesamt: ${state.entries.length}`;
       toast(`Backup eingelesen · ${clean.length} neue/überschriebene Einträge · insgesamt ${state.entries.length}.`);
     }catch(err){
       console.error('Archiv-Backup-Wiederherstellung fehlgeschlagen',err);
@@ -2908,13 +2918,18 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     renderYoutubeConnections();
     $('#downloadArchiveBackup')?.addEventListener('click',downloadArchiveBackup);
     const backupFile=$('#archiveBackupFile');
-    backupFile?.addEventListener('change',e=>{
-      const f=e.target.files?.[0];
-      if(!f)return;
-      const nameEl=$('#archiveBackupFileName');
-      if(nameEl)nameEl.textContent=`Ausgewählt: ${f.name}`;
-      void restoreArchiveBackup(f);
-    });
+    if(backupFile){
+      backupFile.addEventListener('change',e=>{
+        const f=e.target.files?.[0];
+        if(!f)return;
+        const nameEl=$('#archiveBackupFileName');
+        if(nameEl)nameEl.textContent=`Ausgewählt: ${f.name} · wird eingelesen …`;
+        void restoreArchiveBackup(f).finally(()=>{try{backupFile.value='';}catch{}});
+      });
+    }
+    // Expose explicit handlers for debugging and for the native HTML control.
+    window.grandrpRestoreArchiveBackup=restoreArchiveBackup;
+    window.grandrpDownloadArchiveBackup=downloadArchiveBackup;
     $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }
@@ -2958,12 +2973,9 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     renderQueue();
     void pumpUploads();
     renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();renderAuthUsers();
-    let savedView='';
-    try{savedView=String(location.hash||'').replace(/^#/,'').trim();}catch{}
-    if(!savedView){try{savedView=sessionStorage.getItem('grandrp_current_view')||localStorage.getItem('grandrp_current_view')||'';}catch{}}
-    if(savedView&&views[savedView])showView(savedView,false);
+    restoreSavedView();
   }
-  window.addEventListener('beforeunload' ,()=>{try{persistQueueNow();}catch{};try{saveYoutubeConnections();void saveDurableAppState();}catch{};try{state.worker?.terminate();}catch{};try{state.specialWorker?.terminate();}catch{};try{state.fastWorker?.terminate();}catch{}});
+  window.addEventListener('beforeunload' ,()=>{try{const active=document.querySelector('.view.active')?.id?.replace(/^view-/,'');if(active&&views[active])persistCurrentView(active);}catch{};try{persistQueueNow();}catch{};try{saveYoutubeConnections();void saveDurableAppState();}catch{};try{state.worker?.terminate();}catch{};try{state.specialWorker?.terminate();}catch{};try{state.fastWorker?.terminate();}catch{}});
   setupAuthUI();
   authResume().then(ok=>{if(ok)bootApp();});
 })();
