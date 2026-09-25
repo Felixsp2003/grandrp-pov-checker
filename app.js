@@ -705,9 +705,9 @@
   const META_UPDATED_KEY='grandrp_pov_meta_updated_v1';
   const QUEUE_UPDATED_KEY='grandrp_pov_queue_updated_v1';
   const ARCHIVE_BACKUP_KEY='grandrp_archive_emergency_backup_v1';
-  const PENDING_BACKUP_KEY='grandrp_pending_backup_v117';
-  const DIRECT_RESTORE_KEY='grandrp_direct_restore_v117';
-  const LEGACY_DIRECT_RESTORE_KEY='grandrp_direct_restore_v116';
+  const PENDING_BACKUP_KEY='grandrp_pending_backup_v118';
+  const DIRECT_RESTORE_KEY='grandrp_direct_restore_v118';
+  const LEGACY_DIRECT_RESTORE_KEY='grandrp_direct_restore_v117';
   const ARCHIVE_SNAPSHOT_PREFIX='__grandrp_archive_snapshot_v106__';
   const ARCHIVE_ENTRY_PREFIX='__grandrp_archive_entry_v106__';
   const DESTRUCTIVE_TOKEN=Object.freeze({name:'explicit-user-delete'});
@@ -2918,7 +2918,8 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:5,updatedAt:stamp,entries:state.entries}));
       localStorage.setItem(META_KEY,JSON.stringify(state.entries));
       localStorage.setItem(META_UPDATED_KEY,String(stamp));
-      await saveMetaDb(state.entries,Math.max(Date.now(),stamp),false);
+      // UI-first restore: IndexedDB persistence must never block the visible restore.
+      void saveMetaDb(state.entries,Math.max(Date.now(),stamp),false).catch(err=>console.warn('Backup wurde lokal übernommen; IndexedDB-Sicherung folgt/fehlte:',err));
       if(payload?.youtubeConnections)state.ytConnections=normalizeYoutubeConnections(payload.youtubeConnections);
       if(payload?.settings&&typeof payload.settings==='object')state.settings={...state.settings,...payload.settings};
       saveYoutubeConnections();

@@ -37,7 +37,7 @@
     <header class="topbar">
       <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V117</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V118</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -103,7 +103,7 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V117</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V118</span></div>
           <p class="hint">POVs bis 2 Minuten werden vollständig in 250-ms-Schritten durchsucht. Längere Videos werden adaptiv gescannt und bei Treffern verdichtet. Das Info-Foto kommt aus einem verifizierten Bann-Cluster; der Bannblock wird für das Info-Foto bevorzugt in den letzten 5 Sekunden verifiziert. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
@@ -197,11 +197,11 @@
   });
 })();
 </script>
-<script src="app.js?v=117"></script>
+<script src="app.js?v=118"></script>
 <script>
 (function(){
   'use strict';
-  const KEY='grandrp_pending_backup_v117';
+  const KEY='grandrp_pending_backup_v118';
   const input=document.getElementById('archiveBackupFile');
   const status=document.getElementById('archiveBackupFileName');
   if(!input)return;
@@ -219,7 +219,7 @@
       // Emergency copy first. This file is kept until the user explicitly clears local data.
       localStorage.setItem(KEY,JSON.stringify({version:1,createdAt:stamp,name:file.name,raw:raw}));
       localStorage.setItem('grandrp_archive_emergency_backup_v1',JSON.stringify({version:5,updatedAt:stamp,entries:entries}));
-      localStorage.setItem('grandrp_direct_restore_v117',JSON.stringify({version:2,updatedAt:stamp,name:file.name,entries:entries,youtubeConnections:parsed&&parsed.youtubeConnections,settings:parsed&&parsed.settings}));
+      localStorage.setItem('grandrp_direct_restore_v118',JSON.stringify({version:2,updatedAt:stamp,name:file.name,entries:entries,youtubeConnections:parsed&&parsed.youtubeConnections,settings:parsed&&parsed.settings}));
       if(status)status.textContent='✓ Backup-Datei gelesen · '+entries.length+' Einträge · Wiederherstellung läuft …';
       if(typeof window.grandrpRestoreArchiveBackup==='function'){
         await window.grandrpRestoreArchiveBackup(new File([raw],file.name,{type:'application/json'}));
