@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V116
+/* Grand RP DC Checker V119
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V116';
+  const BUILD='V119';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -705,9 +705,9 @@
   const META_UPDATED_KEY='grandrp_pov_meta_updated_v1';
   const QUEUE_UPDATED_KEY='grandrp_pov_queue_updated_v1';
   const ARCHIVE_BACKUP_KEY='grandrp_archive_emergency_backup_v1';
-  const PENDING_BACKUP_KEY='grandrp_pending_backup_v118';
-  const DIRECT_RESTORE_KEY='grandrp_direct_restore_v118';
-  const LEGACY_DIRECT_RESTORE_KEY='grandrp_direct_restore_v117';
+  const PENDING_BACKUP_KEY='grandrp_pending_backup_v119';
+  const DIRECT_RESTORE_KEY='grandrp_direct_restore_v119';
+  const LEGACY_DIRECT_RESTORE_KEY='grandrp_direct_restore_v118';
   const ARCHIVE_SNAPSHOT_PREFIX='__grandrp_archive_snapshot_v106__';
   const ARCHIVE_ENTRY_PREFIX='__grandrp_archive_entry_v106__';
   const DESTRUCTIVE_TOKEN=Object.freeze({name:'explicit-user-delete'});
@@ -2872,17 +2872,21 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     }
   }
   function downloadArchiveBackup(){
-    try{
-      const entries=sanitizeArchiveEntries(state.entries||[]);
-      if(!entries.length){toast('Kein Archiv zum Sichern vorhanden.');return;}
-      const payload=buildArchiveBackupPayload(entries);
-      const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
-      const ok=triggerBrowserDownload(blob,`grandrp-archiv-backup-${new Date().toISOString().slice(0,10)}.json`);
-      if(ok)toast(`${entries.length} Archiv-Einträge gesichert.`);
-    }catch(err){
-      console.error('Archiv-Backup-Download fehlgeschlagen',err);
-      toast('Backup konnte nicht heruntergeladen werden: '+(err?.message||err));
-    }
+    (async()=>{
+      try{
+        const durable=await collectDurableBackupEntries();
+        const current=window.grandrpGetArchiveEntries?.()||[];
+        const entries=current.length?current:sanitizeArchiveEntries(durable||[]);
+        if(!entries.length){toast('Kein Archiv zum Sichern vorhanden.');return;}
+        const payload=buildArchiveBackupPayload(entries);
+        const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+        const ok=triggerBrowserDownload(blob,`grandrp-archiv-backup-${new Date().toISOString().slice(0,10)}.json`);
+        if(ok)toast(`${entries.length} Archiv-Einträge gesichert.`);
+      }catch(err){
+        console.error('Archiv-Backup-Download fehlgeschlagen',err);
+        toast('Backup konnte nicht heruntergeladen werden: '+(err?.message||err));
+      }
+    })();
   }
   async function parseArchiveBackupFile(file){
     if(!file)throw new Error('Keine Backup-Datei ausgewählt.');
@@ -2957,8 +2961,11 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:6,updatedAt:importStamp,entries:clean}));
       // Apply immediately; never wait for archiveReadyPromise because that promise may still
       // be resolving in parallel with the file-input change event.
-      const count=await forceApplyDirectRestore({showStatus:false});
-      if(count!==clean.length)throw new Error(`Restore-Prüfung fehlgeschlagen (${count}/${clean.length} Einträge übernommen).`);
+      let count=0;
+      try{count=window.grandrpSetArchiveEntries?window.grandrpSetArchiveEntries(clean,{replace:true}):0;}catch(err){console.error('Direkter UI-Archivsetter fehlgeschlagen',err);}
+      const forced=await forceApplyDirectRestore({showStatus:false});
+      count=Math.max(count,forced);
+      if(count<clean.length)throw new Error(`Restore-Prüfung fehlgeschlagen (${count}/${clean.length} Einträge übernommen).`);
       // Make the UI authoritative as well: clear filters/search and render the exact imported
       // list after persistence has completed.
       state.entries=clean.map(e=>({...e,file:undefined,videoUrl:undefined}));
@@ -2985,6 +2992,30 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   }
 
   function setupSettings(){
+    // Install the public archive bridge before any optional settings widget can fail.
+    window.grandrpGetArchiveEntries=()=>sanitizeArchiveEntries(state.entries||[]);
+    window.grandrpSetArchiveEntries=(entries,options={})=>{
+      const clean=sanitizeArchiveEntries(entries);
+      if(!clean.length)throw new Error('Keine gültigen Archiv-Einträge zum Übernehmen.');
+      if(options.replace===true) state.entries=clean;
+      else {const byId=new Map(state.entries.map(e=>[String(e.id),e]));for(const e of clean)byId.set(String(e.id),e);state.entries=[...byId.values()];}
+      state.filter='all';state.archiveSelected.clear();if($('#search'))$('#search').value='';
+      renderArchive();renderCases();renderCsv();
+      return state.entries.length;
+    };
+    window.grandrpDeleteArchiveEntry=async(id)=>{
+      const key=String(id||'');const entry=state.entries.find(e=>String(e.id)===key);
+      if(!entry)throw new Error('Archiv-Eintrag nicht gefunden.');
+      await delVideo(entry.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(e=>String(e.id)!==key);state.archiveSelected.delete(entry.id);
+      saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});renderArchive();renderCases();renderCsv();return true;
+    };
+    window.grandrpClearLocalData=async()=>{
+      state.entries=[];state.queue=[];
+      try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(DIRECT_RESTORE_KEY);localStorage.removeItem(LEGACY_DIRECT_RESTORE_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);}catch{}
+      await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();return true;
+    };
+    window.grandrpForceArchiveRender=()=>{renderArchive();return state.entries.length;};
+
     state.settings.frames=Number(localStorage.getItem('v44_frames')||24);
     state.settings.window=Number(localStorage.getItem('v44_window')||4.5);
     state.settings.step=Number(localStorage.getItem('v44_step')||.5);
@@ -3002,10 +3033,10 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       reauthBtn?.addEventListener('click',()=>reauthorizeYoutube(slot));
       disconnectBtn?.addEventListener('click',()=>disconnectYoutube(slot));
     }
-    renderYoutubeConnections();
+    try{renderYoutubeConnections();}catch(err){console.error('YouTube-Einstellungen konnten nicht initialisiert werden',err);}
     $('#downloadArchiveBackup')?.addEventListener('click',downloadArchiveBackup);
     const backupFile=$('#archiveBackupFile');
-    // Expose explicit handlers so the native HTML file input can call restore directly.
+    // Public handlers are assigned even when an optional settings renderer failed.
     window.grandrpRestoreArchiveBackup=restoreArchiveBackup;
     window.grandrpDownloadArchiveBackup=downloadArchiveBackup;
     $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
@@ -3027,7 +3058,10 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     if(window.__grandrpAppBooted)return;
     try{const saved=JSON.parse(localStorage.getItem(PC_CUSTOM_KEY)||'[]');if(Array.isArray(saved))saved.filter(Boolean).forEach(v=>pcCheckerCustom.add(String(v)));}catch{}
     window.__grandrpAppBooted=true;
-    setupNav();setupUpload();setupEditor();setupSettings();updateYtStatus();void requestPersistentStorage();setInterval(()=>{if(authUser&&state.entries.length)saveMeta();},30000);
+    for(const [name,fn] of [['Navigation',setupNav],['Upload',setupUpload],['Editor',setupEditor],['Einstellungen',setupSettings]]){try{fn();}catch(err){console.error(`${name} konnte nicht initialisiert werden`,err);}}
+    try{updateYtStatus();}catch(err){console.error('YouTube-Status konnte nicht initialisiert werden',err);}
+    void requestPersistentStorage();
+    setInterval(()=>{if(authUser&&state.entries.length)saveMeta();},30000);
     archiveReadyPromise=(async()=>{
       await loadQueue().catch(err=>{console.error('Warteschlange konnte nicht geladen werden',err);state.queue=[];});
       try{await loadMeta();}catch(err){console.error('Archiv konnte nicht geladen werden',err);}

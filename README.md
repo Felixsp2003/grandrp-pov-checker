@@ -1,44 +1,20 @@
-# Grand RP DC Checker V107
+# Grand RP DC Checker V119
 
-Webseite + ACP v93.
+Webseite: V119
+ACP: V93 (unverändert)
 
-## V107 Änderungen
-- Fix für Archiv-Backup herunterladen/wiederherstellen.
-- `index.html` lädt die aktuelle `app.js?v=107`, damit kein alter Browser-Cache die Backup-Buttons blockiert.
-- Backup wartet auf das Laden des Archivs.
-- Backup sammelt die dauerhaft gespeicherten Archiv-Einträge aus IndexedDB/Recovery-Snapshots und localStorage.
-- Wiederherstellen öffnet die Dateiauswahl zuverlässig über `showPicker()` bzw. Fallback auf `click()`.
-- Wiederherstellung wird nach localStorage und IndexedDB geschrieben und anschließend direkt im Archiv angezeigt.
-- Automatische Löschungen des Archivs bleiben ausgeschlossen; Löschen erfolgt nur über die ausdrücklich vorhandenen Nutzeraktionen.
+## Reparaturen
+- Archiv-Backup-Wiederherstellung arbeitet unabhängig von der übrigen Settings-Initialisierung.
+- JSON-Backup wird direkt eingelesen und als autoritativer Archivstand gespeichert.
+- Kompatibilität mit `grandrp-recovery-backup` und 35-Einträge-Recovery-Datei geprüft.
+- Backup-Download liest dauerhaft gespeicherte Archivdaten und erzeugt eine JSON-Datei.
+- Lokales Archiv-Löschen ist weiterhin ausschließlich durch expliziten Benutzerklick möglich.
+- Einzelnes Löschen im Archiv hat eine öffentliche Fallback-Brücke.
+- Aktiver Tab wird über Hash + SessionStorage + localStorage gespeichert und nach Reload wiederhergestellt.
+- Cache-Busting: `app.js?v=119`, `styles.css?v=119`.
 
-### Hinweis
-Ein JSON-Backup enthält Archiv-Metadaten. Es kann lokale POV-Videodateien nicht neu erzeugen, wenn diese bereits vom Browser/Profil gelöscht wurden.
-
-
-V111: Die Archiv-Wiederherstellung nutzt jetzt einen echten nativen Datei-Input direkt über dem sichtbaren Button. Dadurch ist kein programmgesteuertes input.click() für den Datei-Dialog nötig. ACP V93 bleibt unverändert.
-
-
-V111 fixes the missing renderCsv function and persists the selected website tab via URL hash + storage. Archive restore uses a native label/file input. ACP remains V93.
-
-
-## V115
-- Fehlermeldung „renderCsv is not defined“ behoben; CSV-Rendering ist wieder vollständig vorhanden.
-- Backup-Wiederherstellung liest die ausgewählte JSON-Datei vollständig per `File.text()` ein, entfernt UTF-8-BOM und akzeptiert `entries`, `archive` sowie `data.entries`.
-- Das bisherige Recovery-Format `grandrp-recovery-backup` mit 35 Einträgen wird direkt unterstützt.
-- Wiederherstellung führt Einträge nach ID mit dem dauerhaft gespeicherten Archiv zusammen und löscht niemals automatisch bestehende Daten.
-- Der native Datei-Input liegt als transparente Fläche direkt über dem sichtbaren Wiederherstellen-Button; dadurch öffnet der normale Chrome-Dateidialog ohne `input.click()`-Workaround.
-- Nach Auswahl wird der Dateiname angezeigt; nach erfolgreicher Einlesung wird die Anzahl der eingelesenen Einträge gemeldet.
-- Der aktive Website-Tab wird über URL-Hash sowie Session-/Local-Storage wiederhergestellt.
-- ACP bleibt V93 unverändert.
-
-
-V115: Archiv-Backup wird nach Dateiauswahl sofort eingelesen; Datei-Input wird zurückgesetzt, damit dieselbe JSON erneut gewählt werden kann. Cache-Busting auf app.js/styles.css V115. Aktiver Tab wird zusätzlich vor Seitenwechsel/Refresh persistiert. ACP bleibt V93.
-
-
-V115: Native Backup-Import mit lokaler Pending-Sicherung; Wiederherstellung setzt Filter/Suche zurück, zeigt das Archiv sofort und verarbeitet ausstehende Backups beim Boot. ACP V93 unverändert.
-
-
-V115: Backup-Import uses a dedicated direct-restore record with priority on startup; after import, filters are reset and the Archive view is opened automatically. ACP remains V93.
-
-
-V117: Archiv-Backup-Import ist sofort autoritativ, läuft nicht mehr gegen archiveReadyPromise und ist gegen paralleles loadMeta gesperrt.
+## Durchgeführte Tests
+- `node --check app.js`: OK
+- Recovery-Datei: gültiges JSON, Format `grandrp-recovery-backup`, 35/35 gültige IDs
+- Standalone-Backup-Controller-Test: Restore 35 Einträge, Download-Payload 35 Einträge, Einzel-Löschen 34, Komplett-Löschen 0
+- ACP-V93-Dateien: bytegenau unverändert gegenüber V118
