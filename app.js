@@ -2765,7 +2765,16 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     try{
       // Do not await anything before a.click(): browsers can discard the user
       // activation after an async boundary and then silently block the download.
-      const entries=sanitizeArchiveEntries(state.entries||[]);
+      let entries=sanitizeArchiveEntries(state.entries||[]);
+      if(!entries.length){
+        try{
+          const emergency=JSON.parse(localStorage.getItem(ARCHIVE_BACKUP_KEY)||'null');
+          entries=sanitizeArchiveEntries(Array.isArray(emergency)?emergency:(emergency?.entries||[]));
+        }catch{}
+      }
+      if(!entries.length){
+        try{entries=sanitizeArchiveEntries(JSON.parse(localStorage.getItem(META_KEY)||'[]'));}catch{}
+      }
       if(!entries.length){toast('Kein Archiv zum Sichern vorhanden.');return;}
       const payload={format:'grandrp-archive-backup',version:3,createdAt:new Date().toISOString(),entries,youtubeConnections:state.ytConnections,settings:state.settings};
       const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});
@@ -2810,6 +2819,10 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       toast(`Backup wiederhergestellt · ${state.entries.length} Einträge.`);
     }catch(err){console.error(err);toast('Backup konnte nicht wiederhergestellt werden: '+(err?.message||err));}
   }
+  // Expose backup operations immediately so the HTML controls remain functional
+  // even when another settings renderer throws before setupSettings() completes.
+  window.grandrpDownloadArchiveBackup=downloadArchiveBackup;
+  window.grandrpRestoreArchiveBackupFile=restoreArchiveBackup;
 
   function setupSettings(){
     state.settings.frames=Number(localStorage.getItem('v44_frames')||24);
@@ -2821,6 +2834,9 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v44_frames',state.settings.frames)};
     $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v44_window',state.settings.window)};
     $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v44_step',state.settings.step)};
+
+    // Backup controls are bound FIRST. A rendering error in another settings block
+    // must never prevent the archive backup buttons from working.
     for(let slot=1;slot<=YT_MAX_CONNECTIONS;slot++){
       const input=$(`#ytClientId${slot}`), connectBtn=$(`#ytConnect${slot}`), reauthBtn=$(`#ytReauth${slot}`), disconnectBtn=$(`#ytDisconnect${slot}`);
       input?.addEventListener('input',e=>setYoutubeConnectionClientId(slot,e.target.value));
@@ -2829,24 +2845,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       reauthBtn?.addEventListener('click',()=>reauthorizeYoutube(slot));
       disconnectBtn?.addEventListener('click',()=>disconnectYoutube(slot));
     }
-    renderYoutubeConnections();
-    $('#downloadArchiveBackup')?.addEventListener('click',downloadArchiveBackup);
-    const backupFile=$('#archiveBackupFile');
-    $('#restoreArchiveBackup')?.addEventListener('click',e=>{
-      e.preventDefault();
-      e.stopPropagation();
-      if(!backupFile){toast('Backup-Dateifeld wurde nicht gefunden.');return;}
-      // Keep the file input in the DOM (not display:none/hidden) so Chrome's
-      // native file chooser can always be opened from the trusted click event.
-      try{backupFile.value='';}catch{}
-      try{backupFile.click();}
-      catch(err){console.error('Dateiauswahl konnte nicht geöffnet werden',err);toast('Dateiauswahl konnte nicht geöffnet werden: '+(err?.message||err));}
-    });
-    backupFile?.addEventListener('change',e=>{
-      const f=e.target.files?.[0];
-      if(!f)return;
-      void restoreArchiveBackup(f);
-    });
+    try{renderYoutubeConnections();}catch(err){console.error('YouTube-Einstellungen konnten nicht gerendert werden',err);}
     $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }

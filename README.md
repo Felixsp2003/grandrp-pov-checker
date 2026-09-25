@@ -1,15 +1,10 @@
-# Grand RP DC Checker V107
+Grand RP DC Checker V109
 
-Webseite + ACP v93.
+Website-Fix für Archiv-Backups:
+- Restore verwendet einen echten nativen input[type=file] innerhalb des sichtbaren Buttons. Dadurch öffnet Chrome direkt den Windows-Dateiauswahldialog.
+- Kein programmgesteuertes input.click() mehr für die Restore-Schaltfläche.
+- Backup-Download und Restore-Funktionen werden sofort global bereitgestellt und sind nicht von der restlichen Einstellungs-Initialisierung abhängig.
+- Download hat zusätzlich einen localStorage-Fallback, falls das Archivobjekt gerade noch nicht im UI geladen ist.
+- ACP bleibt auf V93 und wird nicht verändert.
 
-## V107 Änderungen
-- Fix für Archiv-Backup herunterladen/wiederherstellen.
-- `index.html` lädt die aktuelle `app.js?v=107`, damit kein alter Browser-Cache die Backup-Buttons blockiert.
-- Backup wartet auf das Laden des Archivs.
-- Backup sammelt die dauerhaft gespeicherten Archiv-Einträge aus IndexedDB/Recovery-Snapshots und localStorage.
-- Wiederherstellen öffnet die Dateiauswahl zuverlässig über `showPicker()` bzw. Fallback auf `click()`.
-- Wiederherstellung wird nach localStorage und IndexedDB geschrieben und anschließend direkt im Archiv angezeigt.
-- Automatische Löschungen des Archivs bleiben ausgeschlossen; Löschen erfolgt nur über die ausdrücklich vorhandenen Nutzeraktionen.
-
-### Hinweis
-Ein JSON-Backup enthält Archiv-Metadaten. Es kann lokale POV-Videodateien nicht neu erzeugen, wenn diese bereits vom Browser/Profil gelöscht wurden.
+Wichtig: Ein JSON-Backup enthält Archiv-Metadaten. Es kann lokale POV-Dateiblobs nicht neu erzeugen, falls Chrome diese bereits aus dem Browserprofil gelöscht hat.

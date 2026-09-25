@@ -59,3 +59,9 @@ button,select,input,textarea,.nav-item,.chip,.filter,.switch{ -webkit-user-selec
 
 /* V100 duplicate-ID archive view */
 .card.duplicate-id{border-color:#7a3150;box-shadow:0 0 0 1px rgba(255,72,142,.10) inset}.duplicate-tag{color:#ff9bbc!important;border-color:#7a3150!important;background:#25101b!important}.duplicate-filter{border-color:#5f2944}
+
+/* V109: native backup file chooser -- the real <input type=file> receives the click directly. */
+.backup-file-picker{position:relative;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;}
+.backup-file-picker input[type=file]{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;padding:0;margin:0;border:0;}
+.backup-file-picker span{pointer-events:none;white-space:nowrap;}
+.archive-backup-actions{align-items:center;}
