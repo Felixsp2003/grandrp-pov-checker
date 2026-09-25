@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V106';
+  const BUILD='V107';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -637,6 +637,7 @@
     if(global){const count=usableYoutubeConnections().length;global.textContent=count?`${count} YouTube-Verbindung${count===1?'':'en'} verfügbar. Leere Felder werden ignoriert.`:'Keine nutzbare YouTube-Verbindung vorhanden.';}
   }
   const state={entries:[],queue:[],archiveSelected:new Set(),filter:'all',editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:'',tokenClient:null,clientId:'',activeYoutubeSlot:1,ytConnections:loadYoutubeConnectionsLocal(),settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,localFallbackRunner:false,youtubeUploadBlocked:false,tokenExpiresAt:0,tokenRefreshPromise:null,tokenRefreshPromises:new Map()};
+  let archiveReadyPromise=Promise.resolve();
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
   // Local authentication: plaintext passwords are never stored; only salted PBKDF2 hashes are persisted in this browser.
   const AUTH_USERS_KEY='grandrp_auth_users_v1';
@@ -2743,30 +2744,63 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     if(actual!==desiredTitle)throw new Error(`YouTube-Titel weicht ab: erwartet „${desiredTitle}“ · erhalten „${actual}“`);
   }
 
-  function downloadArchiveBackup(){
-    const entries=sanitizeArchiveEntries(state.entries);
-    if(!entries.length){toast('Kein Archiv zum Sichern vorhanden.');return;}
-    const payload={format:'grandrp-archive-backup',version:1,createdAt:new Date().toISOString(),entries,youtubeConnections:state.ytConnections,settings:state.settings};
-    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
-    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`grandrp-archiv-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast(`${entries.length} Archiv-Einträge gesichert.`);
+  async function collectDurableBackupEntries(){
+    const merged=new Map();
+    const add=rows=>{for(const e of sanitizeArchiveEntries(rows||[])){const id=String(e.id);const old=merged.get(id);const ou=Number(old?.updatedAt||old?.savedAt||0);const eu=Number(e?.updatedAt||e?.savedAt||0);if(!old||eu>=ou)merged.set(id,e);}};
+    add(state.entries);
+    try{
+      const dbData=await getMetaDb();
+      add(dbData?.entries);add(dbData?.perma);
+      const snaps=await getArchiveSnapshotsDb();
+      for(const snap of snaps)add(snap.entries);
+    }catch(err){console.warn('Dauerhaftes Archiv konnte für Backup nicht vollständig gelesen werden',err);}
+    try{
+      const raw=localStorage.getItem(ARCHIVE_BACKUP_KEY);
+      if(raw){const parsed=JSON.parse(raw);add(Array.isArray(parsed)?parsed:parsed?.entries);}
+    }catch{}
+    return [...merged.values()];
   }
+
+  async function downloadArchiveBackup(){
+    try{await archiveReadyPromise;}catch{}
+    const entries=await collectDurableBackupEntries();
+    if(!entries.length){toast('Kein Archiv zum Sichern vorhanden.');return;}
+    const payload={format:'grandrp-archive-backup',version:2,createdAt:new Date().toISOString(),entries,youtubeConnections:state.ytConnections,settings:state.settings};
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=`grandrp-archiv-backup-${new Date().toISOString().slice(0,10)}.json`;
+    a.rel='noopener';
+    a.style.display='none';
+    document.body.appendChild(a);
+    try{a.click();}finally{setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},1500);}
+    toast(`${entries.length} Archiv-Einträge gesichert.`);
+  }
+
   async function restoreArchiveBackup(file){
     if(!file)return;
     try{
-      const parsed=JSON.parse(await file.text());
+      const text=await file.text();
+      const parsed=JSON.parse(text);
       const entries=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.entries)?parsed.entries:[]);
-      if(!entries.length)throw new Error('Die Backup-Datei enthält keine Archiv-Einträge.');
-      if(!confirm(`Backup mit ${entries.length} Einträgen wiederherstellen?
-
-Vorhandene Einträge werden nach ID zusammengeführt.`))return;
-      const byId=new Map(state.entries.map(e=>[String(e.id),e]));
-      for(const e of entries)if(e?.id)byId.set(String(e.id),e);
+      const clean=sanitizeArchiveEntries(entries);
+      if(!clean.length)throw new Error('Die Backup-Datei enthält keine Archiv-Einträge.');
+      if(!confirm(`Backup mit ${clean.length} Einträgen wiederherstellen?\n\nVorhandene Einträge werden nach ID zusammengeführt.`))return;
+      try{await archiveReadyPromise;}catch{}
+      const byId=new Map((await collectDurableBackupEntries()).map(e=>[String(e.id),e]));
+      for(const e of clean)byId.set(String(e.id),e);
       state.entries=[...byId.values()];
-      saveMeta();
+      const stamp=Date.now();
+      try{localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:2,updatedAt:stamp,entries:sanitizeArchiveEntries(state.entries)}));}catch{}
+      try{localStorage.setItem(META_KEY,JSON.stringify(sanitizeArchiveEntries(state.entries)));localStorage.setItem(META_UPDATED_KEY,String(stamp));}catch{}
+      const ok=await saveMetaDb(state.entries,stamp,false);
+      if(!ok)throw new Error('Das Archiv konnte nicht dauerhaft in IndexedDB gespeichert werden.');
       renderArchive();renderCases();renderCsv();
       toast(`Backup wiederhergestellt · ${state.entries.length} Einträge.`);
     }catch(err){console.error(err);toast('Backup konnte nicht wiederhergestellt werden: '+(err?.message||err));}
   }
+
   function setupSettings(){
     state.settings.frames=Number(localStorage.getItem('v44_frames')||24);
     state.settings.window=Number(localStorage.getItem('v44_window')||4.5);
@@ -2786,8 +2820,13 @@ Vorhandene Einträge werden nach ID zusammengeführt.`))return;
       disconnectBtn?.addEventListener('click',()=>disconnectYoutube(slot));
     }
     renderYoutubeConnections();
-    $('#downloadArchiveBackup')?.addEventListener('click',downloadArchiveBackup);
-    $('#restoreArchiveBackup')?.addEventListener('click',()=>$('#archiveBackupFile')?.click());
+    $('#downloadArchiveBackup')?.addEventListener('click',()=>{void downloadArchiveBackup();});
+    $('#restoreArchiveBackup')?.addEventListener('click',()=>{
+      const input=$('#archiveBackupFile');
+      if(!input)return;
+      try{if(typeof input.showPicker==='function')input.showPicker();else input.click();}
+      catch(err){console.warn('Dateiauswahl konnte nicht geöffnet werden',err);try{input.click();}catch{toast('Dateiauswahl konnte nicht geöffnet werden. Bitte die Seite einmal neu laden.');}}
+    });
     $('#archiveBackupFile')?.addEventListener('change',e=>{const f=e.target.files?.[0];if(f)void restoreArchiveBackup(f);e.target.value='';});
     $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
@@ -2798,8 +2837,11 @@ Vorhandene Einträge werden nach ID zusammengeführt.`))return;
     try{const saved=JSON.parse(localStorage.getItem(PC_CUSTOM_KEY)||'[]');if(Array.isArray(saved))saved.filter(Boolean).forEach(v=>pcCheckerCustom.add(String(v)));}catch{}
     window.__grandrpAppBooted=true;
     setupNav();setupUpload();setupEditor();setupSettings();updateYtStatus();void requestPersistentStorage();setInterval(()=>{if(authUser&&state.entries.length)saveMeta();},30000);
-    await loadQueue().catch(err=>{console.error('Warteschlange konnte nicht geladen werden',err);state.queue=[];});
-    try{await loadMeta();}catch(err){console.error('Archiv konnte nicht geladen werden',err);}
+    archiveReadyPromise=(async()=>{
+      await loadQueue().catch(err=>{console.error('Warteschlange konnte nicht geladen werden',err);state.queue=[];});
+      try{await loadMeta();}catch(err){console.error('Archiv konnte nicht geladen werden',err);}
+    })();
+    await archiveReadyPromise;
     renderYoutubeConnections();
     renderQueue();
     const persistedRetry=youtubeRetryAt();
