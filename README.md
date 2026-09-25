@@ -1,9 +1,3 @@
-Grand RP DC Checker V124
+Grand RP DC Checker V125
 
-Fixes in V124:
-- CSV herunterladen ist wieder vollständig verdrahtet und funktioniert auch nach dem Seitenstart.
-- Perma-CSV herunterladen ist vollständig verdrahtet.
-- CSV kopieren hat Clipboard- und Fallback-Unterstützung.
-- CSV-Vorschau enthält Ergebnis und Aktion passend zur Datenstruktur.
-- Versions-/Cache-Busting auf V124.
-- ACP V93 unverändert.
+Fix: Google Drive OAuth requests only the Drive scope and explicitly sets include_granted_scopes=false, so previously granted YouTube scopes are not bundled into the Drive authorization request. YouTube OAuth remains unchanged. Drive OAuth pending state uses a separate key. ACP V93 is unchanged.

@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V124';
+  const BUILD='V125';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -25,9 +25,9 @@
   const YT_CONNECTIONS_DB_KEY='__grandrp_youtube_connections_v89__';
   const YT_OAUTH_PENDING_KEY='grandrp_youtube_oauth_pending_v89';
   const YT_MAX_CONNECTIONS=3;
-  const DRIVE_OAUTH_PENDING_KEY='grandrp_youtube_oauth_pending_v89';
-  const DRIVE_STATE_KEY='grandrp_drive_oauth_state_v122';
-  const DRIVE_RESULT_KEY='grandrp_drive_oauth_result_v122';
+  const DRIVE_OAUTH_PENDING_KEY='grandrp_drive_oauth_pending_v125';
+  const DRIVE_STATE_KEY='grandrp_drive_oauth_state_v125';
+  const DRIVE_RESULT_KEY='grandrp_drive_oauth_result_v125';
   const DRIVE_FOLDER_NAME='GrandRP DC Checker';
   const DRIVE_MANIFEST_NAME='grandrp-archive-manifest.json';
   const DRIVE_FOLDER_MIME='application/vnd.google-apps.folder';
@@ -2707,12 +2707,12 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     return await new Promise((resolve,reject)=>{
       let finished=false; const done=(fn,v)=>{if(finished)return;finished=true;fn(v);};
       try{
-        const client=google.accounts.oauth2.initTokenClient({client_id:st.clientId,scope:DRIVE_SCOPE,include_granted_scopes:true,callback:resp=>{if(resp?.error)return done(reject,new Error(resp.error_description||resp.error));const ns={...st,clientId:st.clientId,accessToken:String(resp.access_token||''),tokenExpiresAt:Date.now()+Math.max(60,Number(resp.expires_in||3600)-30)*1000,connected:true};if(!ns.accessToken)return done(reject,new Error('Google hat kein Drive-Zugriffstoken zurückgegeben.'));saveDriveState(ns);renderDriveStatus();done(resolve,ns.accessToken);},error_callback:e=>done(reject,new Error(e?.message||e?.type||'Google Drive OAuth fehlgeschlagen.'))});
+        const client=google.accounts.oauth2.initTokenClient({client_id:st.clientId,scope:DRIVE_SCOPE,include_granted_scopes:false,callback:resp=>{if(resp?.error)return done(reject,new Error(resp.error_description||resp.error));const ns={...st,clientId:st.clientId,accessToken:String(resp.access_token||''),tokenExpiresAt:Date.now()+Math.max(60,Number(resp.expires_in||3600)-30)*1000,connected:true};if(!ns.accessToken)return done(reject,new Error('Google hat kein Drive-Zugriffstoken zurückgegeben.'));saveDriveState(ns);renderDriveStatus();done(resolve,ns.accessToken);},error_callback:e=>done(reject,new Error(e?.message||e?.type||'Google Drive OAuth fehlgeschlagen.'))});
         client.requestAccessToken({prompt:forceConsent?'consent':'none'});
       }catch(err){done(reject,err);} setTimeout(()=>done(reject,new Error('Zeitüberschreitung beim Erneuern des Google-Drive-Zugriffs.')),15000);
     });
   }
-  function startDriveOAuth(){const c=state.ytConnections.find(x=>String(x?.clientId||'').trim())||connection(1)||state.ytConnections[0];const clientId=String(c?.clientId||'').trim();if(!clientId)throw new Error('Bitte zuerst eine Google OAuth Client-ID in einer YouTube-Verbindung eintragen.');if(!validClientId(clientId))throw new Error('Die Google OAuth Client-ID sieht ungültig aus.');const stateValue=randomState();const pending={purpose:'drive',clientId,state:stateValue,createdAt:Date.now()};localStorage.setItem(DRIVE_OAUTH_PENDING_KEY,JSON.stringify(pending));sessionStorage.setItem(DRIVE_OAUTH_PENDING_KEY,JSON.stringify(pending));const params=new URLSearchParams({client_id:clientId,redirect_uri:oauthRedirectUri(),response_type:'token',scope:DRIVE_SCOPE,include_granted_scopes:'true',state:stateValue,prompt:'consent'});location.assign('https://accounts.google.com/o/oauth2/v2/auth?'+params.toString());}
+  function startDriveOAuth(){const c=state.ytConnections.find(x=>String(x?.clientId||'').trim())||connection(1)||state.ytConnections[0];const clientId=String(c?.clientId||'').trim();if(!clientId)throw new Error('Bitte zuerst eine Google OAuth Client-ID in einer YouTube-Verbindung eintragen.');if(!validClientId(clientId))throw new Error('Die Google OAuth Client-ID sieht ungültig aus.');const stateValue=randomState();const pending={purpose:'drive',clientId,state:stateValue,createdAt:Date.now()};localStorage.setItem(DRIVE_OAUTH_PENDING_KEY,JSON.stringify(pending));sessionStorage.setItem(DRIVE_OAUTH_PENDING_KEY,JSON.stringify(pending));const params=new URLSearchParams({client_id:clientId,redirect_uri:oauthRedirectUri(),response_type:'token',scope:DRIVE_SCOPE,include_granted_scopes:'false',state:stateValue,prompt:'consent'});location.assign('https://accounts.google.com/o/oauth2/v2/auth?'+params.toString());}
   async function driveApi(url,options={}){let token=await driveTokenFresh(false);let r=await fetch(url,{...options,headers:{...(options.headers||{}),Authorization:`Bearer ${token}`}});if(r.status===401){token=await driveTokenFresh(true);r=await fetch(url,{...options,headers:{...(options.headers||{}),Authorization:`Bearer ${token}`}});}if(!r.ok){const body=(await r.text()).slice(0,1200);throw new Error(`Google Drive API ${r.status}: ${body}`);}return r;}
   async function driveEnsureFolder(){const q=encodeURIComponent(`name='${DRIVE_FOLDER_NAME.replace(/'/g,"\\'")}' and mimeType='${DRIVE_FOLDER_MIME}' and trashed=false`);const r=await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&pageSize=10&fields=files(id,name,mimeType)`);const d=await r.json();if(d.files?.[0]?.id)return d.files[0].id;const cr=await driveApi('https://www.googleapis.com/drive/v3/files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:DRIVE_FOLDER_NAME,mimeType:DRIVE_FOLDER_MIME})});return (await cr.json()).id;}
   async function driveFindFile(name,folderId){const q=encodeURIComponent(`name='${String(name).replace(/'/g,"\\'")}' and '${folderId}' in parents and trashed=false`);const r=await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=modifiedTime desc&pageSize=20&fields=files(id,name,size,mimeType,modifiedTime,appProperties)`);return (await r.json()).files?.[0]||null;}
