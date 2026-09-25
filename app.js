@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V119
+/* Grand RP DC Checker V120
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V119';
+  const BUILD='V120';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -25,6 +25,15 @@
   const YT_CONNECTIONS_DB_KEY='__grandrp_youtube_connections_v89__';
   const YT_OAUTH_PENDING_KEY='grandrp_youtube_oauth_pending_v89';
   const YT_MAX_CONNECTIONS=3;
+  const DRIVE_OAUTH_PENDING_KEY='grandrp_youtube_oauth_pending_v89';
+  const DRIVE_STATE_KEY='grandrp_drive_oauth_state_v120';
+  const DRIVE_RESULT_KEY='grandrp_drive_oauth_result_v120';
+  const DRIVE_FOLDER_NAME='GrandRP DC Checker';
+  const DRIVE_MANIFEST_NAME='grandrp-archive-manifest.json';
+  const DRIVE_FOLDER_MIME='application/vnd.google-apps.folder';
+  const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
+  const LOCAL_CLEAR_MARKER_KEY='grandrp_local_clear_marker_v120';
+  let driveSyncInProgress=false;
   let youtubeRetryTimer=0;
   let youtubeConnectionSaveTimer=0;
   const pcCheckerCustom=new Set();
@@ -705,8 +714,8 @@
   const META_UPDATED_KEY='grandrp_pov_meta_updated_v1';
   const QUEUE_UPDATED_KEY='grandrp_pov_queue_updated_v1';
   const ARCHIVE_BACKUP_KEY='grandrp_archive_emergency_backup_v1';
-  const PENDING_BACKUP_KEY='grandrp_pending_backup_v119';
-  const DIRECT_RESTORE_KEY='grandrp_direct_restore_v119';
+  const PENDING_BACKUP_KEY='grandrp_pending_backup_v120';
+  const DIRECT_RESTORE_KEY='grandrp_direct_restore_v120';
   const LEGACY_DIRECT_RESTORE_KEY='grandrp_direct_restore_v118';
   const ARCHIVE_SNAPSHOT_PREFIX='__grandrp_archive_snapshot_v106__';
   const ARCHIVE_ENTRY_PREFIX='__grandrp_archive_entry_v106__';
@@ -1016,6 +1025,7 @@
       void saveMetaDb([],updatedAt,true);
     }
     void saveDurableAppState();
+    scheduleDriveSync();
     return true;
   }
   // Safety invariant: normal application code may never delete a stored POV.
@@ -1094,8 +1104,9 @@
   function restoreSavedView(){
     let saved='';
     try{saved=String(location.hash||'').replace(/^#/,'').trim();}catch{}
-    if(!saved){try{saved=sessionStorage.getItem('grandrp_current_view')||localStorage.getItem('grandrp_current_view')||'';}catch{}}
+    if(!saved){try{saved=localStorage.getItem('grandrp_current_view')||sessionStorage.getItem('grandrp_current_view')||document.documentElement.dataset.initialView||'';}catch{}}
     if(saved&&views[saved])showView(saved,false); else showView('archive',false);
+    if(saved&&views[saved])persistCurrentView(saved);
   }
   function showView(v,persist=true){
     if(!views[v])v='archive';
@@ -2622,6 +2633,47 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   window.grandrpReauthorizeYouTube=(slot)=>reauthorizeYoutube(Number(slot)||1);
   window.connectYouTubeNow=(slot)=>initYoutube(Number(slot)||1);
   window.reauthorizeYouTube=(slot)=>reauthorizeYoutube(Number(slot)||1);
+
+  function loadDriveState(){try{return JSON.parse(localStorage.getItem(DRIVE_STATE_KEY)||'null')||{connected:false,clientId:'',accessToken:'',tokenExpiresAt:0};}catch{return {connected:false,clientId:'',accessToken:'',tokenExpiresAt:0};}}
+  function saveDriveState(v){try{localStorage.setItem(DRIVE_STATE_KEY,JSON.stringify({...v,updatedAt:Date.now()}));}catch(err){console.warn('Drive-Status konnte nicht gespeichert werden',err);}}
+  function driveState(){return loadDriveState();}
+  function renderDriveStatus(){const st=driveState(),el=$('#driveStatus'),help=$('#driveHelp'),connect=$('#driveConnectBtn'),sync=$('#driveSyncBtn'),restore=$('#driveRestoreBtn');const ok=!!(st.clientId&&st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now());if(el){el.className='connection '+(ok?'good':'');el.textContent=ok?'● Verbunden':'● Nicht verbunden';}if(connect)connect.textContent=ok?'Google Drive erneut verbinden':'Google Drive verbinden';if(sync)sync.disabled=!ok||driveSyncInProgress;if(restore)restore.disabled=!ok||driveSyncInProgress;if(help&&ok)help.textContent='Google Drive verbunden. Nach einer Browser-Neuinstallation genügt eine erneute Anmeldung mit demselben Google-Konto; danach kann das Cloud-Archiv vollständig zurückgeladen werden.';}
+  async function driveTokenFresh(forceConsent=false){
+    let st=driveState();
+    if(st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+120000)return st.accessToken;
+    if(!st.clientId){const c=state.ytConnections.find(x=>String(x?.clientId||'').trim())||connection(1)||state.ytConnections[0];st.clientId=String(c?.clientId||'').trim();}
+    if(!st.clientId)throw new Error('Für Google Drive ist noch keine Google OAuth Client-ID in Verbindung 1 hinterlegt.');
+    const ready=await waitForGoogleGIS(); if(!ready)throw new Error('Google Identity Services konnte nicht geladen werden.');
+    return await new Promise((resolve,reject)=>{
+      let finished=false; const done=(fn,v)=>{if(finished)return;finished=true;fn(v);};
+      try{
+        const client=google.accounts.oauth2.initTokenClient({client_id:st.clientId,scope:DRIVE_SCOPE,include_granted_scopes:true,callback:resp=>{if(resp?.error)return done(reject,new Error(resp.error_description||resp.error));const ns={...st,clientId:st.clientId,accessToken:String(resp.access_token||''),tokenExpiresAt:Date.now()+Math.max(60,Number(resp.expires_in||3600)-30)*1000,connected:true};if(!ns.accessToken)return done(reject,new Error('Google hat kein Drive-Zugriffstoken zurückgegeben.'));saveDriveState(ns);renderDriveStatus();done(resolve,ns.accessToken);},error_callback:e=>done(reject,new Error(e?.message||e?.type||'Google Drive OAuth fehlgeschlagen.'))});
+        client.requestAccessToken({prompt:forceConsent?'consent':'none'});
+      }catch(err){done(reject,err);} setTimeout(()=>done(reject,new Error('Zeitüberschreitung beim Erneuern des Google-Drive-Zugriffs.')),15000);
+    });
+  }
+  function startDriveOAuth(){const c=state.ytConnections.find(x=>String(x?.clientId||'').trim())||connection(1)||state.ytConnections[0];const clientId=String(c?.clientId||'').trim();if(!clientId)throw new Error('Bitte zuerst eine Google OAuth Client-ID in einer YouTube-Verbindung eintragen.');if(!validClientId(clientId))throw new Error('Die Google OAuth Client-ID sieht ungültig aus.');const stateValue=randomState();const pending={purpose:'drive',clientId,state:stateValue,createdAt:Date.now()};localStorage.setItem(DRIVE_OAUTH_PENDING_KEY,JSON.stringify(pending));sessionStorage.setItem(DRIVE_OAUTH_PENDING_KEY,JSON.stringify(pending));const params=new URLSearchParams({client_id:clientId,redirect_uri:oauthRedirectUri(),response_type:'token',scope:DRIVE_SCOPE,include_granted_scopes:'true',state:stateValue,prompt:'consent'});location.assign('https://accounts.google.com/o/oauth2/v2/auth?'+params.toString());}
+  async function driveApi(url,options={}){let token=await driveTokenFresh(false);let r=await fetch(url,{...options,headers:{...(options.headers||{}),Authorization:`Bearer ${token}`}});if(r.status===401){token=await driveTokenFresh(true);r=await fetch(url,{...options,headers:{...(options.headers||{}),Authorization:`Bearer ${token}`}});}if(!r.ok){const body=(await r.text()).slice(0,1200);throw new Error(`Google Drive API ${r.status}: ${body}`);}return r;}
+  async function driveEnsureFolder(){const q=encodeURIComponent(`name='${DRIVE_FOLDER_NAME.replace(/'/g,"\\'")}' and mimeType='${DRIVE_FOLDER_MIME}' and trashed=false`);const r=await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&pageSize=10&fields=files(id,name,mimeType)`);const d=await r.json();if(d.files?.[0]?.id)return d.files[0].id;const cr=await driveApi('https://www.googleapis.com/drive/v3/files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:DRIVE_FOLDER_NAME,mimeType:DRIVE_FOLDER_MIME})});return (await cr.json()).id;}
+  async function driveFindFile(name,folderId){const q=encodeURIComponent(`name='${String(name).replace(/'/g,"\\'")}' and '${folderId}' in parents and trashed=false`);const r=await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=modifiedTime desc&pageSize=20&fields=files(id,name,size,mimeType,modifiedTime,appProperties)`);return (await r.json()).files?.[0]||null;}
+  async function driveUploadJson(name,folderId,payload,existingId){const boundary='----grandrpDrive'+Math.random().toString(16).slice(2);const meta={name,parents:[folderId],mimeType:'application/json'};const body=`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(payload)}\r\n--${boundary}--`;const url=existingId?`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(existingId)}?uploadType=multipart&fields=id,name,modifiedTime`:'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime';return (await driveApi(url,{method:existingId?'PATCH':'POST',headers:{'Content-Type':`multipart/related; boundary=${boundary}`},body})).json();}
+  async function driveUploadBlobResumable(blob,name,mime,folderId,existingId,onProgress){const meta={name,parents:existingId?undefined:[folderId],mimeType:mime||'application/octet-stream',appProperties:{grandrpBackup:'1'}};if(existingId){delete meta.parents;}const url=existingId?`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(existingId)}?uploadType=resumable&fields=id,name,size,modifiedTime`:'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,modifiedTime';let token=await driveTokenFresh(false);let init=await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json; charset=UTF-8','X-Upload-Content-Type':mime||'application/octet-stream','X-Upload-Content-Length':String(blob.size)},body:JSON.stringify(meta)});if(init.status===401){token=await driveTokenFresh(true);init=await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json; charset=UTF-8','X-Upload-Content-Type':mime||'application/octet-stream','X-Upload-Content-Length':String(blob.size)},body:JSON.stringify(meta)});}if(!init.ok)throw new Error(`Drive Upload-Init ${init.status}: ${(await init.text()).slice(0,800)}`);const session=init.headers.get('Location');if(!session)throw new Error('Google Drive hat keine Resumable-Upload-URL geliefert.');const CHUNK=16*1024*1024;let uploaded=0;while(uploaded<blob.size){const end=Math.min(blob.size,uploaded+CHUNK)-1;const chunk=blob.slice(uploaded,end+1);let r=await fetch(session,{method:'PUT',headers:{'Content-Range':`bytes ${uploaded}-${end}/${blob.size}`},body:chunk});if(r.status===401){token=await driveTokenFresh(true);r=await fetch(session,{method:'PUT',headers:{Authorization:`Bearer ${token}`,'Content-Range':`bytes ${uploaded}-${end}/${blob.size}`},body:chunk});}if(r.status===308){const range=r.headers.get('Range')||'';const m=range.match(/-(\d+)$/);uploaded=m?Number(m[1])+1:end+1;}else if(r.ok){uploaded=end+1;return r.json();}else throw new Error(`Drive Upload ${r.status}: ${(await r.text()).slice(0,800)}`);if(onProgress)onProgress(uploaded/blob.size);await new Promise(requestAnimationFrame);} }
+  async function syncDriveBackup(){if(driveSyncInProgress)return;driveSyncInProgress=true;renderDriveStatus();const help=$('#driveHelp');try{const token=await driveTokenFresh(false);if(!token)throw new Error('Drive-Zugriff fehlt.');const folder=await driveEnsureFolder();const entries=sanitizeArchiveEntries(state.entries||[]);const manifestEntries=[];let index=0;for(const entry of entries){let driveFileId=entry.driveFileId||'';const local=await getVideo(entry.id).catch(()=>null);if(local&&local.size){const existing=driveFileId?{id:driveFileId}:await driveFindFile(String(entry.finalName||entry.originalName||`${entry.id}.mp4`),folder);if(existing?.id&&Number(existing.size||0)===Number(local.size))driveFileId=existing.id;else{if(help)help.textContent=`Cloud-Sicherung: ${index+1}/${entries.length} · ${entry.finalName||entry.id}`;const uploaded=await driveUploadBlobResumable(local,String(entry.finalName||entry.originalName||`${entry.id}.mp4`),String(entry.sourceType||local.type||'video/mp4'),folder,existing?.id||'',p=>{if(help)help.textContent=`Cloud-Sicherung: ${index+1}/${entries.length} · ${Math.round(p*100)} %`});driveFileId=uploaded.id;entry.driveFileId=driveFileId;}}manifestEntries.push({...entry,driveFileId:driveFileId||undefined});index++;}const manifest={format:'grandrp-cloud-archive',version:1,createdAt:new Date().toISOString(),entries:manifestEntries};const mf=await driveFindFile(DRIVE_MANIFEST_NAME,folder);await driveUploadJson(DRIVE_MANIFEST_NAME,folder,manifest,mf?.id||'');const clean=manifestEntries.map(e=>({...e}));state.entries=clean;saveMeta();saveDriveState({...driveState(),connected:true,clientId:driveState().clientId});if(help)help.textContent=`✓ Cloud-Sicherung abgeschlossen · ${clean.length} Einträge`;toast(`Cloud-Sicherung abgeschlossen · ${clean.length} Einträge.`);}catch(err){console.error('Google-Drive-Sicherung fehlgeschlagen',err);if(help)help.textContent='✕ Cloud-Sicherung fehlgeschlagen: '+(err?.message||err);toast('Cloud-Sicherung fehlgeschlagen: '+(err?.message||err));}finally{driveSyncInProgress=false;renderDriveStatus();}}
+  async function restoreDriveBackup(){if(driveSyncInProgress)return;driveSyncInProgress=true;renderDriveStatus();const help=$('#driveHelp');try{const folder=await driveEnsureFolder();const mf=await driveFindFile(DRIVE_MANIFEST_NAME,folder);if(!mf)throw new Error('Kein Cloud-Archiv gefunden.');const token=await driveTokenFresh(false);const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(mf.id)}?alt=media`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw new Error(`Cloud-Manifest ${r.status}`);const manifest=await r.json();const entries=sanitizeArchiveEntries(manifest?.entries||[]);if(!entries.length)throw new Error('Cloud-Archiv enthält keine Einträge.');const restored=[];for(let i=0;i<entries.length;i++){const e={...entries[i]};if(e.driveFileId){if(help)help.textContent=`Cloud-Wiederherstellung: ${i+1}/${entries.length} · ${e.finalName||e.id}`;const rr=await driveApi(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(e.driveFileId)}?alt=media`);const blob=await rr.blob();if(blob.size>0){await putVideo(e.id,blob);e.videoStored=true;e.sourceSize=blob.size;}}restored.push(e);}state.entries=restored;state.filter='all';state.archiveSelected.clear();if($('#search'))$('#search').value='';const stamp=Date.now();localStorage.setItem(DIRECT_RESTORE_KEY,JSON.stringify({version:7,updatedAt:stamp,name:DRIVE_MANIFEST_NAME,entries:restored}));localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:7,updatedAt:stamp,entries:restored}));localStorage.setItem(META_KEY,JSON.stringify(restored));localStorage.setItem(META_UPDATED_KEY,String(stamp));await saveMetaDb(restored,stamp,false);renderArchive();renderCases();renderCsv();renderQueue();showView('archive',false);persistCurrentView('archive');if(help)help.textContent=`✓ Cloud-Archiv wiederhergestellt · ${restored.length} Einträge`;toast(`Cloud-Archiv wiederhergestellt · ${restored.length} Einträge.`);}catch(err){console.error('Cloud-Wiederherstellung fehlgeschlagen',err);if(help)help.textContent='✕ Cloud-Wiederherstellung fehlgeschlagen: '+(err?.message||err);toast('Cloud-Wiederherstellung fehlgeschlagen: '+(err?.message||err));}finally{driveSyncInProgress=false;renderDriveStatus();}}
+  function scheduleDriveRecoveryIfEmpty(){
+    if(driveSyncInProgress)return;
+    try{const st=driveState();const explicitlyCleared=!!localStorage.getItem(LOCAL_CLEAR_MARKER_KEY);if(!st?.accessToken||!st?.clientId||state.entries.length||explicitlyCleared)return;}catch{return;}
+    setTimeout(()=>{if(!driveSyncInProgress&&!(state.entries||[]).length){void restoreDriveBackup();}},900);
+  }
+  function updateDriveResult(){try{const r=JSON.parse(localStorage.getItem(DRIVE_RESULT_KEY)||'null');if(r){const h=$('#driveHelp');if(h)h.textContent=r.message||'';localStorage.removeItem(DRIVE_RESULT_KEY);}}catch{}renderDriveStatus();scheduleDriveSync();scheduleDriveRecoveryIfEmpty();}
+
+  let driveSyncTimer=0;
+  function scheduleDriveSync(){
+    if(driveSyncInProgress)return;
+    try{const st=driveState();if(!st?.accessToken||!st?.clientId||!(state.entries||[]).length)return;}catch{return;}
+    clearTimeout(driveSyncTimer);
+    driveSyncTimer=setTimeout(()=>{driveSyncTimer=0;void syncDriveBackup();},1800);
+  }
   function updateYtStatus(){renderYoutubeConnections();}
   async function waitForYoutubeProcessing(videoId,token,onProgress,expectedSize=0,slot=state.activeYoutubeSlot){
     if(!videoId||!token) throw new Error('YouTube-Video-ID oder Zugriffstoken fehlt.');
@@ -2915,6 +2967,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       // A restore is authoritative: use the selected backup as the complete archive.
       // Do this AFTER normal startup/loading so no older IndexedDB snapshot can replace it.
       state.entries=clean.map(e=>({...e,file:undefined,videoUrl:undefined}));
+      try{localStorage.removeItem(LOCAL_CLEAR_MARKER_KEY);}catch{}
       state.archiveSelected.clear();
       state.filter='all';
       if($('#search'))$('#search').value='';
@@ -2957,6 +3010,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
         settings:parsed?.settings||undefined};
       // Write the authoritative restore record first. It survives reloads and protects the
       // imported archive against concurrent startup reads of stale IndexedDB/localStorage.
+      localStorage.removeItem(LOCAL_CLEAR_MARKER_KEY);
       localStorage.setItem(DIRECT_RESTORE_KEY,JSON.stringify(directPayload));
       localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:6,updatedAt:importStamp,entries:clean}));
       // Apply immediately; never wait for archiveReadyPromise because that promise may still
@@ -3035,11 +3089,15 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     }
     try{renderYoutubeConnections();}catch(err){console.error('YouTube-Einstellungen konnten nicht initialisiert werden',err);}
     $('#downloadArchiveBackup')?.addEventListener('click',downloadArchiveBackup);
+    $('#driveConnectBtn')?.addEventListener('click',()=>{try{startDriveOAuth();}catch(err){toast(err?.message||String(err));const h=$('#driveHelp');if(h)h.textContent='✕ '+(err?.message||String(err));}});
+    $('#driveSyncBtn')?.addEventListener('click',()=>{void syncDriveBackup();});
+    $('#driveRestoreBtn')?.addEventListener('click',()=>{void restoreDriveBackup();});
+    updateDriveResult();
     const backupFile=$('#archiveBackupFile');
     // Public handlers are assigned even when an optional settings renderer failed.
     window.grandrpRestoreArchiveBackup=restoreArchiveBackup;
     window.grandrpDownloadArchiveBackup=downloadArchiveBackup;
-    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
+    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.setItem(LOCAL_CLEAR_MARKER_KEY,String(Date.now()));localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }
 
@@ -3100,8 +3158,14 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     // Last startup step: an explicitly selected backup is authoritative and is re-applied
     // after every normal loader has finished. This prevents stale/empty stores from winning.
     try{await forceApplyDirectRestore({showStatus:false});}catch(err){console.error('Startup-Restore konnte nicht abgeschlossen werden',err);}
+    updateDriveResult();
+    scheduleDriveSync();
   }
-  window.addEventListener('beforeunload' ,()=>{try{const active=document.querySelector('.view.active')?.id?.replace(/^view-/,'');if(active&&views[active])persistCurrentView(active);}catch{};try{persistQueueNow();}catch{};try{saveYoutubeConnections();void saveDurableAppState();}catch{};try{state.worker?.terminate();}catch{};try{state.specialWorker?.terminate();}catch{};try{state.fastWorker?.terminate();}catch{}});
+  function persistActiveViewNow(){try{const active=document.querySelector('.view.active')?.id?.replace(/^view-/,'');if(active&&views[active])persistCurrentView(active);}catch{}}
+  document.addEventListener('visibilitychange',persistActiveViewNow);
+  window.addEventListener('pagehide',persistActiveViewNow);
+  window.addEventListener('hashchange',()=>{try{const v=String(location.hash||'').slice(1);if(views[v]){localStorage.setItem('grandrp_current_view',v);sessionStorage.setItem('grandrp_current_view',v);}}catch{}});
+  window.addEventListener('beforeunload' ,()=>{persistActiveViewNow();try{const active=document.querySelector('.view.active')?.id?.replace(/^view-/,'');if(active&&views[active])persistCurrentView(active);}catch{};try{persistQueueNow();}catch{};try{saveYoutubeConnections();void saveDurableAppState();}catch{};try{state.worker?.terminate();}catch{};try{state.specialWorker?.terminate();}catch{};try{state.fastWorker?.terminate();}catch{}});
   setupAuthUI();
   authResume().then(ok=>{if(ok)bootApp();});
 })();

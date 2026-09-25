@@ -1,20 +1,19 @@
-# Grand RP DC Checker V119
+# Grand RP DC Checker V120 + ACP V93
 
-Webseite: V119
-ACP: V93 (unverändert)
+## V120 Änderungen
+- Der zuletzt aktive Tab wird über URL-Hash sowie localStorage/sessionStorage gespeichert und beim Reload wiederhergestellt.
+- Zusätzlich wird der aktive Tab bei `visibilitychange`, `pagehide`, `hashchange` und `beforeunload` persistiert.
+- Lokale Archivdaten bleiben geschützt und werden nicht automatisch gelöscht.
+- Für eine Aufbewahrung über eine Browser-Deinstallation hinaus gibt es jetzt eine browserunabhängige Google-Drive-Sicherung.
+- Google Drive speichert das Archiv-Manifest und lokale POV-Dateien. Große Dateien werden per resumable upload übertragen.
+- Nach einer Neuinstallation: dieselbe Google OAuth Client-ID verwenden, Google Drive erneut autorisieren und bei leerem lokalen Archiv wird das Cloud-Archiv automatisch zur Wiederherstellung angeboten/geladen.
 
-## Reparaturen
-- Archiv-Backup-Wiederherstellung arbeitet unabhängig von der übrigen Settings-Initialisierung.
-- JSON-Backup wird direkt eingelesen und als autoritativer Archivstand gespeichert.
-- Kompatibilität mit `grandrp-recovery-backup` und 35-Einträge-Recovery-Datei geprüft.
-- Backup-Download liest dauerhaft gespeicherte Archivdaten und erzeugt eine JSON-Datei.
-- Lokales Archiv-Löschen ist weiterhin ausschließlich durch expliziten Benutzerklick möglich.
-- Einzelnes Löschen im Archiv hat eine öffentliche Fallback-Brücke.
-- Aktiver Tab wird über Hash + SessionStorage + localStorage gespeichert und nach Reload wiederhergestellt.
-- Cache-Busting: `app.js?v=119`, `styles.css?v=119`.
+## Einmalige Google-Drive-Einrichtung
+1. In Google Cloud beim verwendeten OAuth-Projekt die Google Drive API aktivieren.
+2. In der Website unter Einstellungen eine vorhandene Google OAuth Client-ID verwenden.
+3. `Google Drive verbinden` klicken und die Drive-Berechtigung bestätigen.
+4. Mit `Jetzt alles sichern` können bereits vorhandene lokale POVs vollständig in Drive gespiegelt werden. Danach wird bei neuen gespeicherten POVs automatisch nachgesichert.
 
-## Durchgeführte Tests
-- `node --check app.js`: OK
-- Recovery-Datei: gültiges JSON, Format `grandrp-recovery-backup`, 35/35 gültige IDs
-- Standalone-Backup-Controller-Test: Restore 35 Einträge, Download-Payload 35 Einträge, Einzel-Löschen 34, Komplett-Löschen 0
-- ACP-V93-Dateien: bytegenau unverändert gegenüber V118
+Wichtig: Browser-localStorage und IndexedDB können eine Browser-Deinstallation nicht überleben. Deshalb muss für browserunabhängige Aufbewahrung die Cloud-Sicherung genutzt werden. Die Dateien bleiben in deinem Google-Drive-Konto erhalten, unabhängig vom lokalen Browserprofil.
+
+ACP V93 wurde gegenüber der vorherigen Version nicht verändert.
