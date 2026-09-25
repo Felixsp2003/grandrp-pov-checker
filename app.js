@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V120
+/* Grand RP DC Checker V124
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V120';
+  const BUILD='V124';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -1161,9 +1161,14 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     $('#archiveBulkPerma')?.addEventListener('click',()=>{const ids=[...state.archiveSelected];if(!ids.length){toast('Keine POVs ausgewählt.');return;}let n=0;for(const e of state.entries){if(ids.includes(e.id)&&!e.permaArchive){e.permaArchive=true;n++;}}state.archiveSelected.clear();saveMeta();renderArchive();renderCsv();toast(`${n} POV(s) ins Archiv verschoben.`);});
   }
   function renderCases(){const cases=state.entries.filter(e=>!e.complete);const box=$('#casesList');box.innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button type="button" class="mini" data-action="case-open" data-id="${esc(e.id)}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';box.onclick=async ev=>{const b=ev.target.closest('[data-action="case-open"]');if(!b)return;const e=state.entries.find(x=>x.id===b.dataset.id);if(e){await openEditorFromEntry(e,{});}};}
-  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:!!e.perma,PermaArchiv:!!e.permaArchive,Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
-  function csvRowsPermaBase(){return csvRowsBase(state.entries.filter(e=>e.permaArchive));}
-  function csvRows(){const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();const reason=(($('#csvFilterReason')?.value)||'all');const sc=(($('#csvFilterSc')?.value)||'all');const perma=(($('#csvFilterPerma')?.value)||'all');return csvRowsBase().filter(r=>{if(reason!=='all'&&r.Grund!==reason)return false;if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;if(perma==='yes'&&!r.Perma)return false;if(perma==='no'&&r.Perma)return false;if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.Ergebnis,r.Grund].some(v=>String(v||'').toLowerCase().includes(q))))return false;return true;});}
+  function isPermaBanValue(v){
+    if(v===true||v===1)return true;
+    if(typeof v==='string'){const n=v.trim().toLowerCase();return ['true','1','yes','ja','perma','perma-ban','permaban'].includes(n);}
+    return false;
+  }
+  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:isPermaBanValue(e.permaArchive),Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
+  function csvRowsPermaBase(){return csvRowsBase(state.entries.filter(e=>isPermaBanValue(e.permaArchive)));}
+  function csvRows(){const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();const reason=(($('#csvFilterReason')?.value)||'all');const sc=(($('#csvFilterSc')?.value)||'all');const perma=(($('#csvFilterPerma')?.value)||'all');return csvRowsBase().filter(r=>{if(reason!=='all'&&r.Grund!==reason)return false;if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;if(perma==='yes'&&r.Perma!==true)return false;if(perma==='no'&&r.Perma===true)return false;if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.Ergebnis,r.Grund].some(v=>String(v||'').toLowerCase().includes(q))))return false;return true;});}
 
   function renderCsv(){
     const all=csvRowsBase();
@@ -1181,6 +1186,54 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if(entry)await openEditorFromEntry(entry,{});
     };
     $('#csvEmpty')?.classList.toggle('hidden',all.length>0);
+  }
+
+
+  function csvTextFromRows(rows){
+    const header=['Proof','Datum','ID','SOC','RID','Discord ID','Familie','Ergebnis','Grund','Admin 1','Admin 2','Admin 3','Admin 4','Admin 5'];
+    const line=values=>values.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(';');
+    const safeRows=Array.isArray(rows)?rows:[];
+    return '\uFEFF'+[line(header),...safeRows.map(r=>line([
+      r.Proof,r.Datum,r.ID,r.SOC,r.RID,r.DiscordID,r.Familie,r.Ergebnis,r.Grund,
+      r.Admin1,r.Admin2,r.Admin3,r.Admin4,r.Admin5
+    ]))].join('\r\n');
+  }
+  function downloadCsv(){
+    try{
+      const rows=csvRows();
+      if(!rows.length){toast('Keine CSV-Einträge für den aktuellen Filter.');return false;}
+      const blob=new Blob([csvTextFromRows(rows)],{type:'text/csv;charset=utf-8'});
+      const ok=triggerBrowserDownload(blob,`grandrp_bans-${new Date().toISOString().slice(0,10)}.csv`);
+      if(ok)toast(`${rows.length} CSV-Einträge exportiert.`);
+      return ok;
+    }catch(err){console.error('CSV-Download fehlgeschlagen',err);toast('CSV-Download fehlgeschlagen: '+(err?.message||err));return false;}
+  }
+  function downloadPermaCsv(){
+    try{
+      const rows=csvRowsBase().filter(r=>r.Perma===true);
+      if(!rows.length){toast('Keine Perma-Ban-Einträge vorhanden.');return false;}
+      const blob=new Blob([csvTextFromRows(rows)],{type:'text/csv;charset=utf-8'});
+      const ok=triggerBrowserDownload(blob,`grandrp_perma-bans-${new Date().toISOString().slice(0,10)}.csv`);
+      if(ok)toast(`${rows.length} Perma-Ban-Einträge exportiert.`);
+      return ok;
+    }catch(err){console.error('Perma-CSV-Download fehlgeschlagen',err);toast('Perma-CSV-Download fehlgeschlagen: '+(err?.message||err));return false;}
+  }
+  async function copyCsv(){
+    try{
+      const text=csvTextFromRows(csvRows());
+      if(!text || text.split('\r\n').length<2){toast('Keine CSV-Einträge für den aktuellen Filter.');return false;}
+      if(navigator.clipboard?.writeText){
+        await navigator.clipboard.writeText(text);
+      }else{
+        const area=document.createElement('textarea');
+        area.value=text;area.setAttribute('readonly','');area.style.position='fixed';area.style.left='-99999px';
+        document.body.appendChild(area);area.select();
+        const ok=document.execCommand('copy');area.remove();
+        if(!ok)throw new Error('Kopieren ist in diesem Browser nicht verfügbar.');
+      }
+      toast('CSV in die Zwischenablage kopiert.');
+      return true;
+    }catch(err){console.error('CSV-Kopieren fehlgeschlagen',err);toast('CSV-Kopieren nicht verfügbar.');return false;}
   }
 
 
@@ -1212,7 +1265,10 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     $('#downloadPermaCsvBtn')?.addEventListener('click',downloadPermaCsv);
     $('#copyCsvBtn')?.addEventListener('click',copyCsv);
     ['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterPerma'].forEach(s=>{
-      const el=$(s); if(el) el.addEventListener(el.tagName==='SELECT'?'change':'input',renderCsv);
+      const el=$(s);
+      if(!el)return;
+      el.addEventListener(el.tagName==='SELECT'?'change':'input',renderCsv);
+      if(s==='#csvFilterPerma')el.addEventListener('input',renderCsv);
     });
     $('#csvFilterClear')?.addEventListener('click',()=>{
       if($('#csvFilterSearch'))$('#csvFilterSearch').value='';
@@ -2918,6 +2974,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       a.download=filename;
       a.rel='noopener';
       a.style.position='fixed';a.style.left='-99999px';a.style.top='-99999px';a.style.width='1px';a.style.height='1px';
+      document.body.appendChild(a);
       document.body.appendChild(a);
       a.click();
       setTimeout(()=>{try{a.remove();}catch{};try{URL.revokeObjectURL(url);}catch{};},1500);
