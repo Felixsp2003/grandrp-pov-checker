@@ -984,11 +984,27 @@
       return priority(b.source)-priority(a.source) || Number(b.updatedAt||0)-Number(a.updatedAt||0) || b.entries.length-a.entries.length;
     });
     const mergedById=new Map();
-    for(const c of [...nonEmpty].reverse()){for(const e of sanitizeArchiveEntries(c.entries)){if(e?.id)mergedById.set(String(e.id),e);}}
+    const permaIds=new Set();
+    // Perma/POV-Archiv is a one-way location flag. If ANY durable source still knows
+    // that an ID was moved into the POV archive, preserve that flag during recovery.
+    // This prevents an older snapshot/localStorage copy from moving the file back into
+    // the normal area after F5 / Ctrl+Shift+R.
+    for(const c of nonEmpty){
+      for(const e of sanitizeArchiveEntries(c.entries)){
+        if(e?.id && isPermaBanValue(e.permaArchive)) permaIds.add(String(e.id));
+      }
+    }
+    for(const c of [...nonEmpty].reverse()){
+      for(const e of sanitizeArchiveEntries(c.entries)){
+        if(e?.id) mergedById.set(String(e.id),e);
+      }
+    }
     const directFirst=nonEmpty.find(c=>c.source==='DIRECT-RESTORE');
     // Re-apply direct restore last so it wins deterministically for duplicate IDs.
     if(directFirst)for(const e of sanitizeArchiveEntries(directFirst.entries))if(e?.id)mergedById.set(String(e.id),e);
-    const recovered=[...mergedById.values()];
+    const recovered=[...mergedById.values()].map(e=>
+      permaIds.has(String(e.id)) ? {...e,permaArchive:true} : e
+    );
     state.entries=recovered;
 
     // If anything was recovered, immediately normalize both stores and create a fresh recovery snapshot.
@@ -1184,14 +1200,14 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     $('#archiveClearSelection')?.addEventListener('click',()=>{state.archiveSelected.clear();renderArchive();});
     $('#archiveBulkPerma')?.addEventListener('click',()=>{const ids=[...state.archiveSelected];if(!ids.length){toast('Keine POVs ausgewählt.');return;}let n=0;for(const e of state.entries){if(ids.includes(e.id)&&!e.permaArchive){e.permaArchive=true;n++;}}state.archiveSelected.clear();saveMeta();renderArchive();renderCsv();toast(`${n} POV(s) ins Archiv verschoben.`);});
   }
-  function renderCases(){const cases=state.entries.filter(e=>!e.complete);const box=$('#casesList');box.innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button type="button" class="mini" data-action="case-open" data-id="${esc(e.id)}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';box.onclick=async ev=>{const b=ev.target.closest('[data-action="case-open"]');if(!b)return;const e=state.entries.find(x=>x.id===b.dataset.id);if(e){await openEditorFromEntry(e,{});}};}
+  function renderCases(){const cases=state.entries.filter(e=>!e.complete&&!e.permaArchive);const box=$('#casesList');box.innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button type="button" class="mini" data-action="case-open" data-id="${esc(e.id)}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';box.onclick=async ev=>{const b=ev.target.closest('[data-action="case-open"]');if(!b)return;const e=state.entries.find(x=>x.id===b.dataset.id);if(e){await openEditorFromEntry(e,{});}};}
   function isPermaBanValue(v){
     if(v===true||v===1)return true;
     if(typeof v==='string'){const n=v.trim().toLowerCase();return ['true','1','yes','ja','perma','perma-ban','permaban'].includes(n);}
     return false;
   }
-  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:isPermaBanValue(e.permaArchive),Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
-  function csvRowsPermaBase(){return csvRowsBase(state.entries.filter(e=>isPermaBanValue(e.permaArchive)));}
+  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved&&!e.permaArchive).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:isPermaBanValue(e.permaArchive),Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
+  function csvRowsPermaBase(){return state.entries.filter(e=>e.saved&&isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:true,Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
   function csvRows(){const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();const reason=(($('#csvFilterReason')?.value)||'all');const sc=(($('#csvFilterSc')?.value)||'all');const perma=(($('#csvFilterPerma')?.value)||'all');return csvRowsBase().filter(r=>{if(reason!=='all'&&r.Grund!==reason)return false;if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;if(perma==='yes'&&r.Perma!==true)return false;if(perma==='no'&&r.Perma===true)return false;if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.Ergebnis,r.Grund].some(v=>String(v||'').toLowerCase().includes(q))))return false;return true;});}
 
   function renderCsv(){
