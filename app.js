@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V93
+/* Grand RP DC Checker V95
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V93';
+  const BUILD='V95';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -40,6 +40,7 @@
     'Event 1.7 (NoPov in PC Check)',
     'PC Check Positiv (Banevading)',
     'PC Check Positiv (Covering Cheater)',
+    'Cheater',
     'Acc 1.4 (Twink)',
     'Acc 1.4 (Main)'
   ];
@@ -53,6 +54,7 @@
     'Event 1.7 (NoPov in PC Check)':['event 1.7 nopov in pc check','event1.7 nopov in pc check','event 17 nopov in pc check','event 1.7 no pov in pc check','event1.7 nopov'],
     'PC Check Positiv (Banevading)':['pc check positiv banevading','pc-check positiv banevading','pccheck positiv banevading','pc check posiv banevading'],
     'PC Check Positiv (Covering Cheater)':['pc check positiv covering cheater','pc-check positiv covering cheater','pc check covering cheater','covering cheater'],
+    'Cheater':['cheater','cheating','cheat','cheater detected','cheater ban'],
     'Acc 1.4 (Twink)':['acc 1.4 twink','acc1.4 twink','acc 14 twink','acc 1.4 (twink)','acc 14 twinkk'],
     'Acc 1.4 (Main)':['acc 1.4 main','acc1.4 main','acc 14 main','acc 1.4 (main)','acc1.4']
   };
@@ -104,9 +106,31 @@
       .replace(/\s*Social\s+Club(?:\s+ID)?\s*:?.*/i,'')
       .trim();
   }
+  function resolveReasonExact(text){
+    const raw=String(text||'').replace(/\u00a0/g,' ').replace(/[\r\n]+/g,' ').replace(/\s+/g,' ').trim();
+    const n=raw.toLowerCase();
+    if(!raw)return '';
+    // Most-specific ACP values first. Never let the generic "Verweigerung"
+    // rule swallow "Verweigerung - Trolling".
+    if(/pc[\s-]*check.*verweig(?:erung|ert|ern).*(?:-|—|–)?\s*troll/i.test(raw) || /troll(?:ing)?[\s-]*(?:in|im)?[\s-]*pc[\s-]*check/i.test(raw)) return 'PC-Check Verweigerung - Trolling';
+    if(/pc[\s-]*check.*positiv.*4(?:[\s.,_-]*1)?.*discord/i.test(raw)) return 'PC-Check Positiv 4.1 (Discord)';
+    if(/pc[\s-]*check.*positiv.*4(?:[\s.,_-]*1)?.*redux/i.test(raw)) return 'PC-Check Positiv 4.1 (Redux)';
+    if(/pc[\s-]*check.*positiv.*banevading/i.test(raw)) return 'PC Check Positiv (Banevading)';
+    if(/pc[\s-]*check.*positiv.*(?:covering|cheater)/i.test(raw)) return 'PC Check Positiv (Covering Cheater)';
+    if(/pc[\s-]*check.*positiv.*cleaning/i.test(raw)) return 'PC-Check Positiv - Cleaning';
+    if(/event\s*1(?:[.\s:_-]*7).*no\s*p[o0]v/i.test(raw)) return 'Event 1.7 (NoPov in PC Check)';
+    if(/acc\s*1(?:[.\s_-]*4).*twink/i.test(raw)) return 'Acc 1.4 (Twink)';
+    if(/acc\s*1(?:[.\s_-]*4).*main/i.test(raw)) return 'Acc 1.4 (Main)';
+    if(/pc[\s-]*check.*positiv/i.test(raw)) return 'PC-Check Positiv';
+    if(/pc[\s-]*check.*verweig/i.test(raw)) return 'PC-Check Verweigerung';
+    if(/\bcheat(?:er|ing)?\b/i.test(n)) return 'Cheater';
+    return '';
+  }
   function canonicalReason(text){
     const raw=stripChatNoise(String(text||''));
     if(!raw)return null;
+    const exact=resolveReasonExact(raw);
+    if(exact)return {value:exact,score:1};
     const variants=[];
     const add=(x)=>{x=stripChatNoise(x);if(x&&!variants.includes(x))variants.push(x);};
     add(raw);
@@ -248,6 +272,8 @@
     const c=reasonOcrNormalize(raw);
     const n=reasonCompact(raw);
     if(!n)return '';
+    const exact=resolveReasonExact(raw);
+    if(exact)return exact;
     // Fix OCR forms such as "°C-Check Yerweigerung", "PO-Check Verweigerung"
     // and "Trolling in PC Check" before applying the semantic flags below.
     let nn=n.replace(/^(?:0|o|c)?check/,'pccheck').replace(/^(?:po|0|o|c)check/,'pccheck');
@@ -296,6 +322,8 @@
   function extractReasonStrict(text){
     const raw=cleanText(text);
     if(!raw)return '';
+    const exact=resolveReasonExact(raw);
+    if(exact)return exact;
     const lines=raw.split('\n').map(x=>x.trim()).filter(Boolean);
     const priority=[];
     for(const line of lines){
@@ -840,48 +868,80 @@
   async function delVideo(id){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
   async function clearDB(){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
   function showView(v,persist=true){if(!views[v])v='archive';$$('.view').forEach(x=>x.classList.remove('active'));$('#view-'+v).classList.add('active');$$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));$('#pageTitle').textContent=views[v][0];$('#pageSubtitle').textContent=views[v][1];if(persist)try{sessionStorage.setItem('grandrp_current_view',v);localStorage.setItem('grandrp_current_view',v);}catch{}if(v==='archive')renderArchive();if(v==='cases')renderCases();if(v==='csv')renderCsv();}
-  function updateCounts(){const all=state.entries;const count=k=>all.filter(e=>e.types?.includes(k)).length;$('#countAll').textContent=all.length;$('#countBan').textContent=all.filter(e=>!e.notBanned).length;$('#countPc').textContent=count('pccheck');$('#countSoc').textContent=count('socban');$('#countHard').textContent=count('hardban');$('#countCheat').textContent=count('cheater');$('#countNeg').textContent=count('negativ');$('#countNoVideo').textContent=all.filter(e=>!e.videoStored).length;}
+  function updateCounts(){const all=state.entries;const count=k=>all.filter(e=>e.types?.includes(k)).length;$('#countAll').textContent=all.filter(e=>!e.permaArchive).length;$('#countBan').textContent=all.filter(e=>!e.notBanned&&!e.permaArchive).length;$('#countPc').textContent=all.filter(e=>e.types?.includes('pccheck')&&!e.permaArchive).length;$('#countSoc').textContent=all.filter(e=>e.types?.includes('socban')&&!e.permaArchive).length;$('#countHard').textContent=all.filter(e=>e.types?.includes('hardban')&&!e.permaArchive).length;$('#countCheat').textContent=all.filter(e=>e.types?.includes('cheater')&&!e.permaArchive).length;$('#countNeg').textContent=all.filter(e=>e.types?.includes('negativ')&&!e.permaArchive).length;$('#countNoVideo').textContent=all.filter(e=>!e.videoStored&&!e.permaArchive).length;$('#countPerma').textContent=all.filter(e=>e.permaArchive).length;}
+  async function buildArchiveThumbnail(entry){
+    try{
+      const file=await getVideo(entry.id);
+      if(!file)return '';
+      const video=document.createElement('video');
+      video.muted=true;video.playsInline=true;video.preload='metadata';
+      const url=URL.createObjectURL(file);video.src=url;
+      const frame=await new Promise((resolve,reject)=>{
+        let done=false;
+        const finish=(fn,val)=>{if(done)return;done=true;clearTimeout(timer);video.removeEventListener('loadedmetadata',onMeta);video.removeEventListener('seeked',onSeeked);video.removeEventListener('error',onError);try{video.pause();}catch{}fn(val);};
+        const onMeta=()=>{const d=Number(video.duration||0);const t=Number(entry.timestamps?.banner??entry.result?.timestamps?.banner??(d>0?Math.max(0,d-1):0));try{video.currentTime=Math.max(0,Math.min(t,Math.max(0,d-.05)));}catch{finish(reject,new Error('Seek fehlgeschlagen'));}};
+        const onSeeked=()=>{try{const c=document.createElement('canvas');const maxW=640,maxH=360;const scale=Math.min(1,maxW/(video.videoWidth||640),maxH/(video.videoHeight||360));c.width=Math.max(1,Math.round((video.videoWidth||640)*scale));c.height=Math.max(1,Math.round((video.videoHeight||360)*scale));c.getContext('2d').drawImage(video,0,0,c.width,c.height);finish(resolve,c.toDataURL('image/jpeg',0.78));}catch(err){finish(reject,err);}};
+        const onError=()=>finish(reject,new Error('Video-Frame konnte nicht gelesen werden'));
+        const timer=setTimeout(()=>finish(reject,new Error('Thumbnail Timeout')),7000);
+        video.addEventListener('loadedmetadata',onMeta);video.addEventListener('seeked',onSeeked);video.addEventListener('error',onError);
+        video.load();
+      });
+      URL.revokeObjectURL(url);
+      return frame;
+    }catch(err){return '';}
+  }
+  async function hydrateArchiveThumbnails(list){
+    for(const entry of list){
+      const img=document.querySelector(`img[data-thumb-id=\"${CSS.escape(entry.id)}\"]`);
+      if(!img||img.dataset.loaded==='1'||!entry.videoStored)continue;
+      const src=await buildArchiveThumbnail(entry);
+      if(src){img.src=src;img.dataset.loaded='1';img.classList.add('loaded');}else{img.remove();const holder=document.querySelector(`[data-thumb-id=\"${CSS.escape(entry.id)}\"]`);if(holder)holder.textContent='POV';}
+    }
+  }
   function renderArchive(){
     updateCounts();
     const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;
-    const list=state.entries.filter(e=>{if(filter==='ban'&&e.notBanned)return false;if(filter!=='all'&&filter!=='ban'&&!e.types?.includes(filter))return false;if(filter==='novideo'&&e.videoStored)return false;if(!q)return true;return [e.targetId,e.sc,e.reason,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));});
+    const list=state.entries.filter(e=>{
+      if(filter==='permaarchive' && !e.permaArchive)return false;
+      if(filter==='all' && e.permaArchive)return false;
+      if(filter==='ban'&&e.notBanned)return false;
+      if(filter!=='all'&&filter!=='permaarchive'&&filter!=='ban'&&!e.types?.includes(filter))return false;
+      if(filter==='novideo'&&e.videoStored)return false;
+      if(!q)return true;
+      return [e.targetId,e.sc,e.reason,e.manualResult,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));
+    });
     const grid=$('#archiveGrid');
-    grid.innerHTML=list.map(e=>`<article class="card"><div class="thumb">${e.videoStored?'POV':'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(e.id.slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span>${e.permaArchive?'<span class="pill perma-tag">PERMA</span>':''}</div><div class="card-body"><div class="card-title">${esc(e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div class="rid-cell"><span>SOC</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(formatDateDE(e.date)||'')}</div>${e.sourceSize?`<div><span>Dateigröße</span>${esc(formatSize(e.sourceSize))}<small class="size-bytes">${esc(formatBytesExact(e.sourceSize))}</small></div>`:''}</div></div><div class="card-actions"><button type="button" class="mini" data-action="open" data-id="${esc(e.id)}">Prüfen</button>${e.youtube?.url||e.proof?`<button type="button" class="mini primary" data-action="youtube" data-url="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}<button type="button" class="mini danger" data-action="delete" data-id="${esc(e.id)}">Löschen</button></div></article>`).join('');
+    grid.innerHTML=list.map(e=>`<article class="card"><div class="thumb archive-thumb" data-thumb-id="${esc(e.id)}">${e.videoStored?`<img alt="POV Vorschau" loading="lazy" data-thumb-id="${esc(e.id)}">`:'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(String(e.id).slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span>${e.permaArchive?'<span class="pill perma-tag">POV ARCHIV</span>':''}</div><div class="card-body"><div class="card-title">${esc(e.manualResult||e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div class="rid-cell"><span>SOC</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(formatDateDE(e.date)||'')}</div>${e.sourceSize?`<div><span>Dateigröße</span>${esc(formatSize(e.sourceSize))}<small class="size-bytes">${esc(formatBytesExact(e.sourceSize))}</small></div>`:''}<div><span>Grund</span>${esc(e.reason||'')}</div></div></div><div class="card-actions"><button type="button" class="mini" data-action="open" data-id="${esc(e.id)}">Prüfen</button>${e.youtube?.url||e.proof?`<button type="button" class="mini primary" data-action="youtube" data-url="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}<button type="button" class="mini ${e.permaArchive?'danger':''}" data-action="perma" data-id="${esc(e.id)}">${e.permaArchive?'Aus POV Archiv':'In POV Archiv'}</button><button type="button" class="mini danger" data-action="delete" data-id="${esc(e.id)}">Löschen</button></div></article>`).join('');
     $('#emptyState').classList.toggle('hidden',list.length>0);
+    void hydrateArchiveThumbnails(list);
     grid.onclick=async ev=>{
       const b=ev.target.closest('button[data-action]');if(!b)return;
       const id=b.dataset.id;const e=state.entries.find(x=>x.id===id);if(!e)return;
       const action=b.dataset.action;
-      if(action==='open'){
-        const reasonWindow=preopenAcpReasonWindow(e.targetId||'');
-        await openEditorFromEntry(e,{reasonWindow});
-      }else if(action==='youtube'){
-        if(b.dataset.url)window.open(b.dataset.url,'_blank','noopener,noreferrer');
-      }else if(action==='delete'){
+      if(action==='open'){await openEditorFromEntry(e,{});}
+      else if(action==='youtube'){if(b.dataset.url)window.open(b.dataset.url,'_blank','noopener,noreferrer');}
+      else if(action==='perma'){e.permaArchive=!e.permaArchive;saveMeta();renderArchive();renderCsv();toast(e.permaArchive?'POV ins POV Archiv verschoben.':'POV aus POV Archiv entfernt.');}
+      else if(action==='delete'){
         if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?\n\nDas YouTube-Video wird NICHT gelöscht.`))return;
         try{await delVideo(e.id);state.entries=state.entries.filter(x=>x.id!==e.id);saveMeta();renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}
       }
     };
   }
-  function renderCases(){const cases=state.entries.filter(e=>!e.complete);const box=$('#casesList');box.innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button type="button" class="mini" data-action="case-open" data-id="${esc(e.id)}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';box.onclick=async ev=>{const b=ev.target.closest('[data-action="case-open"]');if(!b)return;const e=state.entries.find(x=>x.id===b.dataset.id);if(e){const reasonWindow=preopenAcpReasonWindow(e.targetId||'');await openEditorFromEntry(e,{reasonWindow});}};}
-  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Grund:e.reason||'',Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
+  function renderCases(){const cases=state.entries.filter(e=>!e.complete);const box=$('#casesList');box.innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button type="button" class="mini" data-action="case-open" data-id="${esc(e.id)}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';box.onclick=async ev=>{const b=ev.target.closest('[data-action="case-open"]');if(!b)return;const e=state.entries.find(x=>x.id===b.dataset.id);if(e){await openEditorFromEntry(e,{});}};}
+  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Grund:e.reason||'',Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
   function csvRowsPermaBase(){return csvRowsBase(state.entries.filter(e=>e.permaArchive));}
   function csvRows(){
     const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();
-    const reason=($('#csvFilterReason')?.value)||'all';
-    const sc=($('#csvFilterSc')?.value)||'all';
-    return csvRowsBase().filter(r=>{
-      if(reason!=='all' && r.Grund!==reason)return false;
-      if(sc==='present' && !r.SOC)return false;
-      if(sc==='empty' && r.SOC)return false;
-      if(q && ![r.Proof,r.Datum,r.ID,r.SOC,r.Grund].some(v=>String(v||'').toLowerCase().includes(q)))return false;
-      return true;
-    });
+    const reason=(($('#csvFilterReason')?.value)||'all');
+    const sc=(($('#csvFilterSc')?.value)||'all');
+    return csvRowsBase().filter(r=>{if(reason!=='all'&&r.Grund!==reason)return false;if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.Grund].some(v=>String(v||'').toLowerCase().includes(q))))return false;return true;});
   }
   function renderCsv(){
     const all=csvRowsBase(), rows=csvRows(), perma=csvRowsPermaBase();
     $('#csvSummary').textContent=`${rows.length} von ${all.length} Einträgen · ${perma.length} Perma-Archiv`;
-    $('#csvPreviewBody').innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.Proof)}</td><td>${esc(r.Datum)}</td><td>${esc(r.ID)}</td><td>${esc(r.SOC)}</td><td></td><td>${esc(r.DiscordID)}</td><td></td><td>${esc(r.Grund)}</td><td>${esc(r.Admin1)}</td><td>${esc(r.Admin2)}</td><td>${esc(r.Admin3)}</td><td>${esc(r.Admin4)}</td><td>${esc(r.Admin5)}</td></tr>`).join(''):'<tr><td colspan=13 class="csv-empty">Keine Einträge passen zum Filter.</td></tr>';
+    $('#csvPreviewBody').innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.Proof)}</td><td>${esc(r.Datum)}</td><td>${esc(r.ID)}</td><td>${esc(r.SOC)}</td><td></td><td>${esc(r.DiscordID)}</td><td></td><td>${esc(r.Grund)}</td><td>${esc(r.Admin1)}</td><td>${esc(r.Admin2)}</td><td>${esc(r.Admin3)}</td><td>${esc(r.Admin4)}</td><td>${esc(r.Admin5)}</td><td><button type="button" class="mini" data-csv-edit="${esc(r._id)}">Bearbeiten</button></td></tr>`).join(''):'<tr><td colspan=14 class="csv-empty">Keine Einträge passen zum Filter.</td></tr>';
+    const body=$('#csvPreviewBody');
+    body.onclick=async ev=>{const b=ev.target.closest('[data-csv-edit]');if(!b)return;const e=state.entries.find(x=>x.id===b.dataset.csvEdit);if(e)await openEditorFromEntry(e,{});};
   }
   function csvTextFromRows(rows){const header=['Proof','Datum','ID','SOC','RID','Discord ID','Familie','Grund','Admin 1','Admin 2','Admin 3','Admin 4','Admin 5'];const line=a=>a.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(';');return '﻿'+[line(header),...rows.map(r=>line([r.Proof,r.Datum,r.ID,r.SOC,r.RID,r.DiscordID,r.Familie,r.Grund,r.Admin1,r.Admin2,r.Admin3,r.Admin4,r.Admin5]))].join('\r\n');}
   function csvText(){return csvTextFromRows(csvRows());}
@@ -1671,9 +1731,10 @@
   function revokeEditorPreview(){if(state.editorVideoUrl){try{URL.revokeObjectURL(state.editorVideoUrl);}catch{}state.editorVideoUrl=null;}const v=$('#editorVideoPreview');if(v){try{v.pause();}catch{}v.removeAttribute('src');v.load();}}
   function loadEditorPreview(file,t=0){const v=$('#editorVideoPreview');if(!v||!file)return;revokeEditorPreview();state.editorVideoUrl=URL.createObjectURL(file);v.src=state.editorVideoUrl;v.load();const set=()=>{try{v.currentTime=Math.max(0,Math.min(Number(t)||0,Math.max(0,v.duration-.05)));}catch{}};v.addEventListener('loadedmetadata',set,{once:true});} 
   function setEditorValues(v={}){
-    const r=v?.result||v||{};
+    const r=(v?.result && typeof v.result==='object')?v.result:(v||{});
     const val=(x)=>x==null?'':String(x);
     $('#targetId').value=val(r.targetId);
+    const resultEl=$('#result'); if(resultEl)resultEl.value=val(r.manualResult);
     $('#reason').value=ALLOWED_REASONS.includes(val(r.reason))?val(r.reason):'';
     $('#sc').value=val(r.sc);
     $('#server').value='3';
@@ -1686,8 +1747,13 @@
     $('#permaArchive').checked=!!r.permaArchive;
     $('#notBanned').checked=!!r.notBanned;
     $('#documentStatus').value=r.documentStatus==='eingetragen'?'eingetragen':'nicht eingetragen';
-    setupPcCheckerUi(r.pcCheckers||[PC_CHECKER_LEAD]);
-    const pcm=r.pcCheckerManual||[];pcCheckerCustom.clear();pcm.forEach(v=>{if(v&& !PC_CHECKER_POOL.includes(v))pcCheckerCustom.add(v);});setupPcCheckerUi(r.pcCheckers||[PC_CHECKER_LEAD]);
+    const pcm=Array.isArray(r.pcCheckerManual)?r.pcCheckerManual:[];
+    pcCheckerCustom.clear();
+    pcm.forEach(v=>{if(v && !PC_CHECKER_POOL.includes(v))pcCheckerCustom.add(String(v));});
+    // Eine neue POV bekommt immer nur den Leiter (Adam Byers). Alte Auswahlen
+    // aus dem vorherigen Fall dürfen nicht in 2–5 übernommen werden.
+    const selectedPc=Array.isArray(r.pcCheckers)&&r.pcCheckers.length ? r.pcCheckers : [PC_CHECKER_LEAD];
+    setupPcCheckerUi(selectedPc);
     renderTitlePreview();
   }
   function setFieldStatus(item){
@@ -1698,8 +1764,10 @@
     const normalizedUiReason=String(rawReason||'').trim();
     const uiReason=ALLOWED_REASONS.includes(normalizedUiReason)?normalizedUiReason:(classifyReasonStrong(normalizedUiReason)||canonicalReason(normalizedUiReason)?.value||'');
     const uiSc=normalizeHexLoose($('#sc')?.value||r.sc||'');
+    const uiResult=String($('#result')?.value||r.manualResult||'').trim();
     const statuses=[
       ['ID','Ziel-ID',/^\d{1,6}$/.test(uiTarget)],
+      ['Ergebnis','Ergebnis',!!uiResult],
       ['Grund','Grund',ALLOWED_REASONS.includes(uiReason)],
       ['SC','SOC / SC',uiSc.length===40]
     ];
@@ -1768,12 +1836,13 @@
     const item=ctx.item;
     const current=item.result||{};
     const targetId=clampId($('#targetId')?.value||current.targetId||'');
+    const resultText=String($('#result')?.value||current.manualResult||'').trim();
     const reason=String($('#reason')?.value||current.reason||'').trim();
     const sc=normalizeHexLoose($('#sc')?.value||current.sc||'');
     const server=String($('#server')?.value||current.server||'3').trim()||'3';
     const date=String($('#date')?.value||current.date||'').trim();
-    item.result={...current,targetId,reason,sc,server,date};
-    item.targetId=targetId;item.reason=reason;item.sc=sc;item.server=server;item.date=date;
+    item.result={...current,targetId,manualResult:resultText,reason,sc,server,date};
+    item.targetId=targetId;item.resultText=resultText;item.reason=reason;item.sc=sc;item.server=server;item.date=date;
     scheduleQueuePersist();
     return item;
   }
@@ -1785,11 +1854,12 @@
     if(wasEditing)syncEditorDraftToQueueItem();
     const draft=item.result||{};
     const currentTarget=clampId($('#targetId')?.value||draft.targetId||item.targetId||'');
+    const currentResult=String($('#result')?.value||draft.manualResult||item.resultText||'').trim();
     const currentReason=String($('#reason')?.value||draft.reason||item.reason||'').trim();
     const currentDate=String($('#date')?.value||draft.date||item.date||'').trim();
-    if(!/^\d{1,6}$/.test(currentTarget)||!ALLOWED_REASONS.includes(currentReason)||!validDate(currentDate)){
+    if(!/^\d{1,6}$/.test(currentTarget)||!currentResult||!ALLOWED_REASONS.includes(currentReason)||!validDate(currentDate)){
       if(!wasEditing)openEditor(item);
-      toast('Nächste POV erst möglich: Ziel-ID, Grund und Datum müssen ausgefüllt sein.');
+      toast('Nächste POV erst möglich: Ziel-ID, Ergebnis, Grund und Datum müssen ausgefüllt sein.');
       return false;
     }
     try{
@@ -1817,19 +1887,19 @@
 
   async function saveEditor(e){
     e.preventDefault(); const ctx=state.editing; if(!ctx)return;
-    const targetId=clampId($('#targetId').value), reason=$('#reason').value, sc=normalizeHexLoose($('#sc').value), server=$('#server').value||'3', date=$('#date').value;
+    const targetId=clampId($('#targetId').value), resultText=String($('#result')?.value||'').trim(), reason=$('#reason').value, sc=normalizeHexLoose($('#sc').value), server=$('#server').value||'3', date=$('#date').value;
     // A manually entered SC is authoritative. Never let an old OCR "offline" flag overwrite it on save.
     const offlineFlag=!!(ctx.item?.result?.offline||ctx.entry?.offline);
     const offline=sc.length===40?false:offlineFlag;
-    const missing=[]; if(!/^\d{1,6}$/.test(targetId))missing.push('Ziel-ID'); if(!ALLOWED_REASONS.includes(reason))missing.push('Grund'); if(!/^[1-4]$/.test(server))missing.push('Server'); if(!validDate(date))missing.push('Datum'); if(!offline && sc.length!==40)missing.push('SC');
+    const missing=[]; if(!/^\d{1,6}$/.test(targetId))missing.push('Ziel-ID'); if(!resultText)missing.push('Ergebnis'); if(!ALLOWED_REASONS.includes(reason))missing.push('Grund'); if(!/^[1-4]$/.test(server))missing.push('Server'); if(!validDate(date))missing.push('Datum'); if(!offline && sc.length!==40)missing.push('SC');
     if(missing.length){toast('Bitte fehlende Angaben prüfen: '+missing.join(', '));return false;}
-    const base=ctx.item||ctx.entry; const types=[...state.selectedTypes]; if(reason.startsWith('PC'))types.push('pccheck'); if(reason==='Cheating')types.push('cheater'); const finalTypes=[...new Set(types)];
+    const base=ctx.item||ctx.entry; const types=[...state.selectedTypes]; if(reason.startsWith('PC'))types.push('pccheck'); if(reason==='Cheater'||reason==='Cheating')types.push('cheater'); const finalTypes=[...new Set(types)];
     const finalName=`${targetId}, ${reason}, ${formatDateDE(date)}.mp4`;
     const namedFile=new File([base.file],finalName,{type:base.file.type||'video/mp4',lastModified:base.file.lastModified||Date.now()}); if(namedFile.size!==base.file.size)throw new Error('Die Dateigröße hat sich beim Umbenennen verändert. Speicherung abgebrochen.');
     const yt=base.youtube||ctx.item?.youtube||ctx.entry?.youtube||null;
     const timestamps={...(base.result?.timestamps||base.timestamps||{})};
     if(!Number.isFinite(Number(timestamps.pcCheck))){const d=Number(base.result?.duration||base.duration||0);if(d>0)timestamps.pcCheck=Math.max(0,Math.min(d/2,Math.max(0,d-.05)));}
-    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,sc:offline?'':sc,server,date,rid:'',types:finalTypes,perma:$('#perma').checked,permaArchive:$('#permaArchive').checked,notBanned:$('#notBanned').checked,documentStatus:$('#documentStatus').value==='eingetragen'?'eingetragen':'nicht eingetragen',pcCheckers:getPcCheckers(),pcCheckerManual:[...pcCheckerCustom],discordId:'',proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',duration:Number(base.result?.duration||base.duration||0)||0,timestamps,infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
+    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,manualResult:resultText,reason,sc:offline?'':sc,server,date,rid:'',types:finalTypes,perma:$('#perma').checked,permaArchive:$('#permaArchive').checked,notBanned:$('#notBanned').checked,documentStatus:$('#documentStatus').value==='eingetragen'?'eingetragen':'nicht eingetragen',pcCheckers:getPcCheckers(),pcCheckerManual:[...pcCheckerCustom],discordId:'',proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',duration:Number(base.result?.duration||base.duration||0)||0,timestamps,infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
     await putVideo(record.id,namedFile);
     // YouTube must receive the exact final filename (including .mp4). The title update
     // is completed and verified before the saved POV is finalized in the UI.
@@ -1875,7 +1945,7 @@
   window.addEventListener('message',e=>{if(e.data?.type==='grandrp-manual-field'){applyManualField(e.data.field,e.data.value,e.data.time);}});
 
   const ACP_ORIGIN='https://admin.gta5grand.com';
-  const ACP_EXTENSION_TOKEN='grandrp-acp-v88';
+  const ACP_EXTENSION_TOKEN='grandrp-acp-v90';
   let acpWindow=null;
   let acpTimeout=null;
   let acpReasonWindow=null;
@@ -1911,7 +1981,11 @@
   function setReasonValueFromAcp(reason,characterId){
     const raw=String(reason||'').replace(/\s+/g,' ').trim();
     if(!raw)return false;
-    const canonical=canonicalReason(raw)?.value||raw;
+    // Nie zuerst auf den verkürzten canonicalReason-Pfad gehen: Bei
+    // „PC-Check Verweigerung - Trolling“ darf „Trolling“ nicht verloren gehen.
+    const exact=resolveReasonExact(raw);
+    const strong=exact||classifyReasonStrong(raw);
+    const canonical=strong||canonicalReason(raw)?.value||raw;
     const allowed=ALLOWED_REASONS.includes(canonical);
     if(allowed)$('#reason').value=canonical;
     applyReasonPermaPolicy(canonical,false);
@@ -2041,8 +2115,9 @@
       const sel=$(`#pcChecker${n}`);if(!sel)continue;
       const keep=sel.value;
       sel.innerHTML='<option value="">Nicht besetzt</option>'+all.map(name=>`<option value="${esc(name)}">${esc(name)}</option>`).join('');
-      const want=current[n-2]??keep;
-      if(want)sel.value=want;
+      // If no value is provided for this case, explicitly clear the old selection.
+      const want=current[n-2]??'';
+      sel.value=want||'';
     }
     const list=$('#pcCheckerManualList');
     if(list)list.innerHTML=[...pcCheckerCustom].map(name=>`<span class="pc-manual-chip">${esc(name)}<button type="button" data-pc-remove="${esc(name)}">×</button></span>`).join('');
@@ -2090,9 +2165,10 @@
     $('#previewJumpBack')?.addEventListener('click',()=>{const v=$('#editorVideoPreview');if(v)v.currentTime=Math.max(0,v.currentTime-5);});
     $('#previewJumpForward')?.addEventListener('click',()=>{const v=$('#editorVideoPreview');if(v)v.currentTime=Math.min(v.duration||0,v.currentTime+5);});
 
-    $$('#targetId,#reason,#sc').forEach(el=>el.addEventListener('focus',()=>showInfoPhoto(el.id==='targetId'?'targetId':el.id)));
+    $$('#targetId,#result,#reason,#sc').forEach(el=>el?.addEventListener('focus',()=>showInfoPhoto(el.id==='targetId'?'targetId':el.id==='result'?'banner':el.id)));
+    $('#result')?.addEventListener('input',()=>{renderTitlePreview();setFieldStatus(state.editing?.item||state.editing?.entry||{});if(state.editing?.item)syncEditorDraftToQueueItem();});
     $('#reanalyzeBtn')?.addEventListener('click',async()=>{const x=state.editing?.item;if(x){closeEditor();await retryLocalOCR(x);}});
-    $('#fetchAcpSc')?.addEventListener('click',()=>{const sc=normalizeHexLoose($('#sc')?.value||state.editing?.item?.result?.sc||state.editing?.item?.sc||state.editing?.entry?.sc||'');if(sc.length===40){openAcpReasonForCurrentId(preopenAcpReasonWindow($('#targetId')?.value||''));}else{startAcpSequence();}});
+    $('#fetchAcpSc')?.addEventListener('click',()=>{const sc=normalizeHexLoose($('#sc')?.value||state.editing?.item?.result?.sc||state.editing?.item?.sc||state.editing?.entry?.sc||'');if(sc.length===40){openAcpReasonForCurrentId();}else{startAcpSequence();}});
     $('#openDatePicker')?.addEventListener('click',()=>{const el=$('#date');try{el.showPicker?.();}catch{el.focus();el.click();}});
     $('#addPcCheckerBtn')?.addEventListener('click',()=>{const input=$('#pcCheckerManual');if(!input)return;const name=input.value.trim().replace(/\s+/g,' ');if(!name){input.focus();return;}if(name===PC_CHECKER_LEAD||PC_CHECKER_POOL.includes(name)||pcCheckerCustom.has(name)){toast('Dieser PC Checker ist bereits vorhanden.');return;}if(getPcCheckers().length>=5){toast('Maximal 5 PC Checker.');return;}pcCheckerCustom.add(name);input.value='';rebuildPcCheckerOptions(getPcCheckers().slice(1));toast(`${name} zur PC-Checker-Auswahl hinzugefügt.`);});
     $('#copyAcpSc')?.addEventListener('click',async()=>{const v=$('#sc')?.value?.trim();if(!/^\w{40}$/i.test(v||'')){toast('Kein gültiger SC zum Kopieren.');return;}try{await navigator.clipboard.writeText(v);toast('SC kopiert.');}catch{toast('Zwischenablage nicht verfügbar.');}});
@@ -2107,11 +2183,9 @@
       if(btn.dataset.field==='reason'){
         const id=clampId($('#targetId')?.value||entry.result?.targetId||entry.targetId||'');
         if(!/^\d{1,6}$/.test(id)){toast('Zuerst eine gültige Ziel-ID eintragen.');return;}
-        if(normalizeHexLoose($('#sc')?.value||entry.result?.sc||entry.sc||'').length!==40){
-          startAcpSequence();
-        }else{
-          openAcpReasonForCurrentId(preopenAcpReasonWindow(id));
-        }
+        // Manueller Reason-Scan: direkt aus dem User-Klick heraus das Character-Info-
+        // Profil öffnen. Die Extension liest den roten Bannbereich und schließt den Tab.
+        openAcpReasonForCurrentId();
         return;
       }
       await showInfoPhoto(btn.dataset.field);await openManualPicker(entry,btn.dataset.field);
