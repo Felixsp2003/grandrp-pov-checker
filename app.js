@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V100
+/* Grand RP DC Checker V102
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V100';
+  const BUILD='V102';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -918,23 +918,10 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
     $('#archiveBulkPerma')?.addEventListener('click',()=>{const ids=[...state.archiveSelected];if(!ids.length){toast('Keine POVs ausgewählt.');return;}let n=0;for(const e of state.entries){if(ids.includes(e.id)&&!e.permaArchive){e.permaArchive=true;n++;}}state.archiveSelected.clear();saveMeta();renderArchive();renderCsv();toast(`${n} POV(s) ins Archiv verschoben.`);});
   }
   function renderCases(){const cases=state.entries.filter(e=>!e.complete);const box=$('#casesList');box.innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button type="button" class="mini" data-action="case-open" data-id="${esc(e.id)}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';box.onclick=async ev=>{const b=ev.target.closest('[data-action="case-open"]');if(!b)return;const e=state.entries.find(x=>x.id===b.dataset.id);if(e){await openEditorFromEntry(e,{});}};}
-  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
+  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:!!e.perma,PermaArchiv:!!e.permaArchive,Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
   function csvRowsPermaBase(){return csvRowsBase(state.entries.filter(e=>e.permaArchive));}
-  function csvRows(){const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();const reason=($('#csvFilterReason')?.value)||'all';const sc=($('#csvFilterSc')?.value)||'all';return csvRowsBase().filter(r=>{if(reason!=='all'&&r.Grund!==reason)return false;if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.Ergebnis,r.Grund].some(v=>String(v||'').toLowerCase().includes(q))))return false;return true;});}
-  function renderCsv(){const all=csvRowsBase(),rows=csvRows(),perma=csvRowsPermaBase();$('#csvSummary').textContent=`${rows.length} von ${all.length} Einträgen · ${perma.length} Perma-Archiv`;$('#csvPreviewBody').innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.Proof)}</td><td>${esc(r.Datum)}</td><td>${esc(r.ID)}</td><td>${esc(r.SOC)}</td><td></td><td>${esc(r.DiscordID)}</td><td></td><td>${esc(r.Ergebnis)}</td><td>${esc(r.Grund)}</td><td>${esc(r.Admin1)}</td><td>${esc(r.Admin2)}</td><td>${esc(r.Admin3)}</td><td>${esc(r.Admin4)}</td><td>${esc(r.Admin5)}</td><td><button type="button" class="mini" data-csv-edit="${esc(r._id)}">Bearbeiten</button></td></tr>`).join(''):'<tr><td colspan=15 class="csv-empty">Keine Einträge passen zum Filter.</td></tr>';$('#csvPreviewBody').onclick=async ev=>{const b=ev.target.closest('[data-csv-edit]');if(!b)return;const e=state.entries.find(x=>x.id===b.dataset.csvEdit);if(e)await openEditorFromEntry(e,{});};}
-  function csvTextFromRows(rows){const header=['Proof','Datum','ID','SOC','RID','Discord ID','Familie','Ergebnis','Grund','Admin 1','Admin 2','Admin 3','Admin 4','Admin 5'];const line=a=>a.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(';');return '﻿'+[line(header),...rows.map(r=>line([r.Proof,r.Datum,r.ID,r.SOC,r.RID,r.DiscordID,r.Familie,r.Ergebnis,r.Grund,r.Admin1,r.Admin2,r.Admin3,r.Admin4,r.Admin5]))].join('\r\n');}
-  function csvText(){return csvTextFromRows(csvRows());}
-  function downloadCsv(){const blob=new Blob([csvText()],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='grandrp_bans.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
-  function downloadPermaCsv(){const rows=csvRowsPermaBase();if(!rows.length){toast('Noch keine als „Perma eingetragen“ markierten Fälle.');return;}const blob=new Blob([csvTextFromRows(rows)],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='grandrp_perma_archiv.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast(`${rows.length} Perma-Archiv-Einträge exportiert.`);}
-  async function copyCsv(){try{await navigator.clipboard.writeText(csvText());toast('CSV in die Zwischenablage kopiert.');}catch{toast('Kopieren nicht verfügbar. CSV herunterladen.');}}
+  function csvRows(){const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();const reason=(($('#csvFilterReason')?.value)||'all');const sc=(($('#csvFilterSc')?.value)||'all');const perma=(($('#csvFilterPerma')?.value)||'all');return csvRowsBase().filter(r=>{if(reason!=='all'&&r.Grund!==reason)return false;if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;if(perma==='yes'&&!r.Perma)return false;if(perma==='no'&&r.Perma)return false;if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.Ergebnis,r.Grund].some(v=>String(v||'').toLowerCase().includes(q))))return false;return true;});}
 
-  function setupNav(){
-    setupArchiveBulk();
-    $$('.nav-item').forEach(b=>b.onclick=()=>showView(b.dataset.view));$('#headerUploadBtn').onclick=()=>showView('upload');$('#emptyUploadBtn').onclick=()=>showView('upload');$('#headerCsvBtn').onclick=()=>showView('csv');$('#reloadBtn').onclick=()=>renderArchive();$('#casesRefresh').onclick=renderCases;$('#search').oninput=renderArchive;$('#refreshCsvBtn').onclick=renderCsv;$('#downloadCsvBtn').onclick=downloadCsv;$('#downloadPermaCsvBtn')?.addEventListener('click',downloadPermaCsv);$('#copyCsvBtn').onclick=copyCsv;['#csvFilterSearch','#csvFilterReason','#csvFilterSc'].forEach(s=>$(s)?.addEventListener($(s)?.tagName==='SELECT'?'change':'input',renderCsv));$('#csvFilterClear')?.addEventListener('click',()=>{if($('#csvFilterSearch'))$('#csvFilterSearch').value='';if($('#csvFilterReason'))$('#csvFilterReason').value='all';if($('#csvFilterSc'))$('#csvFilterSc').value='all';if($('#csvFilterDiscord'))$('#csvFilterDiscord').value='all';renderCsv();});
-    $$('.filter').forEach(b=>b.onclick=()=>{state.filter=b.dataset.filter;$$('.filter').forEach(x=>x.classList.toggle('active',x===b));renderArchive();});
-    const savedView=sessionStorage.getItem('grandrp_current_view')||localStorage.getItem('grandrp_current_view');
-    if(savedView&&views[savedView])showView(savedView,false);
-  }
 
   const dropzone=$('#dropzone'), input=$('#fileInput');
   function setupUpload(){
@@ -1424,13 +1411,16 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
   // Highest priority: the last five seconds. The end-of-POV ban block is what the
   // user actually wants as the verification/photo anchor. Only when that window has
   // no verified Adam Byers [15340] ban do we fall back to the rest of the video.
-  async function findVerifiedBanInLastFive(video,cancelCheck=()=>false){
+  async function findVerifiedBanInLastFive(video,cancelCheck=()=>false,onProgress=()=>{}){
     if(!video||!Number.isFinite(video.duration)||video.duration<=0)return null;
-    const end=Math.max(0,video.duration-.08), start=Math.max(0,end-5);
     const worker=await ensureWorker();
-    const times=uniqueTimes(Array.from({length:11},(_,i)=>start+(end-start)*(i/10)));
+    const end=Math.max(0,video.duration-.08), start=Math.max(0,end-5);
+    // Keep the first pass light and report progress so the queue never appears frozen at 3%.
+    const times=uniqueTimes(Array.from({length:7},(_,i)=>start+(end-start)*(i/6)));
     const hits=[];
-    for(const t of times){
+    onProgress?.(3,`Bannbereich Schnellscan 0/${times.length}`);
+    for(let i=0;i<times.length;i++){
+      const t=times[i];
       if(cancelCheck())throw new Error('OCR abgebrochen: Fall wurde aus der Warteschlange entfernt.');
       if(!(await fastSeek(video,t)))continue;
       try{
@@ -1438,31 +1428,37 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
         const ban=read.ban||extractBanEvent(read.text);
         if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId)hits.push({time:t,ban,text:read.text,sharp:read.sharp||0});
       }catch{}
+      onProgress?.(3+Math.round((i+1)/times.length*7),`Bannbereich Schnellscan ${i+1}/${times.length}`);
     }
-    if(!hits.length)return null;
-    // Densify only around the best candidate: 11 cheap probes + a short, high precision
-    // local scan is much faster than rescanning the complete POV.
+    if(!hits.length){onProgress?.(10,'Bannbereich nicht gefunden · Gesamtscan wird gestartet');return null;}
     hits.sort((a,b)=>(b.ban.score-a.ban.score)||(b.sharp-a.sharp));
     const best=hits[0];
-    const dense=uniqueTimes(Array.from({length:9},(_,i)=>Math.max(start,best.time-.8+i*.2)));
+    const dense=uniqueTimes(Array.from({length:7},(_,i)=>Math.max(start,best.time-.6+i*.2)));
     const verified=[...hits];
-    for(const t of dense){
+    for(let i=0;i<dense.length;i++){
+      const t=dense[i];
+      if(cancelCheck())throw new Error('OCR abgebrochen: Fall wurde aus der Warteschlange entfernt.');
       if(!(await fastSeek(video,t)))continue;
       try{
         const read=await readBanOnly(worker,video);const ban=read.ban||extractBanEvent(read.text);
         if(ban&&ban.adminId===BAN_ADMIN_ID&&ban.targetId)verified.push({time:t,ban,text:read.text,sharp:read.sharp||0});
       }catch{}
+      onProgress?.(10+Math.round((i+1)/dense.length*8),`Bannbereich Präzisionsscan ${i+1}/${dense.length}`);
     }
     verified.sort((a,b)=>(Number(!!b.ban.reason)-Number(!!a.ban.reason))||(b.ban.score-a.ban.score)||(b.sharp-a.sharp));
-    for(const candidate of verified.slice(0,6)){
+    const reasonCandidates=verified.slice(0,4);
+    for(let i=0;i<reasonCandidates.length;i++){
+      const candidate=reasonCandidates[i];
       if(candidate.ban.reason)continue;
       if(!(await fastSeek(video,candidate.time)))continue;
       try{
         const rr=await readReasonDirect(worker,video);
         if(rr.reason){candidate.ban.reason=rr.reason;candidate.ban.score+=12;candidate.text=(candidate.text||'')+'\nGrund: '+rr.reason;}
       }catch{}
+      onProgress?.(18+Math.round((i+1)/Math.max(1,reasonCandidates.length)*7),`Banngrund Präzisionsprüfung ${i+1}/${reasonCandidates.length}`);
     }
     verified.sort((a,b)=>(Number(!!b.ban.reason)-Number(!!a.ban.reason))||(b.ban.score-a.ban.score)||(b.sharp-a.sharp));
+    onProgress?.(25,verified[0]?.ban?.reason?'Banngrund erkannt':'Ban erkannt · Grund wird verifiziert');
     return verified[0]||best;
   }
     async function analyzeVideo(video,onProgress,originalName='',cancelCheck=()=>false){
@@ -1475,7 +1471,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
     // 1) ALWAYS check the last five seconds first. This is both faster and more reliable
     // for the final ban message used in the Info-Foto.
     onProgress?.(3,'Prüfe die letzten 5 Sekunden…');
-    let anchor=await findVerifiedBanInLastFive(video,cancelCheck);
+    let anchor=await findVerifiedBanInLastFive(video,cancelCheck,(p,m)=>onProgress?.(p,m));
 
     // 2) If the final five seconds do not contain the ban, do a fast full-video candidate
     // scan. For short clips we sample every ~1.5s; for long clips we use a bounded number.
@@ -1613,7 +1609,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
       if(field==='banner'){
         // Only the Bannblock button performs the expensive last-5-second verification.
         // All other info-photo buttons reuse this verified timestamp.
-        const hit=await findVerifiedBanInLastFive(media.video);
+        const hit=await findVerifiedBanInLastFive(media.video,()=>false,()=>{});
         if(hit){
           t=hit.time;
           entry.result=entry.result||{};entry.result.timestamps={...(entry.result.timestamps||{}),banner:t,targetId:t,reason:t};
@@ -1625,7 +1621,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
           renderTitlePreview(); setFieldStatus({result:entry.result});
         }else if(!Number.isFinite(t)) t=Math.max(0,duration-0.4);
       }else if(field==='targetId'||field==='reason'){
-        const hit=await findVerifiedBanInLastFive(media.video);
+        const hit=await findVerifiedBanInLastFive(media.video,()=>false,()=>{});
         if(hit){
           t=hit.time;
           entry.result=entry.result||{}; entry.result.timestamps={...(entry.result.timestamps||{}),banner:t,targetId:t,reason:t};
