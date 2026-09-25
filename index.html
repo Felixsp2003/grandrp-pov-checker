@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=95">
+<link rel="stylesheet" href="styles.css?v=97">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -37,7 +37,7 @@
     <header class="topbar">
       <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V95</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V97</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -55,7 +55,7 @@
         <button class="filter" data-filter="negativ">Negativ <b id="countNeg">0</b></button>
         <button class="filter" data-filter="novideo">Ohne Video <b id="countNoVideo">0</b></button><button class="filter" data-filter="permaarchive">POV Archiv <b id="countPerma">0</b></button>
       </div>
-      <div id="archiveGrid" class="grid"></div>
+      <div class="archive-bulk hidden" id="archiveBulkBar"><strong><span id="archiveSelectedCount">0</span> POVs ausgewählt</strong><div><button type="button" class="ghost mini" id="archiveSelectAll">Alle auswählen</button><button type="button" class="ghost mini" id="archiveClearSelection">Auswahl löschen</button><button type="button" class="pink mini" id="archiveBulkPerma">Ausgewählte ins Archiv</button></div></div><div id="archiveGrid" class="grid"></div>
       <div id="emptyState" class="empty hidden"><div class="empty-icon">⊘</div><h2>Noch keine Einträge</h2><p>Lade mehrere POVs gleichzeitig hoch. Jede Aufnahme wird vollständig eingelesen und erst danach analysiert.</p><button class="pink" id="emptyUploadBtn">POVs hochladen</button></div>
     </section>
 
@@ -71,7 +71,7 @@
             <input type="file" id="fileInput" accept="video/*,.mp4,.mov,.webm,.mkv" multiple hidden>
             <div class="drop-icon">↑</div><h2>POVs hier ablegen</h2><p>Mehrere Aufnahmen gleichzeitig auswählen</p>
             <button class="pink" id="chooseBtn">POVs auswählen</button>
-            <small>YouTube-Upload → Upload 100 % → OCR → Prüfung → finaler Dateiname. „Aus Video auswählen“ öffnet die POV in einem echten Website-Tab statt about:blank.</small>
+            <small>Ergebnis beim Hochladen eintragen → YouTube-Upload → Upload 100 % → OCR → Prüfung → finaler Dateiname. „Aus Video auswählen“ öffnet die POV in einem echten Website-Tab statt about:blank.</small>
           </div>
           <div class="queue-head"><strong>Verarbeitungswarteschlange</strong><span><span id="queueCount">0 Dateien</span> · „Nächste POV“ speichert den aktuellen Fall ins Archiv und öffnet den nächsten.</span></div>
           <div id="uploadQueue" class="upload-queue"></div>
@@ -95,19 +95,19 @@
         <button class="ghost" id="csvFilterClear">Filter zurücksetzen</button>
       </div>
       <div class="csv-summary" id="csvSummary"></div>
-      <div class="csv-table-wrap"><table class="csv-table"><thead><tr><th>Proof</th><th>Datum</th><th>ID</th><th>SOC</th><th>RID</th><th>Discord ID</th><th>Familie</th><th>Grund</th><th>Admin 1</th><th>Admin 2</th><th>Admin 3</th><th>Admin 4</th><th>Admin 5</th><th>Aktion</th></tr></thead><tbody id="csvPreviewBody"></tbody></table></div>
+      <div class="csv-table-wrap"><table class="csv-table"><thead><tr><th>Proof</th><th>Datum</th><th>ID</th><th>SOC</th><th>RID</th><th>Discord ID</th><th>Familie</th><th>Ergebnis</th><th>Grund</th><th>Admin 1</th><th>Admin 2</th><th>Admin 3</th><th>Admin 4</th><th>Admin 5</th><th>Aktion</th></tr></thead><tbody id="csvPreviewBody"></tbody></table></div>
       <div class="empty hidden" id="csvEmpty"><div class="empty-icon">⇩</div><h2>Noch keine CSV-Daten</h2><p>Speichere zuerst vollständig verarbeitete POV-Fälle.</p></div>
     </section>
 
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V95</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V97</span></div>
           <p class="hint">POVs bis 2 Minuten werden vollständig in 250-ms-Schritten durchsucht. Längere Videos werden adaptiv gescannt und bei Treffern verdichtet. Das Info-Foto kommt aus einem verifizierten Bann-Cluster; der Bannblock wird für das Info-Foto bevorzugt in den letzten 5 Sekunden verifiziert. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
           <label>Präzisionsschritt (Sekunden)<input id="refineStep" type="number" min="0.4" max="1" step="0.1" value="0.5"></label>
-          <div class="setting-note">V95: Ergebnis-Feld + exakte ACP-Gründe + CSV-Bearbeitung + Archiv-Vorschauen + POV Archiv + Adaptive YouTube-Statusabfrage + 3 YouTube-Verbindungen + BannGrund wird nach erkannter Ziel-ID direkt aus dem Grand-RP-Adminpanel übernommen (2,5 s Ladezeit); einheitlicher kompletter Chat-ROI links oben, Priorität auf den letzten 5 Sekunden, strikter Bannblock mit Adam Byers [15340], Datum automatisch aus dem Dateinamen, SC ausschließlich über ACP/Chrome. </div>
+          <div class="setting-note">V94: Adaptive YouTube-Statusabfrage + 3 YouTube-Verbindungen + BannGrund wird nach erkannter Ziel-ID direkt aus dem Grand-RP-Adminpanel übernommen (2,5 s Ladezeit); einheitlicher kompletter Chat-ROI links oben, Priorität auf den letzten 5 Sekunden, strikter Bannblock mit Adam Byers [15340], Datum automatisch aus dem Dateinamen, SC ausschließlich über ACP/Chrome. </div>
         </div>
         <div class="settings-card yt-settings-card">
           <div class="card-title">YouTube-Verbindungen <span class="badge">3 Slots</span></div>
@@ -159,7 +159,7 @@
   <form id="entryForm">
     <div class="form-grid">
       <div class="field"><label>Ziel-ID</label><input id="targetId" inputmode="numeric" maxlength="6" placeholder="max. 6 Ziffern"><button type="button" class="jump hidden" data-field="targetId">POV hier öffnen</button></div>
-      <div class="field"><label>Ergebnis</label><input id="result" placeholder="Ergebnis manuell eintragen" autocomplete="off"><div class="field-note">Dieses Feld wird beim Hochladen manuell eingetragen und beim Speichern dauerhaft im Fall gespeichert.</div></div>
+      <div class="field"><label>Ergebnis</label><input id="result" placeholder="Ergebnis manuell eintragen" autocomplete="off"><div class="field-note">Beim Hochladen eintragen. Bei Verweigerung/Trolling automatisch. Bei Positiv beim Prüfen selbst eintragen.</div></div>
       <div class="field"><label>Grund</label><select id="reason"><option value="">Bitte wählen</option><option>PC-Check Verweigerung</option><option>PC-Check Verweigerung - Trolling</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv - Cleaning</option><option>Event 1.7 (NoPov in PC Check)</option><option>PC Check Positiv (Banevading)</option><option>PC Check Positiv (Covering Cheater)</option><option>Cheater</option><option>Acc 1.4 (Twink)</option><option>Acc 1.4 (Main)</option></select><button type="button" class="jump hidden" data-field="reason">Grund manuell auswählen</button><div id="reasonStatus" class="acp-status warn">BannGrund wird im roten Adminpanel-Bereich geladen; bei fehlendem SC zuerst SC holen, danach Character-Info öffnen.</div><div class="field-note">Der Ablauf ist zweistufig: zuerst SC aus Authorization holen und Tab schließen, danach Character-Info erneut öffnen und den roten BannGrund auslesen. 2,5 Sekunden Ladezeit vor dem Auslesen.</div></div>
       <div class="field"><label>SOC / SC aus Adminpanel</label><input id="sc" maxlength="40" placeholder="SC wird aus dem Chrome-Adminpanel übernommen"><div class="acp-actions"><button type="button" class="pink mini" id="fetchAcpSc">SC aus ACP holen</button><button type="button" class="ghost mini" id="copyAcpSc">SC kopieren</button></div><div id="acpStatus" class="acp-status warn">SC fehlt · über ACP holen</div></div>
       <div class="field"><label>Server</label><input id="server" value="3" readonly><div class="field-note">Fest: DE03</div></div>
@@ -196,6 +196,6 @@
   });
 })();
 </script>
-<script src="app.js?v=95"></script>
+<script src="app.js?v=97"></script>
 </body>
 </html>
