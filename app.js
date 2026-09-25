@@ -1228,7 +1228,7 @@
       if(sel){if(sel.checked)state.archiveSelected.add(sel.dataset.archiveSelect);else state.archiveSelected.delete(sel.dataset.archiveSelect);const c=$('#archiveSelectedCount');if(c)c.textContent=String(state.archiveSelected.size);return;}
       const b=ev.target.closest('button[data-action]');if(!b)return;const id=b.dataset.id;const e=state.entries.find(x=>x.id===id);if(!e)return;const action=b.dataset.action;
       if(action==='open'){await openEditorFromEntry(e,{});}
-      else if(action==='youtube'){if(b.dataset.url)window.open(b.dataset.url,'_blank','noopener,noreferrer');}
+      else if(action==='youtube'){const url=String(b.dataset.url||'').trim();if(!url)return;try{const w=window.open(url,'_blank');if(w){try{w.opener=null;}catch{}}else{window.location.href=url;}}catch(err){console.warn('POV öffnen fehlgeschlagen',err);window.location.href=url;}}
       else if(action==='perma'){
         if(!e.permaArchive){
           e.permaArchive=true;
