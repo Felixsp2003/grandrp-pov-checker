@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V96
+/* Grand RP DC Checker V100
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V99';
+  const BUILD='V100';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -877,15 +877,19 @@
   }
   async function clearDB(){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
   function showView(v,persist=true){if(!views[v])v='archive';$$('.view').forEach(x=>x.classList.remove('active'));$('#view-'+v).classList.add('active');$$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));$('#pageTitle').textContent=views[v][0];$('#pageSubtitle').textContent=views[v][1];if(persist)try{sessionStorage.setItem('grandrp_current_view',v);localStorage.setItem('grandrp_current_view',v);}catch{}if(v==='archive')renderArchive();if(v==='cases')renderCases();if(v==='csv')renderCsv();}
-  function updateCounts(){const all=state.entries;const normal=all.filter(e=>!e.permaArchive);const count=k=>normal.filter(e=>e.types?.includes(k)).length;$('#countAll').textContent=normal.length;$('#countBan').textContent=normal.filter(e=>!e.notBanned).length;$('#countPc').textContent=count('pccheck');$('#countSoc').textContent=count('socban');$('#countHard').textContent=count('hardban');$('#countCheat').textContent=count('cheater');$('#countNeg').textContent=count('negativ');$('#countNoVideo').textContent=normal.filter(e=>!e.videoStored).length;$('#countPerma').textContent=all.filter(e=>e.permaArchive).length;}
+  function duplicateIdMap(entries=state.entries){const map=new Map();for(const e of entries){const id=String(e?.targetId||'').trim();if(/^\d{1,6}$/.test(id))map.set(id,(map.get(id)||0)+1);}return map;}
+  function duplicateIdCount(entries=state.entries){let n=0;for(const count of duplicateIdMap(entries).values())if(count>1)n++;return n;}
+  function isDuplicateId(entry){const id=String(entry?.targetId||'').trim();return /^\d{1,6}$/.test(id)&&Number(duplicateIdMap().get(id)||0)>1;}
+  function updateCounts(){const all=state.entries;const normal=all.filter(e=>!e.permaArchive);const count=k=>normal.filter(e=>e.types?.includes(k)).length;$('#countAll').textContent=normal.length;$('#countBan').textContent=normal.filter(e=>!e.notBanned).length;$('#countPc').textContent=count('pccheck');$('#countSoc').textContent=count('socban');$('#countHard').textContent=count('hardban');$('#countCheat').textContent=count('cheater');$('#countNeg').textContent=count('negativ');$('#countNoVideo').textContent=normal.filter(e=>!e.videoStored).length;$('#countPerma').textContent=all.filter(e=>e.permaArchive).length;if($('#countDuplicates'))$('#countDuplicates').textContent=String(duplicateIdCount(all));}
   function renderArchive(){
     updateCounts();
     const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;
     const list=state.entries.filter(e=>{
       if(filter==='permaarchive' && !e.permaArchive)return false;
       if(filter==='all' && e.permaArchive)return false;
+      if(filter==='duplicates' && !isDuplicateId(e))return false;
       if(filter==='ban'&&e.notBanned)return false;
-      if(filter!=='all'&&filter!=='permaarchive'&&filter!=='ban'&&!e.types?.includes(filter))return false;
+      if(filter!=='all'&&filter!=='permaarchive'&&filter!=='ban'&&filter!=='duplicates'&&!e.types?.includes(filter))return false;
       if(filter==='novideo'&&e.videoStored)return false;
       if(!q)return true;
       return [e.targetId,e.sc,e.reason,e.manualResult,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));
@@ -893,7 +897,7 @@
     state.archiveSelected=new Set([...state.archiveSelected].filter(id=>list.some(e=>e.id===id)));
     const bulk=$('#archiveBulkBar');if(bulk){bulk.classList.toggle('hidden',!list.length);const c=$('#archiveSelectedCount');if(c)c.textContent=String(state.archiveSelected.size);}
     const grid=$('#archiveGrid');
-    grid.innerHTML=list.map(e=>`<article class="card"><div class="thumb archive-thumb" data-thumb-id="${esc(e.id)}">${e.videoStored?`<img alt="POV Vorschau" loading="lazy" data-thumb-id="${esc(e.id)}">`:'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(String(e.id).slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span>${e.permaArchive?'<span class="pill perma-tag">POV ARCHIV</span>':''}</div><div class="card-body"><div class="card-title">${esc(e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div class="rid-cell"><span>SOC</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(formatDateDE(e.date)||'')}</div>${e.sourceSize?`<div><span>Dateigröße</span>${esc(formatSize(e.sourceSize))}<small class="size-bytes">${esc(formatBytesExact(e.sourceSize))}</small></div>`:''}<div><span>Ergebnis</span>${esc(e.manualResult||'')}</div><div><span>Grund</span>${esc(e.reason||'')}</div></div></div><div class="card-actions"><label class="archive-select"><input type="checkbox" data-archive-select="${esc(e.id)}" ${state.archiveSelected.has(e.id)?'checked':''}><span>Auswählen</span></label><button type="button" class="mini" data-action="open" data-id="${esc(e.id)}">Prüfen</button>${e.youtube?.url||e.proof?`<button type="button" class="mini primary" data-action="youtube" data-url="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}<button type="button" class="mini ${e.permaArchive?'danger':''}" data-action="perma" data-id="${esc(e.id)}">${e.permaArchive?'Aus Archiv':'POV-Archiv'}</button><button type="button" class="mini danger" data-action="delete" data-id="${esc(e.id)}">Löschen</button></div></article>`).join('');
+    grid.innerHTML=list.map(e=>{const duplicate=isDuplicateId(e);return `<article class="card ${duplicate?'duplicate-id':''}"><div class="thumb archive-thumb" data-thumb-id="${esc(e.id)}">${e.videoStored?`<img alt="POV Vorschau" loading="lazy" data-thumb-id="${esc(e.id)}">`:'OHNE VIDEO'}</div><div class="card-top"><span class="pill">#${esc(String(e.id).slice(-6))}</span><span class="pill ${e.complete?'good':'warn'}">${e.complete?'Vollständig':'Prüfen'}</span>${duplicate?'<span class="pill duplicate-tag">DOPPELTE ID</span>':''}${e.permaArchive?'<span class="pill perma-tag">POV ARCHIV</span>':''}</div><div class="card-body"><div class="card-title">${esc(e.reason||'Unbekannter Grund')}</div><div class="meta"><div><span>ID</span>${esc(e.targetId||'')}</div><div class="rid-cell"><span>SOC</span>${esc(e.sc||'')}</div><div><span>Server</span>${esc(e.server||'')}</div><div><span>Datum</span>${esc(formatDateDE(e.date)||'')}</div>${e.sourceSize?`<div><span>Dateigröße</span>${esc(formatSize(e.sourceSize))}<small class="size-bytes">${esc(formatBytesExact(e.sourceSize))}</small></div>`:''}<div><span>Ergebnis</span>${esc(e.manualResult||'')}</div><div><span>Grund</span>${esc(e.reason||'')}</div></div></div><div class="card-actions"><label class="archive-select"><input type="checkbox" data-archive-select="${esc(e.id)}" ${state.archiveSelected.has(e.id)?'checked':''}><span>Auswählen</span></label><button type="button" class="mini" data-action="open" data-id="${esc(e.id)}">Prüfen</button>${e.youtube?.url||e.proof?`<button type="button" class="mini primary" data-action="youtube" data-url="${esc(e.youtube?.url||e.proof)}">POV öffnen</button>`:''}<button type="button" class="mini ${e.permaArchive?'danger':''}" data-action="perma" data-id="${esc(e.id)}">${e.permaArchive?'Aus Archiv':'POV-Archiv'}</button><button type="button" class="mini danger" data-action="delete" data-id="${esc(e.id)}">Löschen</button></div></article>`}).join('');
     $('#emptyState').classList.toggle('hidden',list.length>0);
     void hydrateArchiveThumbnails(list);
     grid.onclick=async ev=>{
@@ -1802,6 +1806,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
       if(!wasEditing){
         state.editing={item};
         setEditorValues({...item.result,proof:item.result?.proof||item.youtube?.url||''});
+        maybeAskPermaForQueueItem(item,item.result?.reason||'');
         state.selectedTypes=new Set(item.result?.types||[]);
         $$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));
       }
@@ -1923,6 +1928,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
     toast('SC aus Adminpanel übernommen. SOC wird damit gefüllt.');
     return true;
   }
+  function maybeAskPermaForQueueItem(item,reason){const r=String(reason||'').trim();if(!item||r!=='PC-Check Verweigerung'||item.permaQuestionAsked)return;if(item.result?.perma===true)return;item.permaQuestionAsked=true;const answer=window.confirm('PC-Check Verweigerung: Soll dieser Fall als Permabann markiert werden?');$('#perma').checked=answer;item.perma=answer;item.result={...(item.result||{}),perma:answer};scheduleQueuePersist();}
   function setReasonValueFromAcp(reason,characterId){
     const raw=String(reason||'').replace(/\s+/g,' ').trim();
     if(!raw)return false;
@@ -1934,7 +1940,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
     if(allowed)$('#reason').value=canonical;
     if(allowed)applyAutomaticResultForReason(canonical,true);
     if(allowed && state.editing?.item)syncEditorDraftToQueueItem();
-    applyReasonPermaPolicy(canonical,false);
+    if(canonical==='PC-Check Verweigerung' && state.editing?.item){maybeAskPermaForQueueItem(state.editing.item,canonical);}else{applyReasonPermaPolicy(canonical,false);}
     renderTitlePreview();
     const ctx=state.editing;
     if(ctx?.item){ctx.item.result={...(ctx.item.result||{}),reason:canonical};ctx.item.reason=canonical;scheduleQueuePersist();}

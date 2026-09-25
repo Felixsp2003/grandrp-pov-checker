@@ -56,3 +56,6 @@ button,select,input,textarea,.nav-item,.chip,.filter,.switch{ -webkit-user-selec
 .card-actions .mini{max-width:100%;white-space:nowrap}
 .archive-select span{white-space:nowrap}
 @media(max-width:620px){.card-actions .archive-select{width:100%;margin-right:0}.card-actions .mini{flex:1 1 auto}}
+
+/* V100 duplicate-ID archive view */
+.card.duplicate-id{border-color:#7a3150;box-shadow:0 0 0 1px rgba(255,72,142,.10) inset}.duplicate-tag{color:#ff9bbc!important;border-color:#7a3150!important;background:#25101b!important}.duplicate-filter{border-color:#5f2944}

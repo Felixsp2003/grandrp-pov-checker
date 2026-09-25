@@ -1,1 +1,1 @@
-Grand RP DC Checker V99 + ACP Bridge V93. Adminpanel wird als neuer Tab geöffnet; Prüf-Fenster hat direkten Löschen-Button.
+Grand RP DC Checker V100. PC-Check Verweigerung fragt bei neuen Warteschlangen-Fällen nach Perma. Archiv markiert doppelte Ziel-IDs und bietet einen eigenen Doppelte-IDs-Tab. ACP V93 unverändert.
