@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V114
+/* Grand RP DC Checker V116
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V115';
+  const BUILD='V116';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -705,8 +705,8 @@
   const META_UPDATED_KEY='grandrp_pov_meta_updated_v1';
   const QUEUE_UPDATED_KEY='grandrp_pov_queue_updated_v1';
   const ARCHIVE_BACKUP_KEY='grandrp_archive_emergency_backup_v1';
-  const PENDING_BACKUP_KEY='grandrp_pending_backup_v115';
-  const DIRECT_RESTORE_KEY='grandrp_direct_restore_v115';
+  const PENDING_BACKUP_KEY='grandrp_pending_backup_v116';
+  const DIRECT_RESTORE_KEY='grandrp_direct_restore_v116';
   const ARCHIVE_SNAPSHOT_PREFIX='__grandrp_archive_snapshot_v106__';
   const ARCHIVE_ENTRY_PREFIX='__grandrp_archive_entry_v106__';
   const DESTRUCTIVE_TOKEN=Object.freeze({name:'explicit-user-delete'});
@@ -2880,54 +2880,67 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     if(!clean.length)throw new Error('Die Backup-Datei enthält keine gültigen Archiv-Einträge.');
     return {parsed,entries:clean};
   }
+  async function forceApplyDirectRestore(options={}){
+    try{
+      const raw=localStorage.getItem(DIRECT_RESTORE_KEY);
+      if(!raw)return 0;
+      const payload=JSON.parse(raw);
+      const clean=sanitizeArchiveEntries(payload?.entries);
+      if(!clean.length)return 0;
+      // A restore is authoritative: use the selected backup as the complete archive.
+      // Do this AFTER normal startup/loading so no older IndexedDB snapshot can replace it.
+      state.entries=clean.map(e=>({...e,file:undefined,videoUrl:undefined}));
+      state.archiveSelected.clear();
+      state.filter='all';
+      if($('#search'))$('#search').value='';
+      const stamp=Number(payload?.updatedAt)||Date.now();
+      localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:5,updatedAt:stamp,entries:state.entries}));
+      localStorage.setItem(META_KEY,JSON.stringify(state.entries));
+      localStorage.setItem(META_UPDATED_KEY,String(stamp));
+      await saveMetaDb(state.entries,Math.max(Date.now(),stamp),false);
+      if(payload?.youtubeConnections)state.ytConnections=normalizeYoutubeConnections(payload.youtubeConnections);
+      if(payload?.settings&&typeof payload.settings==='object')state.settings={...state.settings,...payload.settings};
+      saveYoutubeConnections();
+      void saveDurableAppState();
+      try{renderArchive();}catch(err){console.error('Archiv konnte nach Restore nicht gerendert werden',err);}
+      try{renderCases();}catch(err){console.error('Verdachtsfälle konnten nach Restore nicht gerendert werden',err);}
+      try{renderCsv();}catch(err){console.error('CSV konnte nach Restore nicht gerendert werden',err);}
+      try{renderQueue();}catch(err){console.error('Warteschlange konnte nach Restore nicht gerendert werden',err);}
+      try{showView('archive',false);}catch(err){console.error('Archiv-Ansicht konnte nach Restore nicht geöffnet werden',err);}
+      try{persistCurrentView('archive');}catch{}
+      const status=$('#archiveBackupFileName');
+      if(status && options.showStatus!==false)status.textContent=`✓ Archiv wiederhergestellt · ${state.entries.length} Einträge · ${String(payload?.name||'Backup')}`;
+      return state.entries.length;
+    }catch(err){
+      console.error('Direkter Archiv-Restore fehlgeschlagen',err);
+      throw err;
+    }
+  }
+
   async function restoreArchiveBackup(file){
     try{
       const {parsed,entries:clean}=await parseArchiveBackupFile(file);
       const label=String(file?.name||'Backup');
       const nameEl=$('#archiveBackupFileName');
       if(nameEl)nameEl.textContent=`Lese Backup ein: ${label} …`;
-      // Write the imported file to a dedicated restore slot FIRST. This survives any
-      // startup/save race and is also consumed by loadMeta on the next reload.
       const importStamp=Date.now();
-      const directPayload={version:1,updatedAt:importStamp,name:label,entries:clean};
+      const directPayload={version:2,updatedAt:importStamp,name:label,entries:clean,
+        youtubeConnections:parsed?.youtubeConnections||undefined,
+        settings:parsed?.settings||undefined};
       try{localStorage.setItem(DIRECT_RESTORE_KEY,JSON.stringify(directPayload));}
       catch(err){throw new Error('Das Wiederherstellungs-Backup konnte nicht im Browser gespeichert werden: '+(err?.message||err));}
+      // Force the exact imported archive only after the startup barrier has finished.
+      // This is intentionally awaited so no concurrent load/save can overwrite it.
       try{await archiveReadyPromise;}catch{}
-      const durable=await collectDurableBackupEntries();
-      const byId=new Map(durable.map(e=>[String(e.id),e]));
-      for(const e of clean)byId.set(String(e.id),e);
-      state.entries=[...byId.values()];
-
-      const stamp=Date.now();
-      const safe=sanitizeArchiveEntries(state.entries);
-      try{
-        localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:4,updatedAt:stamp,entries:safe}));
-        localStorage.setItem(META_KEY,JSON.stringify(safe));
-        localStorage.setItem(META_UPDATED_KEY,String(stamp));
-      }catch(err){console.warn('Backup localStorage-Sicherung fehlgeschlagen',err);}
-      if(parsed?.youtubeConnections)state.ytConnections=normalizeYoutubeConnections(parsed.youtubeConnections);
-      if(parsed?.settings&&typeof parsed.settings==='object')state.settings={...state.settings,...parsed.settings};
-      const ok=await saveMetaDb(safe,stamp,false);
-      if(!ok)throw new Error('Das Archiv konnte nicht dauerhaft in IndexedDB gespeichert werden.');
-      saveYoutubeConnections();
-      void saveDurableAppState();
-      try{renderArchive();}catch(err){console.error('Archiv-Anzeige konnte nach Backup nicht aktualisiert werden',err);}
-      try{renderCases();}catch(err){console.error('Verdachtsfälle-Anzeige konnte nach Backup nicht aktualisiert werden',err);}
-      try{renderCsv();}catch(err){console.error('CSV-Anzeige konnte nach Backup nicht aktualisiert werden',err);}
-      try{renderQueue();}catch(err){console.error('Warteschlangen-Anzeige konnte nach Backup nicht aktualisiert werden',err);}
-      try{renderYoutubeConnections();}catch(err){console.error('YouTube-Anzeige konnte nach Backup nicht aktualisiert werden',err);}
-      // Always show the restored archive immediately and remove any active filter/search
-      // that could otherwise make imported entries appear to be missing.
-      state.filter='all';
-      if($('#search'))$('#search').value='';
-      try{showView('archive',true);}catch(err){console.error('Archiv-Ansicht konnte nach Backup nicht geöffnet werden',err);}
-      try{renderArchive();}catch(err){console.error('Archiv-Ansicht konnte nach Backup nicht erneut gerendert werden',err);}
+      const count=await forceApplyDirectRestore({showStatus:false});
+      if(count!==clean.length)throw new Error(`Restore-Prüfung fehlgeschlagen (${count}/${clean.length} Einträge übernommen).`);
       const finalNameEl=$('#archiveBackupFileName');
-      if(finalNameEl)finalNameEl.textContent=`✓ Backup eingelesen: ${label} · ${clean.length} Einträge · Archiv gesamt: ${state.entries.length}`;
-      toast(`Backup eingelesen · ${clean.length} neue/überschriebene Einträge · insgesamt ${state.entries.length}.`);
+      if(finalNameEl)finalNameEl.textContent=`✓ Archiv wiederhergestellt · ${count} Einträge · ${label}`;
+      toast(`Archiv wiederhergestellt · ${count} Einträge.`);
     }catch(err){
       console.error('Archiv-Backup-Wiederherstellung fehlgeschlagen',err);
       toast('Backup konnte nicht wiederhergestellt werden: '+(err?.message||err));
+      const el=$('#archiveBackupFileName');if(el)el.textContent='✕ Wiederherstellung fehlgeschlagen: '+(err?.message||err);
     }
   }
 
@@ -2952,18 +2965,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     renderYoutubeConnections();
     $('#downloadArchiveBackup')?.addEventListener('click',downloadArchiveBackup);
     const backupFile=$('#archiveBackupFile');
-    window.__grandrpBackupReadyListener=true;
-    window.addEventListener('grandrp-backup-file-ready',ev=>{
-      const raw=String(ev.detail?.raw||'');
-      const name=String(ev.detail?.name||'Archiv-Backup.json');
-      if(!raw)return;
-      try{
-        const file=new File([raw],name,{type:'application/json'});
-        void restoreArchiveBackup(file);
-      }catch(err){console.error('Backup-Ereignis konnte nicht verarbeitet werden',err);toast('Backup konnte nicht verarbeitet werden: '+(err?.message||err));}
-      finally{try{if(backupFile)backupFile.value='';}catch{}}
-    });
-    // Expose explicit handlers for debugging and for the native HTML control.
+    // Expose explicit handlers so the native HTML file input can call restore directly.
     window.grandrpRestoreArchiveBackup=restoreArchiveBackup;
     window.grandrpDownloadArchiveBackup=downloadArchiveBackup;
     $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
@@ -3021,7 +3023,9 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     void pumpUploads();
     renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();renderAuthUsers();
     restoreSavedView();
-    if(localStorage.getItem(PENDING_BACKUP_KEY))void processPendingArchiveBackup();
+    // Last startup step: an explicitly selected backup is authoritative and is re-applied
+    // after every normal loader has finished. This prevents stale/empty stores from winning.
+    try{await forceApplyDirectRestore({showStatus:false});}catch(err){console.error('Startup-Restore konnte nicht abgeschlossen werden',err);}
   }
   window.addEventListener('beforeunload' ,()=>{try{const active=document.querySelector('.view.active')?.id?.replace(/^view-/,'');if(active&&views[active])persistCurrentView(active);}catch{};try{persistQueueNow();}catch{};try{saveYoutubeConnections();void saveDurableAppState();}catch{};try{state.worker?.terminate();}catch{};try{state.specialWorker?.terminate();}catch{};try{state.fastWorker?.terminate();}catch{}});
   setupAuthUI();
