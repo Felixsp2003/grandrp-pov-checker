@@ -1,3 +1,3 @@
-Grand RP DC Checker V125
+Grand RP DC Checker V129
 
-Fix: Google Drive OAuth requests only the Drive scope and explicitly sets include_granted_scopes=false, so previously granted YouTube scopes are not bundled into the Drive authorization request. YouTube OAuth remains unchanged. Drive OAuth pending state uses a separate key. ACP V93 is unchanged.
+YouTube/Drive OAuth is now isolated by explicit state prefixes and separate pending/result keys. Both flows use a stable root callback URL. YouTube requests only YouTube scopes; Drive requests only drive.file. ACP V93 unchanged.
