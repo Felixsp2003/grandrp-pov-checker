@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V124
+/* Grand RP DC Checker V126
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V125';
+  const BUILD='V126';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -2652,7 +2652,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
           done(resolve,resp.access_token);
         };
         try{
-          const client=window.google.accounts.oauth2.initTokenClient({client_id:c.clientId,scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl',include_granted_scopes:true,callback,error_callback:(err)=>done(reject,new Error(`Google OAuth konnte nicht erneuert werden: ${err?.message||err?.type||'unbekannter Fehler'}`))});
+          const client=window.google.accounts.oauth2.initTokenClient({client_id:c.clientId,scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl',include_granted_scopes:false,callback,error_callback:(err)=>done(reject,new Error(`Google OAuth konnte nicht erneuert werden: ${err?.message||err?.type||'unbekannter Fehler'}`))});
           state.tokenClient=client;state.activeYoutubeSlot=Number(slot);
           client.requestAccessToken({prompt:silent?'':'consent'});
         }catch(err){done(reject,err instanceof Error?err:new Error(String(err)));}
@@ -2681,7 +2681,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     const pending={slot:Number(slot),clientId:c.clientId,state:stateValue,createdAt:Date.now()};
     localStorage.setItem(YT_OAUTH_PENDING_KEY,JSON.stringify(pending));sessionStorage.setItem(YT_OAUTH_PENDING_KEY,JSON.stringify(pending));
     setYoutubeButton('Google wird geöffnet…',true,slot);showYoutubeHelp('Google-Anmeldung wird geöffnet…','',slot);
-    const params=new URLSearchParams({client_id:c.clientId,redirect_uri:oauthRedirectUri(),response_type:'token',scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl',include_granted_scopes:'true',state:stateValue});
+    const params=new URLSearchParams({client_id:c.clientId,redirect_uri:oauthRedirectUri(),response_type:'token',scope:'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl',include_granted_scopes:'false',state:stateValue});
     params.set('prompt',forceConsent?'consent':'select_account');
     location.assign('https://accounts.google.com/o/oauth2/v2/auth?'+params.toString());
   }
