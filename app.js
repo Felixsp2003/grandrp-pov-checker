@@ -705,15 +705,31 @@
   const META_UPDATED_KEY='grandrp_pov_meta_updated_v1';
   const QUEUE_UPDATED_KEY='grandrp_pov_queue_updated_v1';
   const ARCHIVE_BACKUP_KEY='grandrp_archive_emergency_backup_v1';
-  const PENDING_BACKUP_KEY='grandrp_pending_backup_v116';
-  const DIRECT_RESTORE_KEY='grandrp_direct_restore_v116';
+  const PENDING_BACKUP_KEY='grandrp_pending_backup_v117';
+  const DIRECT_RESTORE_KEY='grandrp_direct_restore_v117';
+  const LEGACY_DIRECT_RESTORE_KEY='grandrp_direct_restore_v116';
   const ARCHIVE_SNAPSHOT_PREFIX='__grandrp_archive_snapshot_v106__';
   const ARCHIVE_ENTRY_PREFIX='__grandrp_archive_entry_v106__';
   const DESTRUCTIVE_TOKEN=Object.freeze({name:'explicit-user-delete'});
   const ARCHIVE_SNAPSHOT_COUNT=20;
   let queuePersistTimer=0;
+  let archiveRestoreInProgress=false;
   function sanitizeArchiveEntries(entries){
     return (Array.isArray(entries)?entries:[]).filter(e=>e&&e.id).map(e=>({...e,file:undefined,videoUrl:undefined}));
+  }
+  function readDirectRestorePayload(){
+    const candidates=[];
+    for(const key of [DIRECT_RESTORE_KEY,LEGACY_DIRECT_RESTORE_KEY]){
+      try{
+        const raw=localStorage.getItem(key);
+        if(!raw)continue;
+        const payload=JSON.parse(raw);
+        const entries=sanitizeArchiveEntries(payload?.entries);
+        if(entries.length)candidates.push({key,payload:{...payload,entries},updatedAt:Number(payload?.updatedAt)||0});
+      }catch{}
+    }
+    candidates.sort((a,b)=>b.updatedAt-a.updatedAt);
+    return candidates[0]?.payload||null;
   }
   async function getArchiveSnapshotsDb(){
     try{
@@ -902,13 +918,13 @@
   async function requestPersistentStorage(){try{if(navigator.storage?.persist)await navigator.storage.persist();const persisted=await navigator.storage?.persisted?.();const el=$('#persistentStorageStatus');if(el){el.textContent=persisted?'● Dauerhafter Browser-Speicher aktiv':'● Browser-Speicher nicht garantiert';el.className='connection '+(persisted?'good':'warn');}return !!persisted;}catch{const el=$('#persistentStorageStatus');if(el){el.textContent='● Browser-Speicherstatus nicht verfügbar';el.className='connection warn';}return false;}}
   async function loadMeta(){
     const candidates=[];
-    // A direct restore record is the highest-priority source. It is written BEFORE any
-    // application-side work so a restore cannot be lost to a race with normal startup.
+    // An explicit restore is isolated from normal startup. If a user has just selected
+    // a backup, do not allow a concurrent load to replace it with an older store.
+    if(archiveRestoreInProgress)return;
     try{
-      const directRaw=localStorage.getItem(DIRECT_RESTORE_KEY);
-      if(directRaw){
-        const direct=JSON.parse(directRaw);
-        const directEntries=sanitizeArchiveEntries(direct?.entries);
+      const direct=readDirectRestorePayload();
+      if(direct){
+        const directEntries=sanitizeArchiveEntries(direct.entries);
         if(directEntries.length)candidates.push({entries:directEntries,updatedAt:Number(direct.updatedAt)||Date.now(),source:'DIRECT-RESTORE'});
       }
     }catch(err){console.warn('Direkter Archiv-Restore konnte nicht gelesen werden',err);}
@@ -935,6 +951,12 @@
     // Merge durable sources by ID. A direct restore has explicit precedence so an imported
     // entry cannot be replaced by an older/stale IndexedDB or localStorage copy. Empty sources
     // are ignored and can never wipe a valid archive.
+    if(archiveRestoreInProgress)return;
+    const directNow=readDirectRestorePayload();
+    if(directNow?.entries?.length){
+      const directEntries=sanitizeArchiveEntries(directNow.entries);
+      candidates.push({entries:directEntries,updatedAt:Number(directNow.updatedAt)||Date.now(),source:'DIRECT-RESTORE'});
+    }
     const nonEmpty=candidates.filter(c=>Array.isArray(c.entries)&&c.entries.length);
     nonEmpty.sort((a,b)=>{
       const ap=a.source==='DIRECT-RESTORE'?1:0, bp=b.source==='DIRECT-RESTORE'?1:0;
@@ -2882,9 +2904,8 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   }
   async function forceApplyDirectRestore(options={}){
     try{
-      const raw=localStorage.getItem(DIRECT_RESTORE_KEY);
-      if(!raw)return 0;
-      const payload=JSON.parse(raw);
+      const payload=readDirectRestorePayload();
+      if(!payload)return 0;
       const clean=sanitizeArchiveEntries(payload?.entries);
       if(!clean.length)return 0;
       // A restore is authoritative: use the selected backup as the complete archive.
@@ -2918,22 +2939,38 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   }
 
   async function restoreArchiveBackup(file){
+    if(archiveRestoreInProgress)return;
+    archiveRestoreInProgress=true;
     try{
       const {parsed,entries:clean}=await parseArchiveBackupFile(file);
       const label=String(file?.name||'Backup');
       const nameEl=$('#archiveBackupFileName');
-      if(nameEl)nameEl.textContent=`Lese Backup ein: ${label} …`;
+      if(nameEl)nameEl.textContent=`Backup wird übernommen: ${label} · ${clean.length} Einträge …`;
       const importStamp=Date.now();
-      const directPayload={version:2,updatedAt:importStamp,name:label,entries:clean,
+      const directPayload={version:3,updatedAt:importStamp,name:label,entries:clean,
         youtubeConnections:parsed?.youtubeConnections||undefined,
         settings:parsed?.settings||undefined};
-      try{localStorage.setItem(DIRECT_RESTORE_KEY,JSON.stringify(directPayload));}
-      catch(err){throw new Error('Das Wiederherstellungs-Backup konnte nicht im Browser gespeichert werden: '+(err?.message||err));}
-      // Force the exact imported archive only after the startup barrier has finished.
-      // This is intentionally awaited so no concurrent load/save can overwrite it.
-      try{await archiveReadyPromise;}catch{}
+      // Write the authoritative restore record first. It survives reloads and protects the
+      // imported archive against concurrent startup reads of stale IndexedDB/localStorage.
+      localStorage.setItem(DIRECT_RESTORE_KEY,JSON.stringify(directPayload));
+      localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:6,updatedAt:importStamp,entries:clean}));
+      // Apply immediately; never wait for archiveReadyPromise because that promise may still
+      // be resolving in parallel with the file-input change event.
       const count=await forceApplyDirectRestore({showStatus:false});
       if(count!==clean.length)throw new Error(`Restore-Prüfung fehlgeschlagen (${count}/${clean.length} Einträge übernommen).`);
+      // Make the UI authoritative as well: clear filters/search and render the exact imported
+      // list after persistence has completed.
+      state.entries=clean.map(e=>({...e,file:undefined,videoUrl:undefined}));
+      state.filter='all';
+      state.archiveSelected.clear();
+      if($('#search'))$('#search').value='';
+      if($('#archiveGrid'))renderArchive();
+      if($('#emptyState'))$('#emptyState').classList.add('hidden');
+      renderCases();
+      renderCsv();
+      renderQueue();
+      showView('archive',false);
+      persistCurrentView('archive');
       const finalNameEl=$('#archiveBackupFileName');
       if(finalNameEl)finalNameEl.textContent=`✓ Archiv wiederhergestellt · ${count} Einträge · ${label}`;
       toast(`Archiv wiederhergestellt · ${count} Einträge.`);
@@ -2941,6 +2978,8 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       console.error('Archiv-Backup-Wiederherstellung fehlgeschlagen',err);
       toast('Backup konnte nicht wiederhergestellt werden: '+(err?.message||err));
       const el=$('#archiveBackupFileName');if(el)el.textContent='✕ Wiederherstellung fehlgeschlagen: '+(err?.message||err);
+    }finally{
+      archiveRestoreInProgress=false;
     }
   }
 

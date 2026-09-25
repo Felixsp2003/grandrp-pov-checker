@@ -39,3 +39,6 @@ V115: Native Backup-Import mit lokaler Pending-Sicherung; Wiederherstellung setz
 
 
 V115: Backup-Import uses a dedicated direct-restore record with priority on startup; after import, filters are reset and the Archive view is opened automatically. ACP remains V93.
+
+
+V117: Archiv-Backup-Import ist sofort autoritativ, läuft nicht mehr gegen archiveReadyPromise und ist gegen paralleles loadMeta gesperrt.
