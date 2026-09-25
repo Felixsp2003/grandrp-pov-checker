@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V90
+/* Grand RP DC Checker V92
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V91';
+  const BUILD='V92';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -1000,7 +1000,20 @@
       renderQueue();
     }
   }
-  function renderQueue(){scheduleQueuePersist();const q=$('#uploadQueue');$('#queueCount').textContent=`${state.queue.length} ${state.queue.length===1?'Datei':'Dateien'}`;q.innerHTML=state.queue.map(item=>{const hasError=/^Fehler:/i.test(item.status||'');const retry=(!item.uploading&&!item.ocrProcessing&&((!!item.youtube&&!item.result)||hasError));const label=item.youtube?'OCR erneut':'Erneut hochladen';return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(item.finalName||item.file.name)}</strong><small>${formatSize(item.file.size)} · ${esc(item.status)}</small><div class="progress"><i style="width:${item.progress}%"></i></div></div><div class="queue-actions">${item.result?`<button class="mini" data-check="${item.id}">Prüfen</button><button class="mini primary" data-next="${item.id}">Nächste POV</button>`:''}${retry?`<button class="mini primary" data-retry="${item.id}">${label}</button>`:''}<button class="mini" data-remove="${item.id}">×</button></div></div>`}).join('');$$('[data-check]').forEach(b=>b.onclick=()=>{const x=state.queue.find(i=>i.id===b.dataset.check);if(x?.result)openEditor(x);});$$('[data-next]').forEach(b=>b.onclick=async()=>{await nextQueueItem(b.dataset.next);});$$('[data-retry]').forEach(b=>b.onclick=async()=>{const x=state.queue.find(i=>i.id===b.dataset.retry);if(x)await retryQueueItem(x);});$$('[data-remove]').forEach(b=>b.onclick=async()=>{const x=state.queue.find(i=>i.id===b.dataset.remove);if(!x)return;if(x.uploading){toast('YouTube-Upload läuft noch.');return;}x.cancelled=true;x.editingDone=true;x.ocrProcessing=false;x.processing=false;try{await delVideo(x.id);}catch{}state.queue=state.queue.filter(i=>i.id!==b.dataset.remove);renderQueue();toast('POV aus der Warteschlange entfernt. OCR wurde gestoppt.');});}
+  function renderQueue(){
+    scheduleQueuePersist();
+    const q=$('#uploadQueue');
+    $('#queueCount').textContent=`${state.queue.length} ${state.queue.length===1?'Datei':'Dateien'}`;
+    q.innerHTML=state.queue.map(item=>{
+      const hasError=/^Fehler:/i.test(item.status||'');
+      const retry=(!item.uploading&&!item.ocrProcessing&&((!!item.youtube&&!item.result)||hasError));
+      const label=item.youtube?'OCR erneut':'Erneut hochladen';
+      const canAct=!item.uploading&&(!item.processing||!!item.result)&&(!item.ocrProcessing||!!item.result);
+      return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(item.finalName||item.file?.name||'POV')}</strong><small>${formatSize(item.file?.size||item.sourceSize||0)} · ${esc(item.status||'')}</small><div class="progress"><i style="width:${item.progress||0}%"></i></div></div><div class="queue-actions"><button type="button" class="mini" data-check="${esc(item.id)}" ${canAct?'':'disabled'}>${item.result?'Prüfen':'Öffnen'}</button>${item.result?`<button type="button" class="mini primary" data-next="${esc(item.id)}" ${canAct?'':'disabled'}>Nächste POV</button>`:''}${retry?`<button type="button" class="mini primary" data-retry="${esc(item.id)}">${label}</button>`:''}<button type="button" class="mini" data-remove="${esc(item.id)}" ${item.uploading?'disabled':''}>×</button></div></div>`;
+    }).join('');
+    $$('[data-remove]').forEach(b=>b.onclick=async e=>{e.preventDefault();e.stopPropagation();const x=state.queue.find(i=>i.id===b.dataset.remove);if(!x)return;if(x.uploading){toast('YouTube-Upload läuft noch.');return;}x.cancelled=true;x.editingDone=true;x.ocrProcessing=false;x.processing=false;try{await delVideo(x.id);}catch{}state.queue=state.queue.filter(i=>i.id!==b.dataset.remove);scheduleQueuePersist();renderQueue();toast('POV aus der Warteschlange entfernt. OCR wurde gestoppt.');});
+  }
+
   async function retryLocalOCR(item){
     if(item.processing||item.cancelled)return;
     item.processing=true;item.status='OCR wird erneut gestartet…';item.progress=60;renderQueue();
@@ -1648,7 +1661,25 @@
     const date=formatDateDE($('#date').value);
     $('#titlePreview').value=(id&&reason&&date)?`${id}, ${reason}, ${date}.mp4`:'';
   }
-  function openEditor(item){state.editing={item};$('#modalFile').textContent=item.finalName||item.file.name;setEditorValues({...item.result,proof:item.result?.proof||'',perma:!!item.result?.perma,permaArchive:!!item.result?.permaArchive,notBanned:!!item.result?.notBanned});state.selectedTypes=new Set(item.result?.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus(item);$('#editorModal').classList.remove('hidden');loadEditorPreview(item.file,item.result?.timestamps?.banner||0);showInfoPhoto('banner');renderAcpStatus(item.result?.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',item.result?.sc?'ok':'warn');if(!item.result?.sc&&/^\d{1,6}$/.test(item.result?.targetId||'')){setTimeout(()=>{try{openAcpForCurrentId();}catch{}},350);}if(/^\d{1,6}$/.test(item.result?.targetId||'')){setTimeout(()=>{try{openAcpReasonForCurrentId();}catch{}},450);}}
+  async function openEditor(item){
+    if(!item)return;
+    try{
+      if(!item.file)item.file=await getVideo(item.id);
+      if(!item.file){toast('POV-Datei ist nicht mehr verfügbar.');return;}
+      state.editing={item};
+      $('#modalFile').textContent=item.finalName||item.file.name;
+      setEditorValues({...item.result,proof:item.result?.proof||'',perma:!!item.result?.perma,permaArchive:!!item.result?.permaArchive,notBanned:!!item.result?.notBanned});
+      state.selectedTypes=new Set(item.result?.types||[]);
+      $$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));
+      setFieldStatus(item);
+      $('#editorModal').classList.remove('hidden');
+      loadEditorPreview(item.file,item.result?.timestamps?.banner||0);
+      showInfoPhoto('banner');
+      renderAcpStatus(item.result?.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',item.result?.sc?'ok':'warn');
+      if(!item.result?.sc&&/^\d{1,6}$/.test(item.result?.targetId||''))setTimeout(()=>{try{openAcpForCurrentId();}catch{}},350);
+      if(/^\d{1,6}$/.test(item.result?.targetId||''))setTimeout(()=>{try{openAcpReasonForCurrentId();}catch{}},350);
+    }catch(err){console.error('Prüfen konnte nicht geöffnet werden',err);toast('POV konnte nicht geöffnet werden: '+(err?.message||err));}
+  }
   async function openEditorFromEntry(entry){const file=entry.file||await getVideo(entry.id);if(file)entry.file=file;state.editing={entry};$('#modalFile').textContent=entry.finalName||entry.originalName;setEditorValues(entry);state.selectedTypes=new Set(entry.types||[]);$$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));setFieldStatus({result:entry});$('#editorModal').classList.remove('hidden');loadEditorPreview(entry.file,entry.timestamps?.banner||0);showInfoPhoto('banner');renderAcpStatus(entry.sc?'✓ SC bereits vorhanden':'SC fehlt · über ACP holen',entry.sc?'ok':'warn');if(/^\d{1,6}$/.test(entry.targetId||'')){setTimeout(()=>{try{openAcpReasonForCurrentId();}catch{}},450);}}
   function closeEditor(){revokeEditorPreview();state.editing=null;$('#editorModal').classList.add('hidden');}
   function syncEditorDraftToQueueItem(){
@@ -1671,28 +1702,22 @@
     if(state.editing?.item?.id===item.id)syncEditorDraftToQueueItem();
     const index=state.queue.findIndex(x=>x.id===item.id);
     const next=state.queue.slice(index+1).find(x=>!x.cancelled&&!x.editingDone&&x.status!=='Gespeichert')||null;
-    if(!item.result){
-      openEditor(item);
-      toast('Diese POV hat noch keine OCR-Ergebnisse. Bitte zuerst prüfen.');
-      return;
-    }
-    // Nächste POV = aktuellen Fall wie beim normalen Speichern abschließen, dauerhaft
-    // ins Archiv übernehmen und erst dann aus der Warteschlange entfernen.
+    if(!item.result){await openEditor(item);toast('Diese POV hat noch keine OCR-Ergebnisse. Bitte zuerst prüfen.');return;}
     try{
       state.editing={item};
-      setEditorValues({...item.result,proof:item.result?.proof||item.youtube?.url||''});
-      state.selectedTypes=new Set(item.result?.types||[]);
-      $$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));
-      const saved=await saveEditor({preventDefault(){}});
+      await openEditor(item);
+      if(state.editing?.item?.id!==item.id)return;
+      syncEditorDraftToQueueItem();
+      const saved=await saveEditor({preventDefault(){}},{allowYoutubeTitlePending:true});
       if(saved && next && isQueueItemAlive(next)){
-        openEditor(next);
-        toast('POV gespeichert. Nächste POV geöffnet.');
+        await openEditor(next);
+        toast('POV archiviert. Nächste POV geöffnet.');
       }else if(saved){
-        toast('POV gespeichert. Keine weitere POV in der Warteschlange.');
+        toast('POV archiviert. Keine weitere POV in der Warteschlange.');
       }
-    }catch(err){console.error(err);toast(err?.message||String(err));}
+    }catch(err){console.error('Nächste POV fehlgeschlagen',err);toast(err?.message||String(err));}
   }
-  async function saveEditor(e){
+  async function saveEditor(e,options={}){
     e.preventDefault(); const ctx=state.editing; if(!ctx)return;
     const targetId=clampId($('#targetId').value), reason=$('#reason').value, sc=normalizeHexLoose($('#sc').value), server=$('#server').value||'3', date=$('#date').value;
     // A manually entered SC is authoritative. Never let an old OCR "offline" flag overwrite it on save.
@@ -1717,12 +1742,16 @@
         record.youtubeTitle=finalName;
       }catch(err){
         console.error(err);
-        if(err?.code==='YT_SCOPE_REQUIRED'){
-          toast('YouTube-Titel braucht einmalig die neue Berechtigung „Berechtigung erneut“.');
-        }else{
-          toast('YouTube-Titel konnte nicht aktualisiert werden: '+(err?.message||err));
+        record.youtubeTitlePending=true;
+        record.youtubeTitleError=String(err?.message||err);
+        if(!options.allowYoutubeTitlePending){
+          if(err?.code==='YT_SCOPE_REQUIRED'){
+            toast('YouTube-Titel braucht einmalig die neue Berechtigung „Berechtigung erneut“.');
+          }else{
+            toast('YouTube-Titel konnte nicht aktualisiert werden: '+(err?.message||err));
+          }
+          throw err;
         }
-        throw err;
       }
     }
     state.entries=[record,...state.entries.filter(x=>x.id!==record.id)];
@@ -1752,12 +1781,14 @@
   window.addEventListener('message',e=>{if(e.data?.type==='grandrp-manual-field'){applyManualField(e.data.field,e.data.value,e.data.time);}});
 
   const ACP_ORIGIN='https://admin.gta5grand.com';
-  const ACP_EXTENSION_TOKEN='grandrp-acp-v86';
+  const ACP_EXTENSION_TOKEN='grandrp-acp-v87';
   let acpWindow=null;
   let acpTimeout=null;
+  let acpNonce='';
   function buildAcpUrl(characterId){
     const id=String(characterId||'').replace(/\D/g,'');
     const nonce=(crypto.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    acpNonce=nonce;
     return `${ACP_ORIGIN}/de/3/logs/authorization?nick=&characterid=${encodeURIComponent(id)}&ip=&socialname=&socialid=&date=&subdate=&grandrpBridge=1&bridgeToken=${encodeURIComponent(nonce)}`;
   }
   function setScValueFromAcp(sc,characterId){
@@ -1772,9 +1803,11 @@
   }
   let acpReasonWindow=null;
   let acpReasonTimeout=null;
+  let acpReasonNonce='';
   function buildAcpReasonUrl(characterId){
     const id=String(characterId||'').replace(/\D/g,'');
     const nonce=(crypto.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    acpReasonNonce=nonce;
     return `${ACP_ORIGIN}/de/3/character/info/${encodeURIComponent(id)}?grandrpBridge=1&bridgeMode=reason&bridgeToken=${encodeURIComponent(nonce)}`;
   }
   function setReasonValueFromAcp(reason,characterId){
@@ -1791,7 +1824,7 @@
       status.textContent=allowed?`✓ BannGrund aus Adminpanel übernommen · ID ${characterId}`:`BannGrund aus Adminpanel gelesen: ${raw}`;
       status.className='acp-status '+(allowed?'ok':'warn');
     }
-    if(allowed) toast(`BannGrund aus Adminpanel übernommen: ${canonical}`);
+    if(allowed){ const ctx=state.editing; if(ctx?.item){ctx.item.result={...(ctx.item.result||{}),reason:canonical};scheduleQueuePersist();} if(ctx?.entry){ctx.entry.reason=canonical;ctx.entry.result={...(ctx.entry.result||{}),reason:canonical};} toast(`BannGrund aus Adminpanel übernommen: ${canonical}`); }
     else toast(`BannGrund gelesen, aber nicht in der erlaubten Grund-Liste: ${raw}`);
     return allowed;
   }
@@ -1825,9 +1858,10 @@
     }catch(err){console.error(err);renderAcpStatus('ACP konnte nicht geöffnet werden.','error');}
   }
   window.addEventListener('message',e=>{
-    if(e.origin!==ACP_ORIGIN || !e.data)return;
+    if((e.origin!==ACP_ORIGIN && e.origin!==location.origin) || !e.data)return;
     if(e.data.type==='GRANDRP_ACP_STATUS'){renderAcpStatus(String(e.data.message||'ACP lädt …'),e.data.kind||'');return;}
     if(e.data.type==='GRANDRP_ACP_SC'){
+      if(acpNonce && e.data.bridgeToken && e.data.bridgeToken!==acpNonce)return;
       const id=String(e.data.characterId||'');
       const sc=String(e.data.socialClub||'');
       clearTimeout(acpTimeout);
@@ -1836,7 +1870,7 @@
       }
     }
     if(e.data.type==='GRANDRP_ACP_ERROR'){clearTimeout(acpTimeout);renderAcpStatus(String(e.data.message||'SC im ACP nicht gefunden · Fenster wird geschlossen.'),'error');toast('ACP konnte den SC für die Ziel-ID nicht finden.');closeAcpWindow();}
-    if(e.data.type==='GRANDRP_ACP_REASON'){const id=String(e.data.characterId||'');const reason=String(e.data.reason||'');clearTimeout(acpReasonTimeout);if(id&&id===clampId($('#targetId')?.value||'')){setReasonValueFromAcp(reason,id);closeAcpReasonWindow();}}
+    if(e.data.type==='GRANDRP_ACP_REASON'){if(acpReasonNonce && e.data.bridgeToken && e.data.bridgeToken!==acpReasonNonce)return;const id=String(e.data.characterId||'');const reason=String(e.data.reason||'');clearTimeout(acpReasonTimeout);if(id&&id===clampId($('#targetId')?.value||'')){setReasonValueFromAcp(reason,id);closeAcpReasonWindow();}}
   });
 
   function rebuildPcCheckerOptions(selected=[]){
@@ -1911,6 +1945,14 @@
       if(!entry){toast('POV-Eintrag nicht verfügbar.');return;}
       await showInfoPhoto(btn.dataset.field);await openManualPicker(entry,btn.dataset.field);
     }));
+    $('#uploadQueue')?.addEventListener('click',e=>{
+      const btn=e.target.closest('button[data-check],button[data-next],button[data-retry]');
+      if(!btn)return;
+      e.preventDefault();e.stopPropagation();
+      if(btn.matches('[data-check]')){const x=state.queue.find(i=>i.id===btn.dataset.check);if(x)void openEditor(x);return;}
+      if(btn.matches('[data-next]')){if(!btn.disabled)void nextQueueItem(btn.dataset.next);return;}
+      if(btn.matches('[data-retry]')){const x=state.queue.find(i=>i.id===btn.dataset.retry);if(x)void retryQueueItem(x);return;}
+    });
   }
 
   function isQueueItemAlive(item){return !!item && !item.cancelled && state.queue.includes(item);}

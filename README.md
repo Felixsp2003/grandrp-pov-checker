@@ -1,11 +1,5 @@
-Grand RP DC Checker V91
+Grand RP DC Checker V92
 
-Webseite V91 mit:
-- 3 separaten YouTube-Verbindungen; leere Slots werden ignoriert.
-- Automatischer Wechsel auf den nächsten verfügbaren YouTube-Slot bei Uploadlimit/Quota.
-- Adaptive YouTube-Verarbeitungsabfrage zur Reduzierung unnötiger videos.list-Anfragen; OCR-Genauigkeit bleibt unverändert.
-- Dauerhafte lokale Speicherung von Warteschlange, Archiv und POV-Dateien über IndexedDB plus localStorage; neuere lokale/DB-Stände werden anhand Zeitstempeln zusammengeführt.
-- „Nächste POV“ in der Verarbeitungswarteschlange: aktueller fertiger Fall wird wie beim normalen Speichern ins Archiv übernommen, aus der Warteschlange entfernt und die nächste POV geöffnet. Fehlende Pflichtangaben verhindern das Entfernen.
-- BannGrund wird nach erkannter Ziel-ID über das Grand-RP-Adminpanel mit 2,5 s Ladezeit geholt.
+Website V92 mit robuster Prüfen-/Nächste-POV-Navigation, dauerhaft gespeicherter Warteschlange, 3 YouTube-Verbindungen, adaptiver YouTube-Statusabfrage und BannGrund-Übernahme aus dem roten Bannbereich des Adminpanels.
 
-ACP-Bridge V86 ist enthalten und entspricht dem bisher verwendeten ACP-Stand.
+ACP Bridge V87 liest SC und BannGrund aus dem Adminpanel und schließt Bridge-Tabs über den Extension-Service-Worker.
