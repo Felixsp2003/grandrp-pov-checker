@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V132
+/* Grand RP DC Checker V133
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V132';
+  const BUILD='V133';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -717,7 +717,8 @@
   const ARCHIVE_AUTHORITATIVE_KEY='grandrp_archive_authoritative_v132';
   // Explicit POV-Archiv placement is stored separately from archive snapshots.
   // This prevents an older snapshot from moving a POV back to the normal list after refresh.
-  const ARCHIVE_PLACEMENT_KEY='grandrp_pov_archive_placement_v132';
+  const ARCHIVE_PLACEMENT_KEY='grandrp_pov_archive_placement_v133';
+  const LEGACY_ARCHIVE_PLACEMENT_KEYS=['grandrp_pov_archive_placement_v132'];
   const PENDING_BACKUP_KEY='grandrp_pending_backup_v122';
   const DIRECT_RESTORE_KEY='grandrp_direct_restore_v122';
   const LEGACY_DIRECT_RESTORE_KEY='grandrp_direct_restore_v118';
@@ -731,23 +732,28 @@
     return (Array.isArray(entries)?entries:[]).filter(e=>e&&e.id).map(e=>({...e,file:undefined,videoUrl:undefined}));
   }
   function readArchivePlacement(){
-    try{
-      const raw=localStorage.getItem(ARCHIVE_PLACEMENT_KEY);
-      const parsed=raw?JSON.parse(raw):{};
-      return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:{};
-    }catch{return {};}
+    const merged={};
+    const keys=[ARCHIVE_PLACEMENT_KEY,...LEGACY_ARCHIVE_PLACEMENT_KEYS];
+    for(const key of keys){
+      try{
+        const raw=localStorage.getItem(key);
+        const parsed=raw?JSON.parse(raw):{};
+        if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed)){
+          for(const [id,value] of Object.entries(parsed)){
+            // POV-Archiv is intentionally sticky. Once true, an older snapshot or a stale
+            // editor state is never allowed to turn it back into a normal entry.
+            if(value===true)merged[String(id)]=true;
+          }
+        }
+      }catch{}
+    }
+    return merged;
   }
   function saveArchivePlacement(entries=state.entries){
     try{
-      const placement={};
+      const placement=readArchivePlacement();
       for(const e of entries||[]){
         if(e?.id && e.permaArchive===true)placement[String(e.id)]=true;
-      }
-      // Keep explicit removals too. Without them an old immutable snapshot can restore a POV
-      // to the archive after the user deliberately selected "Aus Archiv".
-      const current=readArchivePlacement();
-      for(const [id,value] of Object.entries(current)){
-        if(value===false)placement[id]=false;
       }
       localStorage.setItem(ARCHIVE_PLACEMENT_KEY,JSON.stringify(placement));
     }catch(err){console.warn('POV-Archiv-Platzierung konnte nicht gespeichert werden',err);}
@@ -756,9 +762,20 @@
     const placement=readArchivePlacement();
     return (entries||[]).map(e=>{
       const id=String(e?.id||'');
-      if(id && Object.prototype.hasOwnProperty.call(placement,id))return {...e,permaArchive:placement[id]===true};
+      if(id && placement[id]===true)return {...e,permaArchive:true};
       return e;
     });
+  }
+  function rememberArchivePlacementFromSources(candidates){
+    try{
+      const placement=readArchivePlacement();
+      for(const source of candidates||[]){
+        for(const e of source?.entries||[]){
+          if(e?.id && e.permaArchive===true)placement[String(e.id)]=true;
+        }
+      }
+      localStorage.setItem(ARCHIVE_PLACEMENT_KEY,JSON.stringify(placement));
+    }catch(err){console.warn('POV-Archiv-Platzierung konnte nicht konsolidiert werden',err);}
   }
   function readDirectRestorePayload(){
     const candidates=[];
@@ -1022,8 +1039,11 @@
     // Re-apply direct restore last so it wins deterministically for duplicate IDs.
     if(directFirst)for(const e of sanitizeArchiveEntries(directFirst.entries))if(e?.id)mergedById.set(String(e.id),e);
     const recovered=[...mergedById.values()];
+    // Any source that ever recorded a POV as archived is treated as proof of permanent
+    // placement. This repairs older V132 stores where the main index could contain the same
+    // POV with permaArchive:false while the dedicated archive subset still had it.
+    rememberArchivePlacementFromSources(nonEmpty);
     // Explicit archive placement always wins over recovered/older snapshots.
-    // This is the critical persistence layer for the POV-Archiv toggle.
     state.entries=applyArchivePlacement(recovered);
 
     // If anything was recovered, immediately normalize both stores and create a fresh recovery snapshot.
@@ -1210,14 +1230,16 @@
       if(action==='open'){await openEditorFromEntry(e,{});}
       else if(action==='youtube'){if(b.dataset.url)window.open(b.dataset.url,'_blank','noopener,noreferrer');}
       else if(action==='perma'){
-        e.permaArchive=!e.permaArchive;
-        try{
-          const placement=readArchivePlacement();
-          placement[String(e.id)]=!!e.permaArchive;
-          localStorage.setItem(ARCHIVE_PLACEMENT_KEY,JSON.stringify(placement));
-        }catch(err){console.warn('POV-Archiv-Platzierung konnte nicht gespeichert werden',err);}
-        saveMeta();renderArchive();renderCsv();
-        toast(e.permaArchive?'POV ins POV-Archiv verschoben.':'POV aus POV-Archiv entfernt.');
+        if(!e.permaArchive){
+          e.permaArchive=true;
+          try{
+            const placement=readArchivePlacement();
+            placement[String(e.id)]=true;
+            localStorage.setItem(ARCHIVE_PLACEMENT_KEY,JSON.stringify(placement));
+          }catch(err){console.warn('POV-Archiv-Platzierung konnte nicht gespeichert werden',err);}
+          saveMeta();renderArchive();renderCsv();
+          toast('POV ins POV-Archiv verschoben.');
+        }
       }
       else if(action==='delete'){if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?
 
@@ -2271,7 +2293,8 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     const yt=base.youtube||ctx.item?.youtube||ctx.entry?.youtube||null;
     const timestamps={...(base.result?.timestamps||base.timestamps||{})};
     if(!Number.isFinite(Number(timestamps.pcCheck))){const d=Number(base.result?.duration||base.duration||0);if(d>0)timestamps.pcCheck=Math.max(0,Math.min(d/2,Math.max(0,d-.05)));}
-    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,manualResult:resultText,sc:offline?'':sc,server,date,rid:'',types:finalTypes,perma:$('#perma').checked,permaArchive:$('#permaArchive').checked,notBanned:$('#notBanned').checked,documentStatus:$('#documentStatus').value==='eingetragen'?'eingetragen':'nicht eingetragen',pcCheckers:getPcCheckers(),pcCheckerManual:[...pcCheckerCustom],discordId:'',proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',duration:Number(base.result?.duration||base.duration||0)||0,timestamps,infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
+    const stickyArchive=!!base.permaArchive||!!ctx.item?.result?.permaArchive||!!ctx.entry?.permaArchive||!!readArchivePlacement()[String(base.id||'')];
+    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,manualResult:resultText,sc:offline?'':sc,server,date,rid:'',types:finalTypes,perma:$('#perma').checked,permaArchive:stickyArchive||$('#permaArchive').checked,notBanned:$('#notBanned').checked,documentStatus:$('#documentStatus').value==='eingetragen'?'eingetragen':'nicht eingetragen',pcCheckers:getPcCheckers(),pcCheckerManual:[...pcCheckerCustom],discordId:'',proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',duration:Number(base.result?.duration||base.duration||0)||0,timestamps,infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
     await putVideo(record.id,namedFile);
     // YouTube must receive the exact final filename (including .mp4). The title update
     // is completed and verified before the saved POV is finalized in the UI.
