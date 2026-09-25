@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V133
+/* Grand RP DC Checker V134
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V133';
+  const BUILD='V134';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -3177,12 +3177,21 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     try{
       const payload=readDirectRestorePayload();
       if(!payload)return 0;
-      const clean=sanitizeArchiveEntries(payload?.entries);
+      let clean=sanitizeArchiveEntries(payload?.entries);
       if(!clean.length)return 0;
+      // A direct restore is applied after normal startup. It must obey the same sticky
+      // POV-Archiv placement rule; otherwise an older backup can move an archived POV
+      // back into "Alle" only after a full page reload.
+      clean=applyArchivePlacement(clean);
+      rememberArchivePlacementFromSources([{entries:clean}]);
       const activeBefore=document.querySelector('.view.active')?.id?.replace(/^view-/,'');
       // A restore is authoritative: use the selected backup as the complete archive.
       // Do this AFTER normal startup/loading so no older IndexedDB snapshot can replace it.
       state.entries=clean.map(e=>({...e,file:undefined,videoUrl:undefined}));
+      try{
+        const normalized={...payload,updatedAt:Math.max(Number(payload?.updatedAt)||0,Date.now()),entries:sanitizeArchiveEntries(state.entries)};
+        localStorage.setItem(DIRECT_RESTORE_KEY,JSON.stringify(normalized));
+      }catch{}
       try{localStorage.removeItem(LOCAL_CLEAR_MARKER_KEY);}catch{}
       state.archiveSelected.clear();
       state.filter='all';
