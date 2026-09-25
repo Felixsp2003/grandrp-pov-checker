@@ -1,10 +1,5 @@
-Grand RP DC Checker V105
+Grand RP DC Checker V106
 
-Wichtige Änderung: Das Archiv ist gegen versehentliches Überschreiben mit einem leeren Zustand geschützt.
-Archiv-Metadaten werden zusätzlich in mehrere IndexedDB-Recovery-Snapshots geschrieben.
-Beim Start durchsucht die Website auch ältere lokale Archivschlüssel und stellt den neuesten nicht-leeren Datenbestand wieder her.
-Zusätzlich gibt es unter Einstellungen einen manuellen JSON-Backup/Restore für die Archiv-Metadaten.
+Lokale POV-Dateien und Archivdaten werden nicht automatisch gelöscht. Löschungen benötigen eine ausdrücklich bestätigte Benutzeraktion. Archivmetadaten werden zusätzlich append-only in IndexedDB-Recovery-Sätzen gespeichert.
 
-Hinweis: POV-Videodateien selbst bleiben lokal in IndexedDB; das JSON-Backup enthält die Archiv-Metadaten und Verbindungs-/Einstellungsdaten.
-
-ACP v93 is included unchanged.
+Wichtig: Browser-/Profildaten oder das Betriebssystem können lokale Website-Daten außerhalb der App entfernen. Für zusätzliche Sicherheit regelmäßig das integrierte Archiv-Backup herunterladen.

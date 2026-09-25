@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V105
+/* Grand RP DC Checker V106
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V105';
+  const BUILD='V106';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -704,7 +704,9 @@
   const META_UPDATED_KEY='grandrp_pov_meta_updated_v1';
   const QUEUE_UPDATED_KEY='grandrp_pov_queue_updated_v1';
   const ARCHIVE_BACKUP_KEY='grandrp_archive_emergency_backup_v1';
-  const ARCHIVE_SNAPSHOT_PREFIX='__grandrp_archive_snapshot_v105__';
+  const ARCHIVE_SNAPSHOT_PREFIX='__grandrp_archive_snapshot_v106__';
+  const ARCHIVE_ENTRY_PREFIX='__grandrp_archive_entry_v106__';
+  const DESTRUCTIVE_TOKEN=Object.freeze({name:'explicit-user-delete'});
   const ARCHIVE_SNAPSHOT_COUNT=20;
   let queuePersistTimer=0;
   function sanitizeArchiveEntries(entries){
@@ -733,31 +735,54 @@
     }catch{return [];}
   }
   async function trimArchiveSnapshotsDb(){
-    try{
-      const db=await openDB();
-      await new Promise((res,rej)=>{
-        const tx=db.transaction(STORE,'readwrite');
-        const os=tx.objectStore(STORE);const req=os.getAllKeys();
-        req.onsuccess=()=>{
-          const keys=(req.result||[]).filter(k=>String(k).startsWith(ARCHIVE_SNAPSHOT_PREFIX));
-          keys.sort((a,b)=>String(a).localeCompare(String(b)));
-          const remove=keys.slice(0,Math.max(0,keys.length-ARCHIVE_SNAPSHOT_COUNT));
-          for(const k of remove)os.delete(k);
-        };
-        tx.oncomplete=res;tx.onerror=()=>rej(tx.error);
-      });
-    }catch(err){console.warn('Archiv-Snapshots konnten nicht bereinigt werden',err);}
+    // Intentionally disabled: recovery snapshots are never automatically deleted.
+    return true;
   }
   async function getMetaDb(){
     try{
       const db=await openDB();
       return await new Promise((res,rej)=>{
         const tx=db.transaction(STORE,'readonly');
-        const os=tx.objectStore(STORE);const r=os.get(META_DB_KEY);const p=os.get(PERMA_DB_KEY);
-        tx.oncomplete=()=>{
-          const val=r.result;
-          const parsed=Array.isArray(val)?{entries:val,updatedAt:0}:((val&&Array.isArray(val.entries))?{entries:val.entries,updatedAt:Number(val.updatedAt)||0}:{entries:[],updatedAt:0});
-          res({entries:parsed.entries,updatedAt:parsed.updatedAt,perma:Array.isArray(p.result)?p.result:[]});
+        const os=tx.objectStore(STORE);
+        const r=os.get(META_DB_KEY);
+        const p=os.get(PERMA_DB_KEY);
+        const k=os.getAllKeys();
+        const entryKeys=[];
+        k.onsuccess=()=>{
+          for(const key of (k.result||[])){
+            if(String(key).startsWith(ARCHIVE_ENTRY_PREFIX))entryKeys.push(key);
+          }
+        };
+        tx.oncomplete=async()=>{
+          try{
+            const val=r.result;
+            const parsed=Array.isArray(val)?{entries:val,updatedAt:0}:((val&&Array.isArray(val.entries))?{entries:val.entries,updatedAt:Number(val.updatedAt)||0}:{entries:[],updatedAt:0});
+            const main=Array.isArray(parsed.entries)?parsed.entries:[];
+            // Always merge append-only per-entry records with the main index. A damaged or
+            // partial main index must never hide older durable records.
+            if(entryKeys.length){
+              const tx2=db.transaction(STORE,'readonly');
+              const os2=tx2.objectStore(STORE);
+              const recovered=[...main];
+              const byId=new Map(recovered.filter(e=>e&&e.id).map(e=>[String(e.id),e]));
+              let remaining=entryKeys.length;
+              for(const key of entryKeys){
+                const rr=os2.get(key);
+                rr.onsuccess=()=>{
+                  const wrapper=rr.result;
+                  const entry=wrapper?.entry||wrapper;
+                  if(entry&&entry.id&&!byId.has(String(entry.id))){byId.set(String(entry.id),entry);recovered.push(entry);}
+                  if(!--remaining)finish(recovered);
+                };
+                rr.onerror=()=>{if(!--remaining)finish(recovered);};
+              }
+              function finish(rec){
+                res({entries:rec,updatedAt:parsed.updatedAt,perma:Array.isArray(p.result)?p.result:[]});
+              }
+              return;
+            }
+            res({entries:main,updatedAt:parsed.updatedAt,perma:Array.isArray(p.result)?p.result:[]});
+          }catch(err){rej(err);}
         };
         tx.onerror=()=>rej(tx.error);
       });
@@ -772,13 +797,18 @@
       await new Promise((res,rej)=>{
         const tx=db.transaction(STORE,'readwrite');
         const os=tx.objectStore(STORE);
-        // Main archive, perma subset and an immutable recovery snapshot are committed together.
-        os.put({version:3,updatedAt,entries:clean},META_DB_KEY);
+        // Durable main index + perma subset.
+        os.put({version:4,updatedAt,entries:clean},META_DB_KEY);
         os.put(clean.filter(e=>e.permaArchive),PERMA_DB_KEY);
+        // Append-only per-entry records: normal saves NEVER delete or replace other entry records.
+        for(const entry of clean){
+          os.put({version:1,updatedAt,entry},`${ARCHIVE_ENTRY_PREFIX}${entry.id}`);
+        }
+        // Immutable recovery snapshot.
         if(clean.length) os.put({version:1,updatedAt,entries:clean},snapshotKey);
         tx.oncomplete=res;tx.onerror=()=>rej(tx.error);
       });
-      void trimArchiveSnapshotsDb();
+      // Recovery snapshots are intentionally NEVER auto-deleted.
       return true;
     }catch(err){console.warn('Archiv-Metadaten konnten nicht in IndexedDB gesichert werden',err);return false;}
   }
@@ -921,7 +951,7 @@
   }
   function saveMeta(options={}){
     const entries=sanitizeArchiveEntries(state.entries);
-    const allowEmpty=!!options.allowEmpty;
+    const allowEmpty=!!options.allowEmpty&&options.explicitDelete===true;
     // Hard safety rule: normal code is NEVER allowed to overwrite an existing archive with [].
     if(!entries.length&&!allowEmpty){
       console.warn('Archiv-Schutz: Leerer Archivstand wurde nicht gespeichert. Bestehende Daten bleiben unangetastet.');
@@ -943,6 +973,11 @@
     void saveDurableAppState();
     return true;
   }
+  // Safety invariant: normal application code may never delete a stored POV.
+  // Only explicit UI delete actions receive DESTRUCTIVE_TOKEN.
+  function assertDestructiveDeleteToken(token){
+    if(token!==DESTRUCTIVE_TOKEN)throw new Error('Destruktive Dateilöschung ist nur über eine ausdrücklich bestätigte Benutzeraktion erlaubt.');
+  }
   const DB_VERSION=3;
   async function openDB(){return new Promise((res,rej)=>{
     let done=false;
@@ -956,7 +991,17 @@
   });}
   async function putVideo(id,file){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(file,id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
   async function getVideo(id){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const r=tx.objectStore(STORE).get(id);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
-  async function delVideo(id){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
+  async function delVideo(id,token){
+    assertDestructiveDeleteToken(token);
+    const db=await openDB();
+    return new Promise((res,rej)=>{
+      const tx=db.transaction(STORE,'readwrite');
+      const os=tx.objectStore(STORE);
+      os.delete(id);
+      os.delete(`${ARCHIVE_ENTRY_PREFIX}${id}`);
+      tx.oncomplete=res;tx.onerror=()=>rej(tx.error);
+    });
+  }
   async function buildArchiveThumbnail(entry){
     try{
       const file=await getVideo(entry.id); if(!file)return '';
@@ -991,7 +1036,11 @@
       else{const holder=img.parentElement;if(holder){img.remove();holder.textContent='POV';}}
     }
   }
-  async function clearDB(){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
+  async function clearDB(token){
+    assertDestructiveDeleteToken(token);
+    const db=await openDB();
+    return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});
+  }
   function showView(v,persist=true){if(!views[v])v='archive';$$('.view').forEach(x=>x.classList.remove('active'));$('#view-'+v).classList.add('active');$$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));$('#pageTitle').textContent=views[v][0];$('#pageSubtitle').textContent=views[v][1];if(persist)try{sessionStorage.setItem('grandrp_current_view',v);localStorage.setItem('grandrp_current_view',v);}catch{}if(v==='archive')renderArchive();if(v==='cases')renderCases();if(v==='csv')renderCsv();}
   function duplicateIdMap(entries=state.entries){const map=new Map();for(const e of entries){const id=String(e?.targetId||'').trim();if(/^\d{1,6}$/.test(id))map.set(id,(map.get(id)||0)+1);}return map;}
   function duplicateIdCount(entries=state.entries){let n=0;for(const count of duplicateIdMap(entries).values())if(count>1)n++;return n;}
@@ -1025,7 +1074,7 @@
       else if(action==='perma'){e.permaArchive=!e.permaArchive;saveMeta();renderArchive();renderCsv();toast(e.permaArchive?'POV ins POV-Archiv verschoben.':'POV aus POV-Archiv entfernt.');}
       else if(action==='delete'){if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?
 
-Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.entries=state.entries.filter(x=>x.id!==e.id);state.archiveSelected.delete(e.id);saveMeta({allowEmpty:state.entries.length===0});renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}}
+Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==e.id);state.archiveSelected.delete(e.id);saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}}
     };
   }
   function setupArchiveBulk(){
@@ -1218,7 +1267,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
     q.innerHTML=state.queue.map(item=>{const fileName=item.finalName||item.file?.name||'POV';const fileSize=Number(item.file?.size||item.result?.sourceSize||item.sourceSize||0);const hasError=/^Fehler:/i.test(item.status||'');const retry=(!item.uploading&&!item.ocrProcessing&&((!!item.youtube&&!item.result)||hasError));const canAct=!!item.result&&!item.uploading&&!item.processing&&!item.ocrProcessing;const label=item.youtube?'OCR erneut':'Erneut hochladen';const resultValue=String(item.manualResult||item.result?.manualResult||'');return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(fileName)}</strong><small>${fileSize?formatSize(fileSize)+' · ':''}${esc(item.status||'Wartet')}</small><div class="queue-result-row"><label>Ergebnis</label><input type="text" class="queue-result-input" data-queue-result data-id="${esc(item.id)}" value="${esc(resultValue)}" placeholder="Ergebnis manuell eintragen"></div><div class="progress"><i style="width:${Number(item.progress)||0}%"></i></div></div><div class="queue-actions">${item.result?`<button type="button" class="mini" data-action="check" data-id="${esc(item.id)}" ${canAct?'':'disabled'}>Prüfen</button><button type="button" class="mini primary" data-action="next" data-id="${esc(item.id)}" ${canAct?'':'disabled'}>Nächste POV</button>`:''}${retry?`<button type="button" class="mini primary" data-action="retry" data-id="${esc(item.id)}">${label}</button>`:''}<button type="button" class="mini" data-action="remove" data-id="${esc(item.id)}">×</button></div></div>`;}).join('');
     $$('[data-queue-result]').forEach(inp=>inp.addEventListener('input',()=>{const x=state.queue.find(i=>i.id===inp.dataset.id);if(!x)return;x.manualResult=String(inp.value||'').trim();if(x.result)x.result.manualResult=x.manualResult;scheduleQueuePersist();}));
     if(activeId){const restored=document.querySelector(`[data-queue-result][data-id="${CSS.escape(activeId)}"]`);if(restored){restored.value=activeValue;restored.focus();try{restored.setSelectionRange(aStart,aEnd);}catch{}}}
-    q.onclick=async e=>{const btn=e.target.closest('button[data-action]');if(!btn||!q.contains(btn))return;const id=btn.dataset.id;const x=state.queue.find(i=>i.id===id);if(!x)return;const action=btn.dataset.action;if(action==='check'){if(!x.result){toast('Für diese POV liegen noch keine OCR-Ergebnisse vor.');return;}openEditor(x);setTimeout(()=>{if(state.editing?.item?.id!==x.id)return;const target=clampId(x.result?.targetId||x.targetId||'');if(!/^\d{1,6}$/.test(target)){toast('Zuerst eine gültige Ziel-ID erkennen/eintragen.');return;}if(normalizeHexLoose(x.result?.sc||x.sc||'').length===40)openAcpReasonForCurrentId();else startAcpSequence();},80);return;}if(action==='next'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}if(x.processing||x.ocrProcessing){toast('Die POV wird noch verarbeitet. Bitte kurz warten.');return;}await nextQueueItem(id);return;}if(action==='retry'){await retryQueueItem(x);return;}if(action==='remove'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}x.cancelled=true;x.editingDone=true;x.ocrProcessing=false;x.processing=false;try{await delVideo(x.id);}catch{}state.queue=state.queue.filter(i=>i.id!==id);persistQueueNow();renderQueue();toast('POV aus der Warteschlange entfernt. OCR wurde gestoppt.');}};
+    q.onclick=async e=>{const btn=e.target.closest('button[data-action]');if(!btn||!q.contains(btn))return;const id=btn.dataset.id;const x=state.queue.find(i=>i.id===id);if(!x)return;const action=btn.dataset.action;if(action==='check'){if(!x.result){toast('Für diese POV liegen noch keine OCR-Ergebnisse vor.');return;}openEditor(x);setTimeout(()=>{if(state.editing?.item?.id!==x.id)return;const target=clampId(x.result?.targetId||x.targetId||'');if(!/^\d{1,6}$/.test(target)){toast('Zuerst eine gültige Ziel-ID erkennen/eintragen.');return;}if(normalizeHexLoose(x.result?.sc||x.sc||'').length===40)openAcpReasonForCurrentId();else startAcpSequence();},80);return;}if(action==='next'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}if(x.processing||x.ocrProcessing){toast('Die POV wird noch verarbeitet. Bitte kurz warten.');return;}await nextQueueItem(id);return;}if(action==='retry'){await retryQueueItem(x);return;}if(action==='remove'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}x.cancelled=true;x.editingDone=true;x.ocrProcessing=false;x.processing=false;try{await delVideo(x.id,DESTRUCTIVE_TOKEN);}catch{}state.queue=state.queue.filter(i=>i.id!==id);persistQueueNow();renderQueue();toast('POV aus der Warteschlange entfernt. OCR wurde gestoppt.');}};
   }
   async function retryLocalOCR(item){
     if(item.processing||item.cancelled)return;
@@ -1942,8 +1991,8 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id);state.
     if(ctx.item?.uploading){toast('YouTube-Upload läuft noch.');return false;}
     if(!window.confirm('Diesen POV wirklich löschen? Die lokale Datei wird gelöscht. Das YouTube-Video bleibt erhalten.'))return false;
     try{
-      if(ctx.item){ctx.item.cancelled=true;ctx.item.editingDone=true;ctx.item.processing=false;ctx.item.ocrProcessing=false;await delVideo(ctx.item.id);state.queue=state.queue.filter(x=>x.id!==ctx.item.id);state.archiveSelected?.delete(ctx.item.id);persistQueueNow();}
-      else{await delVideo(ctx.entry.id);state.entries=state.entries.filter(x=>x.id!==ctx.entry.id);state.archiveSelected?.delete(ctx.entry.id);saveMeta({allowEmpty:state.entries.length===0});}
+      if(ctx.item){ctx.item.cancelled=true;ctx.item.editingDone=true;ctx.item.processing=false;ctx.item.ocrProcessing=false;await delVideo(ctx.item.id,DESTRUCTIVE_TOKEN);state.queue=state.queue.filter(x=>x.id!==ctx.item.id);state.archiveSelected?.delete(ctx.item.id);persistQueueNow();}
+      else{await delVideo(ctx.entry.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==ctx.entry.id);state.archiveSelected?.delete(ctx.entry.id);saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});}
       closeEditor();renderQueue();renderArchive();renderCases();renderCsv();toast('POV gelöscht. YouTube bleibt erhalten.');return true;
     }catch(err){console.error('Direktes Löschen fehlgeschlagen',err);toast('Löschen fehlgeschlagen: '+(err?.message||err));return false;}
   }
@@ -2740,7 +2789,7 @@ Vorhandene Einträge werden nach ID zusammengeführt.`))return;
     $('#downloadArchiveBackup')?.addEventListener('click',downloadArchiveBackup);
     $('#restoreArchiveBackup')?.addEventListener('click',()=>$('#archiveBackupFile')?.click());
     $('#archiveBackupFile')?.addEventListener('change',e=>{const f=e.target.files?.[0];if(f)void restoreArchiveBackup(f);e.target.value='';});
-    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB();renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
+    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }
 
