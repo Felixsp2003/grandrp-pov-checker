@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V142
+/* Grand RP DC Checker V138
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,9 +10,8 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V142';
+  const BUILD='V139';
   const META_KEY='grandrp_pov_meta_v42';
-  const ARCHIVE_FILTER_KEY='grandrp_archive_filter_v142';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
   const BAN_ADMIN_NAME='Adam Byers';
@@ -646,8 +645,7 @@
     const global=$('#ytConnectHelp');
     if(global){const count=usableYoutubeConnections().length;global.textContent=count?`${count} YouTube-Verbindung${count===1?'':'en'} verfügbar. Leere Felder werden ignoriert.`:'Keine nutzbare YouTube-Verbindung vorhanden.';}
   }
-  const savedArchiveFilter=(()=>{try{const v=localStorage.getItem(ARCHIVE_FILTER_KEY);return ['all','ban','pccheck','socban','hardban','cheater','negativ','novideo','permaarchive','duplicates'].includes(v)?v:'all';}catch{return 'all';}})();
-  const state={entries:[],queue:[],archiveSelected:new Set(),filter:savedArchiveFilter,editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:'',tokenClient:null,clientId:'',activeYoutubeSlot:1,ytConnections:loadYoutubeConnectionsLocal(),settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,localFallbackRunner:false,youtubeUploadBlocked:false,tokenExpiresAt:0,tokenRefreshPromise:null,tokenRefreshPromises:new Map()};
+  const state={entries:[],queue:[],archiveSelected:new Set(),filter:'all',editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:'',tokenClient:null,clientId:'',activeYoutubeSlot:1,ytConnections:loadYoutubeConnectionsLocal(),settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,localFallbackRunner:false,youtubeUploadBlocked:false,tokenExpiresAt:0,tokenRefreshPromise:null,tokenRefreshPromises:new Map()};
   let archiveReadyPromise=Promise.resolve();
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
   // Local authentication: plaintext passwords are never stored; only salted PBKDF2 hashes are persisted in this browser.
@@ -1216,34 +1214,7 @@
   function duplicateIdMap(entries=state.entries){const map=new Map();for(const e of entries){const id=String(e?.targetId||'').trim();if(/^\d{1,6}$/.test(id))map.set(id,(map.get(id)||0)+1);}return map;}
   function duplicateIdCount(entries=state.entries){let n=0;for(const count of duplicateIdMap(entries).values())if(count>1)n++;return n;}
   function isDuplicateId(entry){const id=String(entry?.targetId||'').trim();return /^\d{1,6}$/.test(id)&&Number(duplicateIdMap().get(id)||0)>1;}
-  function archiveEntryMatchesFilter(e,filter){
-    const types=Array.isArray(e?.types)?e.types:[];
-    const reason=String(e?.reason||'').toLowerCase();
-    switch(filter){
-      case 'ban': return !e?.notBanned;
-      case 'pccheck': return types.includes('pccheck')||/^pc[- ]?check/.test(reason);
-      case 'socban': return types.includes('socban')||/soc[- ]?ban/.test(reason);
-      case 'hardban': return types.includes('hardban')||/hardban|hardbann/.test(reason);
-      case 'cheater': return types.includes('cheater')||/cheat/.test(reason);
-      case 'negativ': return types.includes('negativ')||/negativ/.test(reason);
-      case 'novideo': return !e?.videoStored;
-      default: return true;
-    }
-  }
-  function updateCounts(){
-    const all=state.entries;
-    const normal=all.filter(e=>!e.permaArchive);
-    $('#countAll').textContent=normal.length;
-    $('#countBan').textContent=all.filter(e=>archiveEntryMatchesFilter(e,'ban')).length;
-    $('#countPc').textContent=all.filter(e=>archiveEntryMatchesFilter(e,'pccheck')).length;
-    $('#countSoc').textContent=all.filter(e=>archiveEntryMatchesFilter(e,'socban')).length;
-    $('#countHard').textContent=all.filter(e=>archiveEntryMatchesFilter(e,'hardban')).length;
-    $('#countCheat').textContent=all.filter(e=>archiveEntryMatchesFilter(e,'cheater')).length;
-    $('#countNeg').textContent=all.filter(e=>archiveEntryMatchesFilter(e,'negativ')).length;
-    $('#countNoVideo').textContent=all.filter(e=>archiveEntryMatchesFilter(e,'novideo')).length;
-    $('#countPerma').textContent=all.filter(e=>e.permaArchive).length;
-    if($('#countDuplicates'))$('#countDuplicates').textContent=String(duplicateIdCount(all));
-  }
+  function updateCounts(){const all=state.entries;const normal=all.filter(e=>!e.permaArchive);const count=k=>normal.filter(e=>e.types?.includes(k)).length;$('#countAll').textContent=normal.length;$('#countBan').textContent=normal.filter(e=>!e.notBanned).length;$('#countPc').textContent=count('pccheck');$('#countSoc').textContent=count('socban');$('#countHard').textContent=count('hardban');$('#countCheat').textContent=count('cheater');$('#countNeg').textContent=count('negativ');$('#countNoVideo').textContent=normal.filter(e=>!e.videoStored).length;$('#countPerma').textContent=all.filter(e=>e.permaArchive).length;if($('#countDuplicates'))$('#countDuplicates').textContent=String(duplicateIdCount(all));}
   function renderArchive(){
     updateCounts();
     const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;
@@ -1251,8 +1222,9 @@
       if(filter==='permaarchive' && !e.permaArchive)return false;
       if(filter==='all' && e.permaArchive)return false;
       if(filter==='duplicates' && !isDuplicateId(e))return false;
-      if(['ban','pccheck','socban','hardban','cheater','negativ','novideo'].includes(filter) && !archiveEntryMatchesFilter(e,filter))return false;
-      if(!['all','permaarchive','duplicates','ban','pccheck','socban','hardban','cheater','negativ','novideo'].includes(filter) && !e.types?.includes(filter))return false;
+      if(filter==='ban'&&e.notBanned)return false;
+      if(filter!=='all'&&filter!=='permaarchive'&&filter!=='ban'&&filter!=='duplicates'&&!e.types?.includes(filter))return false;
+      if(filter==='novideo'&&e.videoStored)return false;
       if(!q)return true;
       return [e.targetId,e.sc,e.reason,e.manualResult,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));
     });
@@ -1296,261 +1268,85 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     if(typeof v==='string'){const n=v.trim().toLowerCase();return ['true','1','yes','ja','perma','perma-ban','permaban'].includes(n);}
     return false;
   }
-  function csvRowsBase(entries=state.entries){
-    // CSV filters operate on the complete saved dataset, including POV-Archiv entries.
-    // The dedicated Perma-CSV export remains available separately.
-    return entries.filter(e=>e.saved).map(e=>{
-      const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];
-      return {
-        _id:e.id,
-        Proof:e.proof||'',
-        Datum:formatDateDE(e.date),
-        ID:e.targetId||'',
-        SOC:e.sc||'',
-        RID:'',
-        DiscordID:'',
-        Familie:'',
-        Ergebnis:e.manualResult||'',
-        Grund:e.reason||'',
-        Perma:isPermaBanValue(e.perma),
-        PermaArchiv:isPermaBanValue(e.permaArchive),
-        Admin1:admins[0]||'',
-        Admin2:admins[1]||'',
-        Admin3:admins[2]||'',
-        Admin4:admins[3]||'',
-        Admin5:admins[4]||'',
-        _entry:e,
-        _admins:admins
-      };
-    });
-  }
-  function csvRowsArchiveBase(){
-    return state.entries.filter(e=>e.saved&&isPermaBanValue(e.permaArchive)).map(e=>{
-      const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];
-      return {
-        _id:e.id,
-        Proof:e.proof||'',
-        Datum:formatDateDE(e.date),
-        ID:e.targetId||'',
-        SOC:e.sc||'',
-        RID:'',
-        DiscordID:'',
-        Familie:'',
-        Ergebnis:e.manualResult||'',
-        Grund:e.reason||'',
-        Perma:isPermaBanValue(e.perma),
-        PermaArchiv:true,
-        Admin1:admins[0]||'',
-        Admin2:admins[1]||'',
-        Admin3:admins[2]||'',
-        Admin4:admins[3]||'',
-        Admin5:admins[4]||'',
-        _entry:e,
-        _admins:admins
-      };
-    });
-  }
+  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved&&!isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:isPermaBanValue(e.permaArchive),Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
+  function csvRowsArchiveBase(){return state.entries.filter(e=>e.saved&&isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:true,Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
   function csvRowsPermaBase(){return csvRowsArchiveBase();}
-  function csvEntryMatchesType(e,type){
-    const types=Array.isArray(e?.types)?e.types:[];
-    const reason=String(e?.reason||'').toLowerCase();
-    const isPc=/^pc[- ]?check/.test(reason);
-    const isRefusal=/verweiger/i.test(reason);
-    const isTrolling=/troll/i.test(reason);
-    const isCleaning=/cleaning/i.test(reason);
-    const isRedux=/redux/i.test(reason);
-    const isDiscordReason=/discord/i.test(reason);
-    const isBanevading=/banevading|ban ?evading/i.test(reason);
-    const isAcc14=/acc\s*1\.4/i.test(reason);
-    const isEvent17=/event\s*1\.7/i.test(reason);
-    switch(type){
-      case 'ban': return !e?.notBanned;
-      case 'hardban': return types.includes('hardban')||/hardban|hardbann/i.test(reason);
-      case 'socban': return types.includes('socban')||/soc[- ]?ban/i.test(reason);
-      case 'cheater': return types.includes('cheater')||/cheat/i.test(reason);
-      case 'negativ': return types.includes('negativ');
-      case 'verweigert': return types.includes('verweigert')||isRefusal;
-      case 'pccheck': return types.includes('pccheck')||isPc;
-      case 'pcPositive': return isPc&&!isRefusal;
-      case 'pcRefused': return isRefusal;
-      case 'trolling': return isTrolling;
-      case 'cleaning': return isCleaning;
-      case 'redux': return isRedux;
-      case 'discordReason': return isDiscordReason;
-      case 'banevading': return isBanevading;
-      case 'acc14': return isAcc14;
-      case 'event17': return isEvent17;
-      case 'perma': return isPermaBanValue(e?.perma);
-      case 'permaArchive': return isPermaBanValue(e?.permaArchive);
-      case 'notBanned': return !!e?.notBanned;
-      case 'video': return !!e?.videoStored;
-      case 'novideo': return !e?.videoStored;
-      case 'docYes': return e?.documentStatus==='eingetragen';
-      case 'docNo': return e?.documentStatus!=='eingetragen';
-      case 'complete': return !!e?.complete;
-      case 'open': return !e?.complete;
-      case 'proof': return !!String(e?.proof||'').trim();
-      case 'noProof': return !String(e?.proof||'').trim();
-      case 'scPresent': return !!String(e?.sc||'').trim();
-      case 'scEmpty': return !String(e?.sc||'').trim();
-      case 'discordPresent': return !!String(e?.discordId||'').trim();
-      case 'discordEmpty': return !String(e?.discordId||'').trim();
-      default: return true;
-    }
-  }
-  function csvPriorityValue(r,key){
-    const e=r._entry||{};
-    const reason=String(r.Grund||'').toLowerCase();
-    const types=Array.isArray(e.types)?e.types:[];
-    switch(key){
-      case 'hardban': return types.includes('hardban')||/hardban|hardbann/.test(reason)?1:0;
-      case 'ban': return e.notBanned?0:1;
-      case 'negativ': return types.includes('negativ')||/negativ/.test(reason)?1:0;
-      case 'novideo': return e.videoStored?0:1;
-      case 'noProof': return String(r.Proof||'').trim()?0:1;
-      case 'scEmpty': return String(r.SOC||'').trim()?0:1;
-      case 'discordEmpty': return String(r.DiscordID||e.discordId||'').trim()?0:1;
-      case 'socban': return types.includes('socban')||/soc[- ]?ban/.test(reason)?1:0;
-      case 'cheater': return types.includes('cheater')||/cheat/.test(reason)?1:0;
-      case 'pccheck': return types.includes('pccheck')||/^pc[- ]?check/.test(reason)?1:0;
-      case 'verweigert': return types.includes('verweigert')||/verweiger/.test(reason)?1:0;
-      case 'trolling': return /troll/.test(reason)?1:0;
-      case 'cleaning': return /cleaning/.test(reason)?1:0;
-      case 'redux': return /redux/.test(reason)?1:0;
-      case 'discordReason': return /discord/.test(reason)?1:0;
-      case 'banevading': return /banevading|ban ?evading/.test(reason)?1:0;
-      case 'perma': return isPermaBanValue(e.perma)?1:0;
-      case 'complete': return e.complete?1:0;
-      case 'docYes': return e.documentStatus==='eingetragen'?1:0;
-      case 'proof': return String(r.Proof||'').trim()?1:0;
-      case 'sc': return String(r.SOC||'').trim()?1:0;
-      case 'discord': return String(r.DiscordID||'').trim()?1:0;
-      case 'missing': return Array.isArray(e.missing)&&e.missing.length?1:0;
-      default: return 0;
-    }
-  }
-  function csvRows(){
-    const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();
-    const reason=(($('#csvFilterReason')?.value)||'all');
-    const sc=(($('#csvFilterSc')?.value)||'all');
-    const discord=(($('#csvFilterDiscord')?.value)||'all');
-    const perma=(($('#csvFilterPerma')?.value)||'all');
-    const type=(($('#csvFilterType')?.value)||'all');
-    const admin=(($('#csvFilterAdmin')?.value)||'all').toLowerCase();
-    const sort=(($('#csvFilterSort')?.value)||'date_desc');
-    const from=(($('#csvFilterDateFrom')?.value)||'');
-    const to=(($('#csvFilterDateTo')?.value)||'');
-    const rows=csvRowsBase().filter(r=>{
-      const e=r._entry||{};
-      if(reason!=='all'&&r.Grund!==reason)return false;
-      if(sc==='present'&&!String(r.SOC||'').trim())return false;
-      if(sc==='empty'&&String(r.SOC||'').trim())return false;
-      if(discord==='present'&&!String(e.discordId||'').trim())return false;
-      if(discord==='empty'&&String(e.discordId||'').trim())return false;
-      if(perma==='yes'&&!isPermaBanValue(r.Perma))return false;
-      if(perma==='no'&&isPermaBanValue(r.Perma))return false;
-      if(type!=='all'&&!csvEntryMatchesType(e,type))return false;
-      if(admin!=='all'&&!r._admins.some(v=>String(v||'').toLowerCase()===admin))return false;
-      if(from&&String(e.date||'')<from)return false;
-      if(to&&String(e.date||'')>to)return false;
-      if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.DiscordID,e.discordId,r.Ergebnis,r.Grund,r.Admin1,r.Admin2,r.Admin3,r.Admin4,r.Admin5].some(v=>String(v||'').toLowerCase().includes(q))))return false;
-      return true;
-    });
-    const cmp=(a,b)=>{
-      const boolSort=(key,dir)=>{
-        const av=csvPriorityValue(a,key),bv=csvPriorityValue(b,key);
-        return dir==='last'?av-bv:bv-av;
-      };
-      let result=0;
-      switch(sort){
-        case 'date_asc': result=String(a._entry?.date||'').localeCompare(String(b._entry?.date||''));break;
-        case 'date_desc': result=String(b._entry?.date||'').localeCompare(String(a._entry?.date||''));break;
-        case 'id_asc': result=String(a.ID||'').localeCompare(String(b.ID||''),undefined,{numeric:true});break;
-        case 'id_desc': result=String(b.ID||'').localeCompare(String(a.ID||''),undefined,{numeric:true});break;
-        case 'reason_asc': result=String(a.Grund||'').localeCompare(String(b.Grund||''),'de');break;
-        case 'reason_desc': result=String(b.Grund||'').localeCompare(String(a.Grund||''),'de');break;
-        case 'sc_asc': result=String(a.SOC||'').localeCompare(String(b.SOC||''));break;
-        case 'sc_desc': result=String(b.SOC||'').localeCompare(String(a.SOC||''));break;
-        case 'discord_asc': result=String(a.DiscordID||'').localeCompare(String(b.DiscordID||''),undefined,{numeric:true});break;
-        case 'discord_desc': result=String(b.DiscordID||'').localeCompare(String(a.DiscordID||''),undefined,{numeric:true});break;
-        case 'admin1_asc': result=String(a.Admin1||'').localeCompare(String(b.Admin1||''),'de');break;
-        case 'admin1_desc': result=String(b.Admin1||'').localeCompare(String(a.Admin1||''),'de');break;
-        case 'hardban_first': result=boolSort('hardban','first');break;
-        case 'hardban_last': result=boolSort('hardban','last');break;
-        case 'ban_first': result=boolSort('ban','first');break;
-        case 'ban_last': result=boolSort('ban','last');break;
-        case 'negativ_first': result=boolSort('negativ','first');break;
-        case 'negativ_last': result=boolSort('negativ','last');break;
-        case 'novideo_first': result=boolSort('novideo','first');break;
-        case 'novideo_last': result=boolSort('novideo','last');break;
-        case 'noProof_first': result=boolSort('noProof','first');break;
-        case 'noProof_last': result=boolSort('noProof','last');break;
-        case 'scEmpty_first': result=boolSort('scEmpty','first');break;
-        case 'scEmpty_last': result=boolSort('scEmpty','last');break;
-        case 'discordEmpty_first': result=boolSort('discordEmpty','first');break;
-        case 'discordEmpty_last': result=boolSort('discordEmpty','last');break;
-        case 'socban_first': result=boolSort('socban','first');break;
-        case 'socban_last': result=boolSort('socban','last');break;
-        case 'cheater_first': result=boolSort('cheater','first');break;
-        case 'cheater_last': result=boolSort('cheater','last');break;
-        case 'pccheck_first': result=boolSort('pccheck','first');break;
-        case 'pccheck_last': result=boolSort('pccheck','last');break;
-        case 'verweigert_first': result=boolSort('verweigert','first');break;
-        case 'verweigert_last': result=boolSort('verweigert','last');break;
-        case 'trolling_first': result=boolSort('trolling','first');break;
-        case 'trolling_last': result=boolSort('trolling','last');break;
-        case 'cleaning_first': result=boolSort('cleaning','first');break;
-        case 'cleaning_last': result=boolSort('cleaning','last');break;
-        case 'redux_first': result=boolSort('redux','first');break;
-        case 'redux_last': result=boolSort('redux','last');break;
-        case 'discordReason_first': result=boolSort('discordReason','first');break;
-        case 'discordReason_last': result=boolSort('discordReason','last');break;
-        case 'banevading_first': result=boolSort('banevading','first');break;
-        case 'banevading_last': result=boolSort('banevading','last');break;
-        case 'perma_first': result=boolSort('perma','first');break;
-        case 'perma_last': result=boolSort('perma','last');break;
-        case 'complete_first': result=boolSort('complete','first');break;
-        case 'complete_last': result=boolSort('complete','last');break;
-        case 'docYes_first': result=boolSort('docYes','first');break;
-        case 'docYes_last': result=boolSort('docYes','last');break;
-        case 'proof_first': result=boolSort('proof','first');break;
-        case 'proof_last': result=boolSort('proof','last');break;
-        case 'sc_first': result=boolSort('sc','first');break;
-        case 'sc_last': result=boolSort('sc','last');break;
-        case 'discord_first': result=boolSort('discord','first');break;
-        case 'discord_last': result=boolSort('discord','last');break;
-        case 'missing_first': result=boolSort('missing','first');break;
-        case 'missing_last': result=boolSort('missing','last');break;
-        default: result=0;
-      }
-      if(result!==0)return result;
-      // Keep identical-priority rows stable and predictable.
-      const dateFallback=String(b._entry?.date||'').localeCompare(String(a._entry?.date||''));
-      if(dateFallback!==0)return dateFallback;
-      return String(a._id||'').localeCompare(String(b._id||''));
-    };
-    return rows.sort(cmp);
-  }
-  function syncCsvAdminOptions(){
-    const sel=$('#csvFilterAdmin');if(!sel)return;
-    const current=sel.value;
-    const names=new Set();
-    state.entries.forEach(e=>(Array.isArray(e.pcCheckers)?e.pcCheckers:[]).slice(0,5).forEach(v=>{if(String(v||'').trim())names.add(String(v).trim());}));
-    const ordered=[...names].sort((a,b)=>a.localeCompare(b,'de'));
-    sel.innerHTML='<option value="all">PC-Checker: Alle</option>'+ordered.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
-    if(ordered.includes(current))sel.value=current;
-  }
+  function csvRows(){const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();const reason=(($('#csvFilterReason')?.value)||'all');const sc=(($('#csvFilterSc')?.value)||'all');const perma=(($('#csvFilterPerma')?.value)||'all');return csvRowsBase().filter(r=>{if(reason!=='all'&&r.Grund!==reason)return false;if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;if(perma==='yes'&&r.Perma!==true)return false;if(perma==='no'&&r.Perma===true)return false;if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.Ergebnis,r.Grund].some(v=>String(v||'').toLowerCase().includes(q))))return false;return true;});}
+
   function renderCsv(){
-    syncCsvAdminOptions();
-    const all=csvRowsBase(),rows=csvRows(),perma=csvRowsPermaBase();
-    $('#csvSummary').textContent=`${rows.length} von ${all.length} Einträgen · ${perma.length} Perma-Archiv`;
-    const body=$('#csvPreviewBody');if(!body)return;
+    const all=csvRowsBase();
+    const rows=csvRows();
+    const perma=csvRowsPermaBase();
+    const summary=$('#csvSummary');
+    if(summary)summary.textContent=`${rows.length} von ${all.length} Einträgen · ${perma.length} Perma-Archiv`;
+    const body=$('#csvPreviewBody');
+    if(!body)return;
     body.innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.Proof)}</td><td>${esc(r.Datum)}</td><td>${esc(r.ID)}</td><td>${esc(r.SOC)}</td><td>${esc(r.RID)}</td><td>${esc(r.DiscordID)}</td><td>${esc(r.Familie)}</td><td>${esc(r.Ergebnis)}</td><td>${esc(r.Grund)}</td><td>${esc(r.Admin1)}</td><td>${esc(r.Admin2)}</td><td>${esc(r.Admin3)}</td><td>${esc(r.Admin4)}</td><td>${esc(r.Admin5)}</td><td><button type="button" class="mini" data-csv-open="${esc(r._id)}">Bearbeiten</button></td></tr>`).join(''):'<tr><td colspan=15 class="csv-empty">Keine Einträge passen zum Filter.</td></tr>';
     body.onclick=async ev=>{
-      const b=ev.target.closest('[data-csv-open]');if(!b)return;
-      const entry=state.entries.find(e=>e.id===b.dataset.csvOpen);if(entry)await openEditorFromEntry(entry,{});
+      const b=ev.target.closest('[data-csv-open]');
+      if(!b)return;
+      const entry=state.entries.find(e=>e.id===b.dataset.csvOpen);
+      if(entry)await openEditorFromEntry(entry,{});
     };
     $('#csvEmpty')?.classList.toggle('hidden',all.length>0);
+  }
+
+
+  function csvTextFromRows(rows){
+    const header=['Proof','Datum','ID','SOC','RID','Discord ID','Familie','Ergebnis','Grund','Admin 1','Admin 2','Admin 3','Admin 4','Admin 5'];
+    const line=values=>values.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(';');
+    const safeRows=Array.isArray(rows)?rows:[];
+    return '\uFEFF'+[line(header),...safeRows.map(r=>line([
+      r.Proof,r.Datum,r.ID,r.SOC,r.RID,r.DiscordID,r.Familie,r.Ergebnis,r.Grund,
+      r.Admin1,r.Admin2,r.Admin3,r.Admin4,r.Admin5
+    ]))].join('\r\n');
+  }
+  function downloadCsv(){
+    try{
+      const rows=csvRows();
+      if(!rows.length){toast('Keine CSV-Einträge für den aktuellen Filter.');return false;}
+      const blob=new Blob([csvTextFromRows(rows)],{type:'text/csv;charset=utf-8'});
+      const ok=triggerBrowserDownload(blob,`grandrp_bans-${new Date().toISOString().slice(0,10)}.csv`);
+      if(ok)toast(`${rows.length} CSV-Einträge exportiert.`);
+      return ok;
+    }catch(err){console.error('CSV-Download fehlgeschlagen',err);toast('CSV-Download fehlgeschlagen: '+(err?.message||err));return false;}
+  }
+  function downloadArchiveCsv(){
+    try{
+      const rows=csvRowsArchiveBase();
+      if(!rows.length){toast('Keine POVs im POV-Archiv vorhanden.');return false;}
+      const blob=new Blob([csvTextFromRows(rows)],{type:'text/csv;charset=utf-8'});
+      const ok=triggerBrowserDownload(blob,`grandrp_pov-archiv-${new Date().toISOString().slice(0,10)}.csv`);
+      if(ok)toast(`${rows.length} POV-Archiv-Einträge exportiert.`);
+      return ok;
+    }catch(err){console.error('POV-Archiv-CSV-Download fehlgeschlagen',err);toast('POV-Archiv-CSV-Download fehlgeschlagen: '+(err?.message||err));return false;}
+  }
+  function downloadPermaCsv(){
+    try{
+      const rows=csvRowsBase().filter(r=>r.Perma===true);
+      if(!rows.length){toast('Keine Perma-Ban-Einträge vorhanden.');return false;}
+      const blob=new Blob([csvTextFromRows(rows)],{type:'text/csv;charset=utf-8'});
+      const ok=triggerBrowserDownload(blob,`grandrp_perma-bans-${new Date().toISOString().slice(0,10)}.csv`);
+      if(ok)toast(`${rows.length} Perma-Ban-Einträge exportiert.`);
+      return ok;
+    }catch(err){console.error('Perma-CSV-Download fehlgeschlagen',err);toast('Perma-CSV-Download fehlgeschlagen: '+(err?.message||err));return false;}
+  }
+  async function copyCsv(){
+    try{
+      const text=csvTextFromRows(csvRows());
+      if(!text || text.split('\r\n').length<2){toast('Keine CSV-Einträge für den aktuellen Filter.');return false;}
+      if(navigator.clipboard?.writeText){
+        await navigator.clipboard.writeText(text);
+      }else{
+        const area=document.createElement('textarea');
+        area.value=text;area.setAttribute('readonly','');area.style.position='fixed';area.style.left='-99999px';
+        document.body.appendChild(area);area.select();
+        const ok=document.execCommand('copy');area.remove();
+        if(!ok)throw new Error('Kopieren ist in diesem Browser nicht verfügbar.');
+      }
+      toast('CSV in die Zwischenablage kopiert.');
+      return true;
+    }catch(err){console.error('CSV-Kopieren fehlgeschlagen',err);toast('CSV-Kopieren nicht verfügbar.');return false;}
   }
 
 
@@ -1567,35 +1363,6 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       try{showView(view);}catch(err){console.error('Navigation failed',err);}
     });
   }
-  let archiveFiltersInstalled=false;
-  function applyArchiveFilter(filter){
-    const allowed=['all','ban','pccheck','socban','hardban','cheater','negativ','novideo','permaarchive','duplicates'];
-    const next=allowed.includes(String(filter||''))?String(filter):'all';
-    state.filter=next;
-    try{localStorage.setItem(ARCHIVE_FILTER_KEY,next);}catch{}
-    const buttons=$$('#filters .filter');
-    buttons.forEach(x=>x.classList.toggle('active',x.dataset.filter===next));
-    renderArchive();
-    return next;
-  }
-  function setupArchiveFilters(){
-    const box=$('#filters');
-    if(!box||archiveFiltersInstalled)return;
-    archiveFiltersInstalled=true;
-    box.style.position='relative';
-    box.style.zIndex='5';
-    box.style.pointerEvents='auto';
-    box.addEventListener('click',ev=>{
-      const button=ev.target.closest('button.filter[data-filter]');
-      if(!button||!box.contains(button))return;
-      ev.preventDefault();
-      ev.stopPropagation();
-      applyArchiveFilter(button.dataset.filter);
-    },true);
-    window.grandrpSetArchiveFilter=applyArchiveFilter;
-    applyArchiveFilter(state.filter);
-  }
-
   function setupNav(){
     installNavDelegation();
     setupArchiveBulk();
@@ -1611,7 +1378,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     $('#archiveCsvBtn')?.addEventListener('click',downloadArchiveCsv);
     $('#downloadPermaCsvBtn')?.addEventListener('click',downloadPermaCsv);
     $('#copyCsvBtn')?.addEventListener('click',copyCsv);
-    ['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterDiscord','#csvFilterPerma','#csvFilterType','#csvFilterAdmin','#csvFilterSort','#csvFilterDateFrom','#csvFilterDateTo'].forEach(s=>{
+    ['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterPerma'].forEach(s=>{
       const el=$(s);
       if(!el)return;
       el.addEventListener(el.tagName==='SELECT'?'change':'input',renderCsv);
@@ -1623,14 +1390,13 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if($('#csvFilterSc'))$('#csvFilterSc').value='all';
       if($('#csvFilterPerma'))$('#csvFilterPerma').value='all';
       if($('#csvFilterDiscord'))$('#csvFilterDiscord').value='all';
-      if($('#csvFilterType'))$('#csvFilterType').value='all';
-      if($('#csvFilterAdmin'))$('#csvFilterAdmin').value='all';
-      if($('#csvFilterSort'))$('#csvFilterSort').value='date_desc';
-      if($('#csvFilterDateFrom'))$('#csvFilterDateFrom').value='';
-      if($('#csvFilterDateTo'))$('#csvFilterDateTo').value='';
       renderCsv();
     });
-    setupArchiveFilters();
+    $$('.filter').forEach(b=>b.addEventListener('click',()=>{
+      state.filter=b.dataset.filter;
+      $$('.filter').forEach(x=>x.classList.toggle('active',x===b));
+      renderArchive();
+    }));
     restoreSavedView();
   }
 
@@ -3113,23 +2879,20 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   function loadDriveState(){try{return JSON.parse(localStorage.getItem(DRIVE_STATE_KEY)||'null')||{connected:false,clientId:'',accessToken:'',tokenExpiresAt:0};}catch{return {connected:false,clientId:'',accessToken:'',tokenExpiresAt:0};}}
   function saveDriveState(v){try{localStorage.setItem(DRIVE_STATE_KEY,JSON.stringify({...v,updatedAt:Date.now()}));}catch(err){console.warn('Drive-Status konnte nicht gespeichert werden',err);}}
   function driveState(){return loadDriveState();}
-  function renderDriveStatus(){const st=driveState(),el=$('#driveStatus'),help=$('#driveHelp'),connect=$('#driveConnectBtn'),sync=$('#driveSyncBtn'),restore=$('#driveRestoreBtn');const linked=!!(st.clientId&&(st.connected||st.accessToken));const tokenValid=!!(st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+15000);if(el){el.className='connection '+(linked?'good':'');el.textContent=linked?(tokenValid?'● Verbunden':'● Verbunden · Erneuerung nötig'):'● Nicht verbunden';}if(connect)connect.textContent=linked?'Google Drive erneut verbinden':'Google Drive verbinden';if(sync)sync.disabled=!linked||driveSyncInProgress;if(restore)restore.disabled=!linked||driveSyncInProgress;if(help){if(!linked)help.textContent='Google Drive ist noch nicht verbunden. Klicke zuerst „Google Drive verbinden“. Danach kannst du „Jetzt alles sichern“ verwenden.';else help.textContent=tokenValid?'Google Drive verbunden. Automatisches Backup nach jedem gespeicherten POV. Es wird nur das Archiv als JSON gesichert – keine POV-Videodateien.':'Google Drive ist verbunden, aber der Zugriff ist abgelaufen. „Jetzt alles sichern“ oder „Cloud-Archiv wiederherstellen“ öffnet die Google-Anmeldung erneut.';}}
+  function renderDriveStatus(){const st=driveState(),el=$('#driveStatus'),help=$('#driveHelp'),connect=$('#driveConnectBtn'),sync=$('#driveSyncBtn'),restore=$('#driveRestoreBtn');const linked=!!(st.clientId&&(st.connected||st.accessToken));const tokenValid=!!(st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+15000);if(el){el.className='connection '+(linked?'good':'');el.textContent=linked?(tokenValid?'● Verbunden':'● Verbunden · Erneuerung nötig'):'● Nicht verbunden';}if(connect)connect.textContent=linked?'Google Drive erneut verbinden':'Google Drive verbinden';if(sync)sync.disabled=!tokenValid||driveSyncInProgress;if(restore)restore.disabled=!tokenValid||driveSyncInProgress;if(help&&linked){help.textContent=tokenValid?'Google Drive verbunden. Automatisches Backup nach jedem gespeicherten POV. Es wird nur das Archiv als JSON gesichert – keine POV-Videodateien.':'Google Drive bleibt verbunden. Der aktuelle Zugriff ist abgelaufen; automatische Backups warten, bis du „Google Drive erneut verbinden“ klickst.';}}
   async function driveTokenFresh(forceConsent=false){
     let st=driveState();
     if(st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+120000)return st.accessToken;
-    if(forceConsent===false && !st.clientId)throw new Error('Bitte zuerst Google Drive verbinden.');
-    // Manueller Sync/Restore darf den Google-Popup-Flow zur Token-Erneuerung verwenden.
-    // Hintergrund-Syncs rufen diese Funktion nur mit bereits gültigem Token auf.
-    return await startDriveOAuth(st.clientId||'');
+    // Niemals aus einem Hintergrund-Backup heraus einen OAuth-Popup öffnen.
+    // Ein abgelaufener Zugriff beendet die gespeicherte Drive-Verknüpfung nicht.
+    throw new Error('Google-Drive-Zugriff ist abgelaufen. Bitte „Google Drive erneut verbinden“ klicken.');
   }
-  async function startDriveOAuth(preferredClientId=''){
-    const saved=driveState();
+  function startDriveOAuth(){
     const c=state.ytConnections.find(x=>String(x?.clientId||'').trim())||connection(1)||state.ytConnections[0];
-    const clientId=String(preferredClientId||saved.clientId||c?.clientId||'').trim();
+    const clientId=String(c?.clientId||'').trim();
     if(!clientId)throw new Error('Bitte zuerst die Google OAuth Client-ID in YouTube-Verbindung 1 eintragen.');
     if(!validClientId(clientId))throw new Error('Die Google OAuth Client-ID sieht ungültig aus.');
-    const ready=window.google?.accounts?.oauth2||await waitForGoogleGIS();
-    if(!ready)throw new Error('Google-Anmeldung ist noch nicht geladen. Bitte kurz warten und erneut klicken.');
+    if(!window.google?.accounts?.oauth2)throw new Error('Google-Anmeldung ist noch nicht geladen. Bitte kurz warten und erneut klicken.');
     const st={purpose:'drive',clientId,createdAt:Date.now()};
     return new Promise((resolve,reject)=>{
       let finished=false;const done=(fn,v)=>{if(finished)return;finished=true;fn(v);};
@@ -3150,19 +2913,14 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   async function driveFindFile(name,folderId){const q=encodeURIComponent(`name='${String(name).replace(/'/g,"\\'")}' and '${folderId}' in parents and trashed=false`);const r=await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=modifiedTime desc&pageSize=20&fields=files(id,name,size,mimeType,modifiedTime,appProperties)`);return (await r.json()).files?.[0]||null;}
   async function driveUploadJson(name,folderId,payload,existingId){const boundary='----grandrpDrive'+Math.random().toString(16).slice(2);const meta=existingId?{name}:{name,parents:[folderId],mimeType:'application/json'};const body=`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(payload)}\r\n--${boundary}--`;const url=existingId?`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(existingId)}?uploadType=multipart&fields=id,name,modifiedTime`:'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime';return (await driveApi(url,{method:existingId?'PATCH':'POST',headers:{'Content-Type':`multipart/related; boundary=${boundary}`},body})).json();}
   async function syncDriveBackup(options={}){if(driveSyncInProgress)return;driveSyncInProgress=true;renderDriveStatus();const help=$('#driveHelp');const interactive=options.interactive===true;try{
-    let st=driveState();
-    if(!st?.clientId){
-      if(interactive)throw new Error('Bitte zuerst Google Drive verbinden.');
-      return;
-    }
-    // Automatische Backups öffnen niemals ungefragt ein OAuth-Popup.
-    // Ein manueller Klick darf einen abgelaufenen Zugriff dagegen direkt erneuern.
+    const st=driveState();
+    if(!st?.clientId||!st?.accessToken){return;}
+    // Automatische Backups dürfen niemals ungefragt ein Google-OAuth-Popup öffnen.
+    // Ist das Token abgelaufen, wird die Sicherung still übersprungen; ein manueller
+    // Klick auf „Backup“ darf dagegen die normale OAuth-Erneuerung durchführen.
     let token='';
-    if(st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+15000) token=String(st.accessToken||'');
-    else if(interactive){
-      token=await driveTokenFresh(false);
-      st=driveState();
-    }
+    if(Number(st.tokenExpiresAt||0)>Date.now()+15000) token=String(st.accessToken||'');
+    else if(interactive) token=await driveTokenFresh(false);
     else return;
     if(!token)return;
     const folder=await driveEnsureFolder();
@@ -3559,7 +3317,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       // Make the UI authoritative as well: clear filters/search and render the exact imported
       // list after persistence has completed.
       state.entries=clean.map(e=>({...e,file:undefined,videoUrl:undefined}));
-      state.filter='all';try{localStorage.setItem(ARCHIVE_FILTER_KEY,'all');}catch{}
+      state.filter='all';
       state.archiveSelected.clear();
       if($('#search'))$('#search').value='';
       if($('#archiveGrid'))renderArchive();
@@ -3589,7 +3347,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if(!clean.length)throw new Error('Keine gültigen Archiv-Einträge zum Übernehmen.');
       if(options.replace===true) state.entries=clean;
       else {const byId=new Map(state.entries.map(e=>[String(e.id),e]));for(const e of clean)byId.set(String(e.id),e);state.entries=[...byId.values()];}
-      state.filter='all';try{localStorage.setItem(ARCHIVE_FILTER_KEY,'all');}catch{}state.archiveSelected.clear();if($('#search'))$('#search').value='';
+      state.filter='all';state.archiveSelected.clear();if($('#search'))$('#search').value='';
       renderArchive();renderCases();renderCsv();
       return state.entries.length;
     };
@@ -3625,8 +3383,8 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     }
     try{renderYoutubeConnections();}catch(err){console.error('YouTube-Einstellungen konnten nicht initialisiert werden',err);}
     $('#downloadArchiveBackup')?.addEventListener('click',downloadArchiveBackup);
-    $('#driveConnectBtn')?.addEventListener('click',()=>{void startDriveOAuth().catch(err=>{toast(err?.message||String(err));const h=$('#driveHelp');if(h)h.textContent='✕ '+(err?.message||String(err));});});
-    $('#driveSyncBtn')?.addEventListener('click',()=>{void syncDriveBackup({interactive:true});});
+    $('#driveConnectBtn')?.addEventListener('click',()=>{try{startDriveOAuth();}catch(err){toast(err?.message||String(err));const h=$('#driveHelp');if(h)h.textContent='✕ '+(err?.message||String(err));}});
+    $('#driveSyncBtn')?.addEventListener('click',()=>{void syncDriveBackup();});
     $('#driveRestoreBtn')?.addEventListener('click',()=>{void restoreDriveBackup();});
     updateDriveResult();
     const backupFile=$('#archiveBackupFile');
