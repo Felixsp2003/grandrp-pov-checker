@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=88">
+<link rel="stylesheet" href="styles.css?v=133">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -35,9 +35,9 @@
 
   <main class="main">
     <header class="topbar">
-      <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export · Mehrfachfilter & Gruppensortierung</p></div>
+      <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V88</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V139</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -53,9 +53,9 @@
         <button class="filter" data-filter="hardban">Hardbann <b id="countHard">0</b></button>
         <button class="filter" data-filter="cheater">Cheater <b id="countCheat">0</b></button>
         <button class="filter" data-filter="negativ">Negativ <b id="countNeg">0</b></button>
-        <button class="filter" data-filter="novideo">Ohne Video <b id="countNoVideo">0</b></button>
+        <button class="filter" data-filter="novideo">Ohne Video <b id="countNoVideo">0</b></button><button class="filter" data-filter="permaarchive">POV Archiv <b id="countPerma">0</b></button><button class="filter duplicate-filter" data-filter="duplicates">Doppelte IDs <b id="countDuplicates">0</b></button>
       </div>
-      <div id="archiveGrid" class="grid"></div>
+      <div class="archive-bulk hidden" id="archiveBulkBar"><strong><span id="archiveSelectedCount">0</span> POVs ausgewählt</strong><div><button type="button" class="ghost mini" id="archiveSelectAll">Alle auswählen</button><button type="button" class="ghost mini" id="archiveClearSelection">Auswahl löschen</button><button type="button" class="pink mini" id="archiveBulkPerma">Ausgewählte ins Archiv</button><button type="button" class="ghost mini hidden" id="archiveCsvBtn">Archiv-CSV</button></div></div><div id="archiveGrid" class="grid"></div>
       <div id="emptyState" class="empty hidden"><div class="empty-icon">⊘</div><h2>Noch keine Einträge</h2><p>Lade mehrere POVs gleichzeitig hoch. Jede Aufnahme wird vollständig eingelesen und erst danach analysiert.</p><button class="pink" id="emptyUploadBtn">POVs hochladen</button></div>
     </section>
 
@@ -71,9 +71,9 @@
             <input type="file" id="fileInput" accept="video/*,.mp4,.mov,.webm,.mkv" multiple hidden>
             <div class="drop-icon">↑</div><h2>POVs hier ablegen</h2><p>Mehrere Aufnahmen gleichzeitig auswählen</p>
             <button class="pink" id="chooseBtn">POVs auswählen</button>
-            <small>YouTube-Upload → Upload 100 % → OCR → Prüfung → finaler Dateiname. „Aus Video auswählen“ öffnet die POV in einem echten Website-Tab statt about:blank.</small>
+            <small>Ergebnis beim Hochladen eintragen → YouTube-Upload → Upload 100 % → OCR → Prüfung → finaler Dateiname. „Aus Video auswählen“ öffnet die POV in einem echten Website-Tab statt about:blank.</small>
           </div>
-          <div class="queue-head"><strong>Verarbeitungswarteschlange</strong><span id="queueCount">0 Dateien</span></div>
+          <div class="queue-head"><strong>Verarbeitungswarteschlange</strong><span><span id="queueCount">0 Dateien</span> · „Nächste POV“ speichert den aktuellen Fall ins Archiv und öffnet den nächsten.</span></div>
           <div id="uploadQueue" class="upload-queue"></div>
         </div>
         <aside class="side-info">
@@ -87,66 +87,42 @@
     <section id="view-csv" class="view">
       <div class="panel-head"><div><h2>CSV erstellen</h2><p>SOC wird mit dem SC aus dem Adminpanel gefüllt. RID bleibt immer leer. Familie bleibt leer. Admin 1–5 werden aus den PC Checkern übernommen.</p></div><div class="top-actions"><button class="ghost" id="refreshCsvBtn">Aktualisieren</button><button class="ghost" id="copyCsvBtn">CSV kopieren</button><button class="pink" id="downloadCsvBtn">CSV herunterladen</button><button class="ghost perma-csv" id="downloadPermaCsvBtn">Perma-CSV herunterladen</button></div></div>
       <div class="csv-filters">
-        <input id="csvFilterSearch" class="csv-filter-input" placeholder="CSV durchsuchen: ID, SOC/SC, Discord, Grund, Admin …" autocomplete="off">
-        <select id="csvFilterType" class="csv-filter-select"><option value="all">Typ / Status: Alle</option><option value="ban">Gebannt</option><option value="hardban">Hardban</option><option value="socban">Soc-Ban</option><option value="cheater">Cheater</option><option value="negativ">Negativ</option><option value="verweigert">Verweigert</option><option value="pccheck">PC-Check</option><option value="pcPositive">PC-Check Positiv</option><option value="pcRefused">PC-Check Verweigerung</option><option value="trolling">Trolling</option><option value="cleaning">Cleaning</option><option value="redux">Redux</option><option value="discordReason">Discord-Grund</option><option value="banevading">Banevading</option><option value="acc14">Acc 1.4</option><option value="event17">Event 1.7</option><option value="perma">Perma-Bann</option><option value="permaArchive">Perma-Archiv</option><option value="notBanned">Nicht gebannt</option><option value="video">Mit Video</option><option value="novideo">Ohne Video</option><option value="docYes">Im Dokument eingetragen</option><option value="docNo">Nicht im Dokument eingetragen</option><option value="complete">Vollständig</option><option value="open">Prüfung offen</option><option value="proof">Mit Proof</option><option value="noProof">Ohne Proof</option><option value="scPresent">SC vorhanden</option><option value="scEmpty">SC leer</option><option value="discordPresent">Discord vorhanden</option><option value="discordEmpty">Discord leer</option></select>
-        <select id="csvFilterReason" class="csv-filter-select"><option value="all">Grund: Alle</option>
-          <option>PC-Check Verweigerung</option><option>PC-Check Verweigerung - Trolling</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv - Cleaning</option><option>Event 1.7 (NoPov in PC Check)</option><option>PC Check Positiv (Banevading)</option><option>PC Check Positiv (Covering Cheater)</option><option>Acc 1.4 (Twink)</option><option>Acc 1.4 (Main)</option>
+        <input id="csvFilterSearch" class="csv-filter-input" placeholder="CSV durchsuchen: ID, SOC/SC oder Grund …" autocomplete="off">
+        <select id="csvFilterReason" class="csv-filter-select"><option value="all">Alle Gründe</option>
+          <option>PC-Check Verweigerung</option><option>PC-Check Verweigerung - Trolling</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv - Cleaning</option><option>Event 1.7 (NoPov in PC Check)</option><option>PC Check Positiv (Banevading)</option><option>PC Check Positiv (Covering Cheater)</option><option>Cheater</option><option>Acc 1.4 (Twink)</option><option>Acc 1.4 (Main)</option>
         </select>
         <select id="csvFilterSc" class="csv-filter-select"><option value="all">SOC / SC: Alle</option><option value="present">SC vorhanden</option><option value="empty">SC leer</option></select>
-        <select id="csvFilterDiscord" class="csv-filter-select"><option value="all">Discord: Alle</option><option value="present">Discord vorhanden</option><option value="empty">Discord leer</option></select>
-        <select id="csvFilterAdmin" class="csv-filter-select"><option value="all">PC-Checker: Alle</option></select>
-        <select id="csvFilterSort" class="csv-filter-select">
-          <option value="date_desc">Sortierung: Datum neu → alt</option><option value="date_asc">Datum alt → neu</option>
-          <option value="id_asc">ID aufsteigend</option><option value="id_desc">ID absteigend</option>
-          <option value="reason_asc">Grund A → Z</option><option value="reason_desc">Grund Z → A</option>
-          <option value="sc_asc">SC A → Z</option><option value="sc_desc">SC Z → A</option>
-          <option value="discord_asc">Discord A → Z</option><option value="discord_desc">Discord Z → A</option>
-          <option value="admin1_asc">Admin 1 A → Z</option><option value="admin1_desc">Admin 1 Z → A</option>
-          <option value="hardban_first">🔥 Hardban zuerst</option><option value="hardban_last">🔥 Hardban zuletzt</option>
-          <option value="socban_first">Soc-Ban zuerst</option><option value="socban_last">Soc-Ban zuletzt</option>
-          <option value="cheater_first">Cheater zuerst</option><option value="cheater_last">Cheater zuletzt</option>
-          <option value="pccheck_first">PC-Checks zuerst</option><option value="pccheck_last">PC-Checks zuletzt</option>
-          <option value="verweigert_first">Verweigerungen zuerst</option><option value="verweigert_last">Verweigerungen zuletzt</option>
-          <option value="trolling_first">Trolling zuerst</option><option value="trolling_last">Trolling zuletzt</option>
-          <option value="cleaning_first">Cleaning zuerst</option><option value="cleaning_last">Cleaning zuletzt</option>
-          <option value="redux_first">Redux zuerst</option><option value="redux_last">Redux zuletzt</option>
-          <option value="discordReason_first">Discord-Grund zuerst</option><option value="discordReason_last">Discord-Grund zuletzt</option>
-          <option value="banevading_first">Banevading zuerst</option><option value="banevading_last">Banevading zuletzt</option>
-          <option value="perma_first">Perma zuerst</option><option value="perma_last">Perma zuletzt</option>
-          <option value="complete_first">Vollständig zuerst</option><option value="complete_last">Vollständig zuletzt</option>
-          <option value="docYes_first">Dokument eingetragen zuerst</option><option value="docYes_last">Dokument eingetragen zuletzt</option>
-          <option value="proof_first">Mit Proof zuerst</option><option value="proof_last">Mit Proof zuletzt</option>
-          <option value="sc_first">Mit SC zuerst</option><option value="sc_last">Mit SC zuletzt</option>
-          <option value="discord_first">Mit Discord zuerst</option><option value="discord_last">Mit Discord zuletzt</option>
-          <option value="missing_first">Fehlende Angaben zuerst</option><option value="missing_last">Fehlende Angaben zuletzt</option>
-        </select>
-        <label class="csv-date-label">Von <input id="csvFilterDateFrom" class="csv-filter-date" type="date"></label>
-        <label class="csv-date-label">Bis <input id="csvFilterDateTo" class="csv-filter-date" type="date"></label>
+        <select id="csvFilterPerma" class="csv-filter-select" aria-label="Perma-Ban Filter"><option value="all">Perma-Ban: Alle</option><option value="yes">Nur Perma-Ban</option><option value="no">Ohne Perma-Ban</option></select>
         <button class="ghost" id="csvFilterClear">Filter zurücksetzen</button>
       </div>
       <div class="csv-summary" id="csvSummary"></div>
-      <div class="csv-table-wrap"><table class="csv-table"><thead><tr><th>Proof</th><th>Datum</th><th>ID</th><th>SOC</th><th>RID</th><th>Discord ID</th><th>Familie</th><th>Grund</th><th>Admin 1</th><th>Admin 2</th><th>Admin 3</th><th>Admin 4</th><th>Admin 5</th></tr></thead><tbody id="csvPreviewBody"></tbody></table></div>
+      <div class="csv-table-wrap"><table class="csv-table"><thead><tr><th>Proof</th><th>Datum</th><th>ID</th><th>SOC</th><th>RID</th><th>Discord ID</th><th>Familie</th><th>Ergebnis</th><th>Grund</th><th>Admin 1</th><th>Admin 2</th><th>Admin 3</th><th>Admin 4</th><th>Admin 5</th><th>Aktion</th></tr></thead><tbody id="csvPreviewBody"></tbody></table></div>
       <div class="empty hidden" id="csvEmpty"><div class="empty-icon">⇩</div><h2>Noch keine CSV-Daten</h2><p>Speichere zuerst vollständig verarbeitete POV-Fälle.</p></div>
     </section>
 
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V88</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V139</span></div>
           <p class="hint">POVs bis 2 Minuten werden vollständig in 250-ms-Schritten durchsucht. Längere Videos werden adaptiv gescannt und bei Treffern verdichtet. Das Info-Foto kommt aus einem verifizierten Bann-Cluster; der Bannblock wird für das Info-Foto bevorzugt in den letzten 5 Sekunden verifiziert. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
           <label>Präzisionsschritt (Sekunden)<input id="refineStep" type="number" min="0.4" max="1" step="0.1" value="0.5"></label>
-          <div class="setting-note">V85: Reason-OCR neu aufgebaut: einheitlicher kompletter Chat-ROI links oben, Priorität auf den letzten 5 Sekunden, strikter Bannblock mit Adam Byers [15340], Datum automatisch aus dem Dateinamen, SC ausschließlich über ACP/Chrome. </div>
+          <div class="setting-note">V94: Adaptive YouTube-Statusabfrage + 3 YouTube-Verbindungen + BannGrund wird nach erkannter Ziel-ID direkt aus dem Grand-RP-Adminpanel übernommen (2,5 s Ladezeit); einheitlicher kompletter Chat-ROI links oben, Priorität auf den letzten 5 Sekunden, strikter Bannblock mit Adam Byers [15340], Datum automatisch aus dem Dateinamen, SC ausschließlich über ACP/Chrome. </div>
+        </div>
+        <div class="settings-card yt-settings-card">
+          <div class="card-title">YouTube-Verbindungen <span class="badge">3 Slots</span></div>
+          <p class="hint">Bis zu drei YouTube-Verbindungen können hinterlegt werden. Ist eine Verbindung wegen Uploadlimit/Quota voll, wird automatisch die nächste verfügbare Verbindung verwendet. Sind alle gesperrt, bleibt die POV in der Warteschlange und wird später automatisch erneut versucht. Leere Client-ID-Felder werden vollständig ignoriert.</p>
+          <div class="yt-connection-grid">
+            <div class="yt-connection-card"><div class="yt-connection-head"><strong>YouTube-Verbindung 1</strong><span id="ytStatus1" class="connection">● Nicht verbunden</span></div><label>Google OAuth Client-ID<input id="ytClientId1" placeholder="...apps.googleusercontent.com" autocomplete="off"></label><div class="settings-actions"><button type="button" class="pink" id="ytConnect1">Mit YouTube verbinden</button><button type="button" class="ghost" id="ytReauth1">Berechtigung erneut</button><button type="button" class="ghost" id="ytDisconnect1">Trennen</button></div><div id="ytHelp1" class="hint yt-help"></div></div>
+            <div class="yt-connection-card"><div class="yt-connection-head"><strong>YouTube-Verbindung 2</strong><span id="ytStatus2" class="connection">● Nicht verbunden</span></div><label>Google OAuth Client-ID<input id="ytClientId2" placeholder="...apps.googleusercontent.com" autocomplete="off"></label><div class="settings-actions"><button type="button" class="pink" id="ytConnect2">Mit YouTube verbinden</button><button type="button" class="ghost" id="ytReauth2">Berechtigung erneut</button><button type="button" class="ghost" id="ytDisconnect2">Trennen</button></div><div id="ytHelp2" class="hint yt-help"></div></div>
+            <div class="yt-connection-card"><div class="yt-connection-head"><strong>YouTube-Verbindung 3</strong><span id="ytStatus3" class="connection">● Nicht verbunden</span></div><label>Google OAuth Client-ID<input id="ytClientId3" placeholder="...apps.googleusercontent.com" autocomplete="off"></label><div class="settings-actions"><button type="button" class="pink" id="ytConnect3">Mit YouTube verbinden</button><button type="button" class="ghost" id="ytReauth3">Berechtigung erneut</button><button type="button" class="ghost" id="ytDisconnect3">Trennen</button></div><div id="ytHelp3" class="hint yt-help"></div></div>
+          </div>
+          <div id="ytConnectHelp" class="hint" style="margin-top:10px"></div>
+          <div class="setting-note" style="margin-top:10px"><b>Google OAuth:</b> YouTube und Google Drive verwenden den sicheren Google-Popup-Flow. Eine OAuth-Weiterleitungs-URI ist dafür nicht erforderlich. In Google Cloud muss als <b>autorisierter JavaScript-Ursprung</b> exakt <code>https://felixsp2003.github.io</code> eingetragen sein.</div>
         </div>
         <div class="settings-card">
-          <div class="card-title">YouTube-Verbindung <span id="ytStatus" class="connection">● Nicht verbunden</span></div>
-          <p class="hint">Die POV wird zuerst vollständig zu YouTube hochgeladen (nicht gelistet). Erst danach startet die OCR. Nach dem Prüfen wird der YouTube-Titel auf den finalen Dateinamen aktualisiert.</p>
-          <label>Google OAuth Client ID<input id="clientId" placeholder="...apps.googleusercontent.com" autocomplete="off" oninput="localStorage.setItem('yt_client_id', this.value.trim())"></label>
-          <div class="settings-actions"><a class="pink yt-link" id="connectYoutube" href="#" onclick="return grandrpPrepareYouTubeAuth(false)">Mit YouTube verbinden</a><a class="ghost yt-link" id="reauthorizeYoutube" href="#" onclick="return grandrpPrepareYouTubeAuth(true)">Berechtigung erneut</a><button type="button" class="ghost" id="disconnectYoutube" onclick="grandrpDisconnectYouTube()">Verbindung entfernen</button></div><div id="ytConnectHelp" class="hint" style="margin-top:10px"></div><div class="setting-note" style="margin-top:10px"><b>OAuth-Weiterleitung:</b> <code id="ytRedirectUriText"></code><br><span>Diese URL einmal in Google Cloud unter „Autorisierte Weiterleitungs-URIs“ eintragen.</span></div>
-        </div>
-        <div class="settings-card">
-          <div class="card-title">Browser / Chrome ACP</div><p class="hint">Für den SC wird Chrome mit dem Grand-RP-Adminpanel verwendet. Die Begleit-Erweiterung wartet auf die geladenen Authorization-Daten und übernimmt die Social-Club-Zeile zur Ziel-ID.</p><div class="setting-note">ACP-Erkennung: bis zu 30 Sekunden Lade-/DOM-Wartezeit. Der SC wird nicht mehr aus der POV-OCR geraten.</div>
+          <div class="card-title">Browser / Chrome ACP</div><p class="hint">Für SC und BannGrund wird Chrome mit dem Grand-RP-Adminpanel verwendet. Die Begleit-Erweiterung wartet auf die geladenen Daten und übernimmt Social Club sowie BannGrund zur Ziel-ID.</p><div class="setting-note">ACP-Erkennung: SC bis zu 30 Sekunden; BannGrund mit mindestens 2,5 Sekunden Ladezeit vor dem Auslesen des roten Bannbereichs.</div>
         </div>
         <div class="settings-card">
           <div class="card-title">Benutzer & Sicherheit <span class="badge">Lokal</span></div>
@@ -156,8 +132,19 @@
         </div>
         <div class="settings-card">
           <div class="card-title">Lokale Daten <span id="persistentStorageStatus" class="connection">● Speicherstatus wird geprüft</span></div>
-          <p class="hint">Archiv-Metadaten und POV-Dateien werden lokal in IndexedDB und zusätzlich als Metadaten in localStorage gehalten. Der Checker fordert persistenten Browser-Speicher an und speichert automatisch weiter. Ein Eintrag bleibt erhalten, bis du ihn selbst löschst; das Löschen der Browser-/Profildaten kann lokale Daten jedoch trotzdem entfernen.</p>
-          <button class="ghost danger" id="clearLocal">Lokales Archiv komplett löschen</button>
+          <p class="hint">Archiv-Metadaten und POV-Dateien werden lokal in IndexedDB und zusätzlich als Metadaten in localStorage gehalten. Der Checker fordert persistenten Browser-Speicher an und speichert automatisch weiter. Ein Eintrag bleibt erhalten, bis du ihn selbst löschst. <b>Für eine Aufbewahrung über eine Browser-Deinstallation hinweg muss die Cloud-Sicherung aktiviert sein.</b></p>
+          <div class="settings-actions archive-backup-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"><button type="button" class="ghost" id="downloadArchiveBackup">Archiv-Backup herunterladen</button><label class="ghost archive-restore-button" id="restoreArchiveBackup" for="archiveBackupFile" title="JSON-Backup auswählen und sofort einlesen"><span>Archiv-Backup wiederherstellen</span><input type="file" id="archiveBackupFile" accept=".json,application/json,text/json" aria-label="Archiv-Backup-Datei auswählen"></label><span id="archiveBackupFileName" class="setting-note" style="display:flex;align-items:center;min-height:40px">Noch keine Backup-Datei ausgewählt</span></div><button class="ghost danger" id="clearLocal">Lokales Archiv komplett löschen</button>
+        </div>
+        <div class="settings-card">
+          <div class="card-title">Permanenter Cloud-Speicher <span id="driveStatus" class="connection">● Nicht verbunden</span></div>
+          <p class="hint">Browser-Speicher kann eine Deinstallation des Browsers nicht überleben. Für browserunabhängige Aufbewahrung wird deshalb nur das Archiv-Backup (JSON) auf deinem Google-Drive-Konto gespeichert. **POV-Videodateien werden nicht in Drive gespeichert.**</p>
+          <div class="settings-actions" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="ghost" id="driveConnectBtn">Google Drive verbinden</button>
+            <button type="button" class="ghost" id="driveSyncBtn">Jetzt alles sichern</button>
+            <button type="button" class="ghost" id="driveRestoreBtn">Cloud-Archiv wiederherstellen</button>
+          </div>
+          <div id="driveHelp" class="setting-note" style="margin-top:10px">Die Cloud-Sicherung braucht einmalig die Drive-Berechtigung im Google-Konto.</div>
+        </div>
         </div>
       </div>
     </section>
@@ -184,7 +171,8 @@
   <form id="entryForm">
     <div class="form-grid">
       <div class="field"><label>Ziel-ID</label><input id="targetId" inputmode="numeric" maxlength="6" placeholder="max. 6 Ziffern"><button type="button" class="jump hidden" data-field="targetId">POV hier öffnen</button></div>
-      <div class="field"><label>Grund</label><select id="reason"><option value="">Bitte wählen</option><option>PC-Check Verweigerung</option><option>PC-Check Verweigerung - Trolling</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv - Cleaning</option><option>Event 1.7 (NoPov in PC Check)</option><option>PC Check Positiv (Banevading)</option><option>PC Check Positiv (Covering Cheater)</option><option>Acc 1.4 (Twink)</option><option>Acc 1.4 (Main)</option></select><button type="button" class="jump hidden" data-field="reason">Grund manuell auswählen</button><div class="field-note">Perma wird automatisch gesetzt; bei PC-Check Verweigerung wird gefragt.</div></div>
+      <div class="field"><label>Ergebnis</label><input id="result" placeholder="Ergebnis manuell eintragen" autocomplete="off"><div class="field-note">Beim Hochladen eintragen. Bei Verweigerung/Trolling automatisch. Bei Positiv beim Prüfen selbst eintragen.</div></div>
+      <div class="field"><label>Grund</label><select id="reason"><option value="">Bitte wählen</option><option>PC-Check Verweigerung</option><option>PC-Check Verweigerung - Trolling</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv - Cleaning</option><option>Event 1.7 (NoPov in PC Check)</option><option>PC Check Positiv (Banevading)</option><option>PC Check Positiv (Covering Cheater)</option><option>Cheater</option><option>Acc 1.4 (Twink)</option><option>Acc 1.4 (Main)</option></select><button type="button" class="jump hidden" data-field="reason">Grund manuell auswählen</button><div id="reasonStatus" class="acp-status warn">BannGrund wird im roten Adminpanel-Bereich geladen; bei fehlendem SC zuerst SC holen, danach Character-Info öffnen.</div><div class="field-note">Der Ablauf ist zweistufig: zuerst SC aus Authorization holen und Tab schließen, danach Character-Info erneut öffnen und den roten BannGrund auslesen. 2,5 Sekunden Ladezeit vor dem Auslesen.</div></div>
       <div class="field"><label>SOC / SC aus Adminpanel</label><input id="sc" maxlength="40" placeholder="SC wird aus dem Chrome-Adminpanel übernommen"><div class="acp-actions"><button type="button" class="pink mini" id="fetchAcpSc">SC aus ACP holen</button><button type="button" class="ghost mini" id="copyAcpSc">SC kopieren</button></div><div id="acpStatus" class="acp-status warn">SC fehlt · über ACP holen</div></div>
       <div class="field"><label>Server</label><input id="server" value="3" readonly><div class="field-note">Fest: DE03</div></div>
       <div class="field"><label>Datum</label><div class="inline-control"><input id="date" type="date" aria-label="Datum aus Dateiname"></div><div class="field-note">Automatisch aus dem POV-Dateinamen.</div></div>
@@ -205,82 +193,26 @@
     <div class="switches"><label>Perma-Bann<input id="perma" type="checkbox"><span class="switch"></span></label><label>Archiv: in Perma eingetragen<input id="permaArchive" type="checkbox"><span class="switch"></span></label><label>Nicht gebannt<input id="notBanned" type="checkbox"><span class="switch"></span></label></div>
     <div class="field" style="margin-top:12px"><label>Im Dokument</label><select id="documentStatus"><option value="nicht eingetragen">Nicht eingetragen</option><option value="eingetragen">Eingetragen</option></select></div>
     <div id="ocrWarning" class="ocr-warning hidden"></div><div class="modal-tools"><button type="button" class="ghost mini hidden" id="reanalyzeBtn">OCR erneut ausführen</button></div>
-    <div class="modal-actions"><button type="button" class="ghost" id="cancelBtn">Abbrechen</button><button type="submit" class="pink" id="saveBtn">Speichern & YouTube hochladen</button></div>
+    <div class="modal-actions"><button type="button" class="ghost" id="cancelBtn">Abbrechen</button><button type="button" class="ghost danger" id="deleteCurrentBtn">Löschen</button><button type="button" class="ghost" id="nextQueueBtn">Nächste POV</button><button type="submit" class="pink" id="saveBtn">Speichern & YouTube hochladen</button></div>
   </form>
 </div></div>
 
 <div id="toast" class="toast"></div>
 <script>
 (function(){
-  'use strict';
-  const CLIENT_KEY='yt_client_id';
-  const TOKEN_KEY='yt_access_token';
-  const STATE_KEY='grandrp_oauth_state_v51';
-  const SCOPE_KEY='grandrp_yt_scope_v51';
-  const YT_SCOPES='https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl';
-  const RESULT_KEY='grandrp_oauth_result_v51';
-  const EXPIRES_KEY='yt_access_expires_at_v50';
-  function callbackUrl(){ return new URL('oauth-callback.html', location.href).href; }
-  function validClientId(id){ return /^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(String(id||'').trim()); }
-  function state(){
-    const bytes=new Uint8Array(24); crypto.getRandomValues(bytes);
-    return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
-  }
-  function show(text,color){ const el=document.getElementById('ytConnectHelp'); if(el){el.textContent=text;el.style.color=color||'';} }
-  function startAuth(forceConsent){
-    try{
-      const id=String(document.getElementById('clientId')?.value||localStorage.getItem(CLIENT_KEY)||'').trim();
-      if(!id) throw new Error('Bitte zuerst die Google OAuth Client-ID eintragen.');
-      if(!validClientId(id)) throw new Error('Die Google OAuth Client-ID hat kein gültiges Format.');
-      localStorage.setItem(CLIENT_KEY,id);
-      const s=state();
-      // Persist across the Google round-trip even if the browser recreates the tab context.
-      localStorage.setItem(STATE_KEY,s);
-      sessionStorage.setItem(STATE_KEY,s);
-      localStorage.removeItem(RESULT_KEY);
-      sessionStorage.removeItem(RESULT_KEY);
-      const params=new URLSearchParams({
-        client_id:id,
-        redirect_uri:callbackUrl(),
-        response_type:'token',
-        scope:YT_SCOPES,
-        include_granted_scopes:'true',
-        state:s
-      });
-      if(forceConsent) params.set('prompt','consent');
-      show('Google wird geöffnet…');
-      // Direct navigation from the user click. No popup and no async operation.
-      window.location.href='https://accounts.google.com/o/oauth2/v2/auth?'+params.toString();
-      return false;
-    }catch(err){
-      show(err.message||String(err),'#ff8ebd');
-      return false;
-    }
-  }
-  window.grandrpPrepareYouTubeAuth=function(forceConsent){ return startAuth(!!forceConsent); };
-  window.grandrpDisconnectYouTube=function(){
-    localStorage.removeItem(TOKEN_KEY);sessionStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(STATE_KEY);sessionStorage.removeItem(STATE_KEY);
-    localStorage.removeItem(RESULT_KEY);sessionStorage.removeItem(RESULT_KEY);
-    const status=document.getElementById('ytStatus'); if(status){status.textContent='● Nicht verbunden';status.style.color='#7f7488';}
-    show('YouTube-Verbindung entfernt.');
-  };
-  window.addEventListener('DOMContentLoaded',function(){
-    const input=document.getElementById('clientId');
-    if(input){input.value=localStorage.getItem(CLIENT_KEY)||''; input.addEventListener('input',()=>localStorage.setItem(CLIENT_KEY,input.value.trim()));}
-    const uri=document.getElementById('ytRedirectUriText'); if(uri) uri.textContent=callbackUrl();
-    const status=document.getElementById('ytStatus');
-    const scopeReady=localStorage.getItem(SCOPE_KEY)==='1';
-    const token=scopeReady?(localStorage.getItem(TOKEN_KEY)||sessionStorage.getItem(TOKEN_KEY)||''):'';
-    if(!scopeReady){localStorage.removeItem(TOKEN_KEY);sessionStorage.removeItem(TOKEN_KEY);}
-    if(token){sessionStorage.setItem(TOKEN_KEY,token); if(status){status.textContent='● Verbunden';status.style.color='#69e1af';}}
-    const resultRaw=localStorage.getItem(RESULT_KEY)||sessionStorage.getItem(RESULT_KEY)||'';
-    if(resultRaw){try{const data=JSON.parse(resultRaw);show(data.message||'',data.ok?'#69e1af':'#ff8ebd'); if(data.ok)localStorage.removeItem(RESULT_KEY); sessionStorage.removeItem(RESULT_KEY);}catch{}}
-    const connect=document.getElementById('connectYoutube'); const reauth=document.getElementById('reauthorizeYoutube');
-    if(connect) connect.href='#'; if(reauth) reauth.href='#';
-  });
+  try{
+    var allowed={archive:1,cases:1,upload:1,csv:1,settings:1};
+    var hash=String(location.hash||'').replace(/^#/,'');
+    var saved=allowed[hash]?hash:(localStorage.getItem('grandrp_current_view')||sessionStorage.getItem('grandrp_current_view')||'archive');
+    if(!allowed[saved])saved='archive';
+    document.documentElement.dataset.initialView=saved;
+    document.body?.setAttribute('data-initial-view',saved);
+    if(location.hash !== '#'+saved){try{location.hash=saved;}catch{try{history.replaceState(null,'',location.pathname+location.search+'#'+saved);}catch{}}}
+  }catch{}
 })();
 </script>
-<script src="app.js?v=88"></script>
+<script src="app.js?v=135"></script>
+
+
 </body>
 </html>

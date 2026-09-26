@@ -3,26 +3,27 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Grand RP · Videoauswahl</title>
+<title>Grand RP · Videoauswahl · V69</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 :root{color-scheme:dark;--bg:#07060c;--panel:#120d19;--panel2:#17101f;--line:#30243a;--text:#f5eef8;--muted:#aaa0b0;--accent:#ff2380;--good:#69e1af;--warn:#ffbf66}
-*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Arial,sans-serif}.app{height:100%;display:flex;flex-direction:column}.bar{padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap}.bar strong{margin-right:auto}.bar button,.bar input,.bar select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px}.bar button:hover{border-color:#5b4769}.bar .primary{background:var(--accent);border-color:var(--accent)}.bar .good{background:#123326;border-color:#215f46}.tip{padding:10px 16px;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px}.workspace{flex:1;min-height:0;display:flex;flex-direction:column}.stage-wrap{flex:1;min-height:0;display:grid;place-items:center;padding:16px;overflow:auto}.stage{position:relative;display:inline-block;max-width:100%;max-height:100%;background:#000;box-shadow:0 15px 50px rgba(0,0,0,.35)}video{display:block;max-width:min(96vw,1600px);max-height:68vh;background:#000}.overlay{position:absolute;left:0;top:0;cursor:crosshair;touch-action:none}.bottom{border-top:1px solid var(--line);background:var(--panel);padding:12px 16px;display:grid;gap:10px}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.row textarea{width:100%;min-height:84px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px;resize:vertical}.status{font-size:13px;color:var(--muted)}.status.good{color:var(--good)}.status.warn{color:var(--warn)}.preset{display:flex;gap:6px;flex-wrap:wrap}.preset button{font-size:12px}.server-buttons button{min-width:48px}.hidden{display:none}.title{font-size:14px}.sub{font-size:12px;color:var(--muted)}.check{font-size:12px;color:var(--muted)}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Arial,sans-serif}.app{height:100%;display:flex;flex-direction:column}.bar{padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap}.bar strong{margin-right:auto}.bar button,.bar input,.bar select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px}.bar button:hover{border-color:#5b4769}.bar .primary{background:var(--accent);border-color:var(--accent)}.bar .good{background:#123326;border-color:#215f46}.tip{padding:10px 16px;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px}.workspace{flex:1;min-height:0;display:flex;flex-direction:column}.stage-wrap{flex:1;min-height:0;display:grid;place-items:center;padding:16px;overflow:auto}.stage{position:relative;display:inline-block;max-width:100%;max-height:100%;background:#000;box-shadow:0 15px 50px rgba(0,0,0,.35)}video{display:block;max-width:min(96vw,1600px);max-height:68vh;background:#000}.overlay{position:absolute;left:0;top:0;cursor:crosshair;touch-action:none;pointer-events:none}.overlay.draw-active{pointer-events:auto}.bottom{border-top:1px solid var(--line);background:var(--panel);padding:12px 16px;display:grid;gap:10px}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.row textarea{width:100%;min-height:84px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px;resize:vertical}.status{font-size:13px;color:var(--muted)}.status.good{color:var(--good)}.status.warn{color:var(--warn)}.preset{display:flex;gap:6px;flex-wrap:wrap}.preset button{font-size:12px}.server-buttons button{min-width:48px}.hidden{display:none}.title{font-size:14px}.sub{font-size:12px;color:var(--muted)}.check{font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
 <div class="app">
   <div class="bar">
-    <strong id="title">Videoauswahl</strong>
+    <strong id="title">Videoauswahl · V69</strong>
     <label>Zeit <input id="time" type="number" step="0.1" min="0" value="0" style="width:100px"></label>
     <button id="seek">Springen</button>
     <button id="prev">−0,5 s</button>
     <button id="next">+0,5 s</button>
     <button id="prev2">−5 s</button>
     <button id="next2">+5 s</button>
+    <button id="drawMode" class="primary">Rahmen ziehen: AUS</button>
     <select id="preset">
       <option value="">Bereich wählen</option>
-      <option value="chat">Links oben · Bannblock</option>
+      <option value="chat">Links oben · kompletter Bann-Chat</option>
       <option value="sc">SC/IP · Chatbereich</option>
       <option value="server">Rechts oben · Server</option>
       <option value="date">Rechts unten · Datum</option>
@@ -30,7 +31,7 @@
       <option value="reason">Grund · hinter Grund:</option>
     </select>
   </div>
-  <div class="tip" id="tip">Ziehe mit der Maus einen Rahmen um die Information. Das Fenster ist eine normale GitHub-Pages-Seite – kein about:blank. Für SC/IP markierst du am besten die Zeilen mit IP und SC.</div>
+  <div class="tip" id="tip">Video normal abspielen/vor- und zurückspulen. Die Video-Controls funktionieren standardmäßig. Für eine Auswahl „Rahmen ziehen“ aktivieren; danach wieder ausschalten, um normal zu spulen. Beim OCR wird ausschließlich das gewählte Feld ausgewertet. Für Ziel-ID gilt zusätzlich: Admin-ID 15340 wird niemals übernommen.</div>
   <div class="workspace">
     <div class="stage-wrap">
       <div class="stage">
@@ -60,61 +61,127 @@
 <script>
 (() => {
   'use strict';
-  const DB_NAME='grandrp_pov_db_v29', STORE='videos';
+  const DB_NAME='grandrp_pov_db_v42', STORE='videos';
   const qs=new URLSearchParams(location.search);
   const job=qs.get('job')||''; const field=qs.get('field')||'view'; const start=Number(qs.get('t')||0)||0;
-  const ALLOWED=['PC Check Positiv','PC Check Verweigert','PC-Check Positiv 4.1 (Discord)','PC-Check Positiv 4.1 (Redux)','PC-Check Positiv (Banevading)','PC Check Positiv (Cleaning)','Cheating','Acc 1.1','Acc 1.4','Event 1.7'];
+  const ALLOWED=['PC-Check Verweigerung','PC-Check Verweigerung - Trolling','PC-Check Positiv 4.1 (Discord)','PC-Check Positiv','PC-Check Positiv 4.1 (Redux)','PC-Check Positiv - Cleaning','Event 1.7 (NoPov in PC Check)','PC Check Positiv (Banevading)','PC Check Positiv (Covering Cheater)','Acc 1.4 (Twink)','Acc 1.4 (Main)'];
   const $=s=>document.querySelector(s), video=$('#video'), overlay=$('#overlay'), ctx=overlay.getContext('2d'), time=$('#time'), manual=$('#manual'), status=$('#status'), fieldTitle=$('#fieldTitle'), tip=$('#tip'), serverButtons=$('#serverButtons');
-  let selection=null,drawing=false,sx=0,sy=0,file=null;
+  let selection=null,drawing=false,sx=0,sy=0,file=null,drawMode=false;
   function setStatus(t,kind=''){status.textContent=t;status.className='status '+kind}
-  function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});}
+  function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,3);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains(STORE))r.result.createObjectStore(STORE);};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});}
   async function getVideo(id){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const r=tx.objectStore(STORE).get(id);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});}
+  function formatSize(n){return n>1024**3?(n/1024**3).toFixed(1)+' GB':n>1024**2?(n/1024**2).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB'}
   function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
   function normalizeHexLoose(s){return String(s||'').toUpperCase().replace(/[OoQq]/g,'0').replace(/[IiLl|!]/g,'1').replace(/[Ss$]/g,'5').replace(/[Gg]/g,'6').replace(/[Zz]/g,'2').replace(/[Tt]/g,'7').replace(/[^0-9A-F]/g,'').toLowerCase();}
   function extractDate(text){const m=String(text||'').match(/\b(0?[1-9]|[12]\d|3[01])[\/\.\-](0?[1-9]|1[0-2])[\/\.\-](20\d{2})\b/);if(!m)return '';return `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;}
+  function lev(a,b){a=String(a);b=String(b);const p=Array.from({length:b.length+1},(_,i)=>i);for(let i=1;i<=a.length;i++){const c=[i];for(let j=1;j<=b.length;j++)c[j]=Math.min(c[j-1]+1,p[j]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p.splice(0,p.length,...c)}return p[b.length]}
+  function compactReason(s){return String(s||'').toLowerCase().replace(/[°º¤]/g,'p').replace(/[‐‑‒–—]/g,'-').replace(/[|¦]/g,'i').replace(/yerweigerung/g,'verweigerung').replace(/verweigerunq/g,'verweigerung').replace(/(?:po|0|o|c)[\s\-_]*check/g,'pc check').replace(/pchek/g,'pc check').replace(/pcchec/g,'pc check').replace(/0/g,'o').replace(/5/g,'s').replace(/9/g,'g').replace(/4\s*[.,\-_ ]*\s*[il]/g,'41').replace(/\s+/g,'').replace(/[^a-z0-9]/g,'')}
+  function reasonScore(a,b){const aa=compactReason(a),bb=compactReason(b);if(!aa||!bb)return 0;return 1-lev(aa,bb)/Math.max(aa.length,bb.length)}
   function reasonFromText(text){
-    const c=String(text||'').toLowerCase().replace(/[^a-z0-9.() -]+/g,' ');
-    const tests=[['Event 1.7',['event 1.7','event17']],['Acc 1.4',['acc 1.4','acc14']],['Acc 1.1',['acc 1.1','acc11']],['Cheating',['cheating','cheat']],['PC-Check Positiv 4.1 (Discord)',['pc check positiv 4.1 discord','pc-check positiv 4.1 discord']],['PC-Check Positiv 4.1 (Redux)',['pc check positiv 4.1 redux','pc-check positiv 4.1 redux']],['PC-Check Positiv (Banevading)',['pc check positiv banevading']],['PC Check Positiv (Cleaning)',['pc check positiv cleaning']],['PC Check Verweigert',['pc check verweigert','pc check verweigerung','pc che k rwelg nn','pc che k verweig']],['PC Check Positiv',['pc check positiv','pc-check positiv']]];
-    for(const [r,vs] of tests)for(const v of vs)if(c.includes(v))return r;return '';
+    const raw=String(text||'');
+    const lines=raw.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    const pieces=[];
+    for(const line of lines){
+      const gm=line.match(/(?:grund|grun[dti]|gru[nm]d)\s*[:.\-]?\s*(.*)$/i); if(gm?.[1])pieces.push(gm[1]);
+      pieces.push(line);
+    }
+    const AL=ALLOWED;
+    const direct=pieces.map(compactReason).join(' ');
+    const n=direct;
+    const pc=/pccheck|pchek|pcchec|pcheck/.test(n), ver=/verweig|weiger|refus|reject/.test(n), troll=/troll/.test(n), pos=/posit|posiv/.test(n);
+    const dc=/discord/.test(n), redux=/redux/.test(n), clean=/cleaning|clean/.test(n), bane=/banevad|banvad/.test(n), cover=/covering|cheater/.test(n), nopov=/nopov|no[pv]ov/.test(n), has41=/(41|4i|4l)/.test(n);
+    if((pc&&ver&&troll)||(troll&&n.includes('pccheck'))||/trollinginpc/.test(n))return 'PC-Check Verweigerung - Trolling';
+    if(pos&&dc&&has41)return 'PC-Check Positiv 4.1 (Discord)';
+    if(pos&&redux&&has41)return 'PC-Check Positiv 4.1 (Redux)';
+    if(pos&&bane)return 'PC Check Positiv (Banevading)';
+    if(pos&&cover)return 'PC Check Positiv (Covering Cheater)';
+    if(pos&&clean)return 'PC-Check Positiv - Cleaning';
+    if(/event17/.test(n)&&nopov)return 'Event 1.7 (NoPov in PC Check)';
+    if(pos)return 'PC-Check Positiv';
+    if(ver)return 'PC-Check Verweigerung';
+    if(/acc14twink/.test(n))return 'Acc 1.4 (Twink)';
+    if(/acc14main/.test(n)||n==='acc14')return 'Acc 1.4 (Main)';
+    let best='',score=0;
+    for(const r of AL){const sc=reasonScore(raw,r);if(sc>score){score=sc;best=r;}}
+    return score>=0.78?best:'';
   }
   function fieldLabel(){const map={sc:'SC / RID',server:'Server',targetId:'Ziel-ID',reason:'Grund',date:'Datum',discordId:'Discord ID',view:'POV ansehen'};return map[field]||field}
   function syncCanvas(){const r=video.getBoundingClientRect();overlay.width=Math.max(1,Math.round(r.width));overlay.height=Math.max(1,Math.round(r.height));overlay.style.width=r.width+'px';overlay.style.height=r.height+'px';draw()}
   function draw(){ctx.clearRect(0,0,overlay.width,overlay.height);if(selection){ctx.fillStyle='rgba(255,35,128,.15)';ctx.fillRect(selection.x,selection.y,selection.w,selection.h);ctx.strokeStyle='#ff2380';ctx.lineWidth=2;ctx.strokeRect(selection.x+.5,selection.y+.5,selection.w,selection.h);}}
   function pos(e){const r=overlay.getBoundingClientRect();return{x:Math.max(0,Math.min(overlay.width,e.clientX-r.left)),y:Math.max(0,Math.min(overlay.height,e.clientY-r.top))}}
+  function setDrawMode(v){drawMode=!!v;overlay.classList.toggle('draw-active',drawMode);const b=$('#drawMode');if(b)b.textContent=drawMode?'Rahmen ziehen: AN':'Rahmen ziehen: AUS';setStatus(drawMode?'Rahmenmodus aktiv. Ziehe jetzt den Bereich über dem Video.':'Rahmenmodus aus. Die normalen Video-Controls funktionieren wieder.');}
+  const drawBtn=$('#drawMode'); if(drawBtn) drawBtn.onclick=()=>setDrawMode(!drawMode);
   overlay.addEventListener('pointerdown',e=>{const p=pos(e);drawing=true;sx=p.x;sy=p.y;selection={x:sx,y:sy,w:0,h:0};overlay.setPointerCapture(e.pointerId);draw()});
   overlay.addEventListener('pointermove',e=>{if(!drawing)return;const p=pos(e);selection={x:Math.min(sx,p.x),y:Math.min(sy,p.y),w:Math.abs(sx-p.x),h:Math.abs(sy-p.y)};draw()});
   overlay.addEventListener('pointerup',()=>{drawing=false}); overlay.addEventListener('pointercancel',()=>{drawing=false});
   function seekTo(t){video.currentTime=Math.max(0,Math.min(video.duration||1e9,Number(t)||0));time.value=video.currentTime.toFixed(1)}
-  function presetRect(name){const W=overlay.width,H=overlay.height;const m={chat:[0,.02,.66,.36],sc:[0,.12,.72,.28],targetId:[0,.04,.72,.16],reason:[0,.14,.72,.14],server:[.86,.0,.14,.18],date:[.78,.80,.22,.20]}[name];if(!m)return;selection={x:W*m[0],y:H*m[1],w:W*m[2],h:H*m[3]};draw();setStatus('Bereich vorgewählt. Du kannst ihn mit der Maus neu ziehen.');}
+  function presetRect(name){const W=overlay.width,H=overlay.height;const m={chat:[0,0,.82,.60],sc:[0,0,.82,.60],targetId:[0,0,.82,.60],reason:[0,0,.82,.60],server:[.82,0,.16,.22],date:[.02,.02,.84,.42]}[name];if(!m)return;selection={x:W*m[0],y:H*m[1],w:W*m[2],h:H*m[3]};draw();setDrawMode(false);setStatus('Bereich vorgewählt. Du kannst sofort OCR lesen oder die Auswahl mit „Rahmen ziehen: AN“ neu ziehen.');}
   $('#seek').onclick=()=>seekTo(time.value);$('#prev').onclick=()=>seekTo(video.currentTime-.5);$('#next').onclick=()=>seekTo(video.currentTime+.5);$('#prev2').onclick=()=>seekTo(video.currentTime-5);$('#next2').onclick=()=>seekTo(video.currentTime+5);
-  video.addEventListener('loadedmetadata',()=>{syncCanvas();seekTo(start);setStatus('POV bereit. Ziehe einen Rahmen um die Information.','good')});video.addEventListener('timeupdate',()=>time.value=video.currentTime.toFixed(1));window.addEventListener('resize',syncCanvas);
+  video.addEventListener('loadedmetadata',()=>{syncCanvas();seekTo(start);setDrawMode(false);setStatus(`POV bereit · ${video.videoWidth}×${video.videoHeight} · ${file?formatSize(file.size):''}`,'good')});video.addEventListener('timeupdate',()=>time.value=video.currentTime.toFixed(1));window.addEventListener('resize',syncCanvas);
   $('#preset').onchange=e=>{if(e.target.value)presetRect(e.target.value)};
-  $('#clear').onclick=()=>{selection=null;manual.value='';draw();setStatus('Auswahl gelöscht.')};
+  $('#clear').onclick=()=>{selection=null;manual.value='';draw();setDrawMode(false);setStatus('Auswahl gelöscht.')};
   serverButtons.querySelectorAll('button').forEach(b=>b.onclick=()=>{if(field==='server'){manual.value=b.dataset.server;setStatus(`Server ${b.dataset.server} gewählt.`,'good')}});
+  function fieldConfig(){
+    return {
+      targetId:{psm:[7,8,11], whitelist:'0123456789[]()ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz', label:'Ziel-ID / Bannzeile'},
+      reason:{psm:[6,7,11,12,13], whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789().-° ', label:'Grund'},
+      sc:{psm:[7,8,11], whitelist:'0123456789ABCDEFabcdef:.- ', label:'SC / RID'},
+      date:{psm:[7,8,11], whitelist:'0123456789./- ', label:'Datum'},
+      discordId:{psm:[7,8,11], whitelist:'0123456789 ', label:'Discord ID'}
+    }[field]||{psm:[6,11],whitelist:'',label:'Auswahl'};
+  }
+  function gray(src){const c=document.createElement('canvas');c.width=src.width;c.height=src.height;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(src,0,0);const im=x.getImageData(0,0,c.width,c.height),d=im.data;for(let i=0;i<d.length;i+=4){const v=Math.round(.299*d[i]+.587*d[i+1]+.114*d[i+2]);d[i]=d[i+1]=d[i+2]=v;}x.putImageData(im,0,0);return c;}
+  function thresh(src,cut=150){const c=gray(src),x=c.getContext('2d',{willReadFrequently:true}),im=x.getImageData(0,0,c.width,c.height),d=im.data;for(let i=0;i<d.length;i+=4){const v=d[i]>=cut?255:0;d[i]=d[i+1]=d[i+2]=v;}x.putImageData(im,0,0);return c;}
+  function clear(c){try{c.width=1;c.height=1}catch{}}
+  function normId(v){const raw=String(v||'').toUpperCase().replace(/[^0-9A-Z]/g,'');const m=raw.replace(/[A-Z]/g,ch=>({O:'0',Q:'0',I:'1',L:'1',S:'5',Z:'2',G:'6',B:'8',T:'7'}[ch]||''));const d=m.replace(/\D/g,'');return /^\d{1,6}$/.test(d)?d:'';}
+  function extractTargetFromBanner(txt){
+    const t=String(txt||'').replace(/\r/g,' ');
+    const m=t.match(/\b15340\b[\s\S]{0,180}?\b(?:hat|ha[t7l1i])\b[\s\S]{0,180}?(?:\[\s*([0-9A-Za-z]{1,8})\s*\]|\bspieler\b\s*([0-9A-Za-z]{1,8}))/i);
+    return normId(m?.[1]||m?.[2]||'');
+  }
+  function numericIdVotes(texts){
+    const votes=new Map();
+    for(const txt of texts){
+      const tokens=[...String(txt||'').matchAll(/(?:\[\s*)?([0-9A-Za-z]{1,8})(?:\s*\])?/g)].map(m=>normId(m[1])).filter(x=>/^\d{1,6}$/.test(x));
+      for(const id of tokens){if(id==='15340')continue;votes.set(id,(votes.get(id)||0)+1);}
+    }
+    return [...votes.entries()].sort((a,b)=>b[1]-a[1]||Number(b[0])-Number(a[0]))[0]?.[0]||'';
+  }
   async function runOcr(){
-    if(field==='server'){manual.value=manual.value||'3';setStatus('Server ist im aktuellen Workflow standardmäßig 3.','good');return}
-    if(!selection||selection.w<6||selection.h<6){setStatus('Bitte zuerst mit der Maus einen Rahmen ziehen.','warn');return}
+    if(field==='server'){manual.value='3';setStatus('Nur das angeforderte Feld wird gelesen: Server = 3.','good');return}
+    if(!selection||selection.w<6||selection.h<6){setStatus('Bitte zuerst nur den benötigten Bereich markieren.','warn');return}
     if(!window.Tesseract){setStatus('OCR-Bibliothek konnte nicht geladen werden.','warn');return}
-    setStatus('OCR läuft…');
+    const cfg=fieldConfig();setStatus(`${cfg.label}: nur diese Auswahl wird analysiert…`);
+    let canvases=[];
     try{
       const sx=selection.x/overlay.clientWidth*video.videoWidth, sy=selection.y/overlay.clientHeight*video.videoHeight, sw=selection.w/overlay.clientWidth*video.videoWidth, sh=selection.h/overlay.clientHeight*video.videoHeight;
-      const out=document.createElement('canvas');out.width=Math.max(10,Math.round(sw*3));out.height=Math.max(10,Math.round(sh*3));
-      const octx=out.getContext('2d');octx.imageSmoothingEnabled=true;octx.filter='contrast(1.25) saturate(0.9)';octx.drawImage(video,sx,sy,sw,sh,0,0,out.width,out.height);
-      const res=await Tesseract.recognize(out,'eng',{logger:m=>{if(m.status&&m.progress)setStatus(`${Math.round(m.progress*100)}% · ${m.status}`)}});
-      let txt=(res.data.text||'').trim();
-      const lower=txt.toLowerCase();
-      if(field==='sc'){const ipLike=txt.match(/(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{0,4}/ig)||[];const normalized=normalizeHexLoose(txt);const candidates=normalized.match(/[0-9a-f]{40}/g)||[];if(candidates.length)txt=candidates[0];else if(ipLike.length&&normalized.length>=40)txt=normalized.slice(normalized.indexOf(normalizeHexLoose(ipLike[ipLike.length-1]))+normalizeHexLoose(ipLike[ipLike.length-1]).length).slice(0,40);}
-      if(field==='reason'){const r=reasonFromText(txt);if(r)txt=r;}
-      if(field==='date'){txt=extractDate(txt)||txt}
-      if(field==='targetId'){const m=txt.match(/\d{1,6}/);txt=m?m[0]:txt}
-      if(field==='server'){txt='3'}
-      manual.value=txt;setStatus('OCR fertig. Ergebnis prüfen und dann „Text / Wert übernehmen“ drücken.','good');
-    }catch(err){setStatus('OCR-Fehler: '+err.message,'warn')}
+      const base=document.createElement('canvas');base.width=Math.max(20,Math.min(5000,Math.round(sw*4)));base.height=Math.max(20,Math.min(5000,Math.round(sh*4)));const octx=base.getContext('2d');octx.imageSmoothingEnabled=true;octx.filter='contrast(1.35) saturate(.9)';octx.drawImage(video,sx,sy,sw,sh,0,0,base.width,base.height);canvases.push(base);
+      const variants=[base,gray(base),thresh(base,125),thresh(base,145),thresh(base,165),thresh(base,185)];canvases.push(...variants.slice(1));
+      const texts=[];
+      for(const img of variants){for(const psm of cfg.psm){
+        try{const res=await Tesseract.recognize(img,'eng',{config:{tessedit_pageseg_mode:String(psm),tessedit_char_whitelist:cfg.whitelist,preserve_interword_spaces:'1'},logger:m=>{if(m.status&&m.progress)setStatus(`${cfg.label}: ${Math.round(m.progress*100)}% · ${m.status}`)}});const t=(res.data.text||'').trim();if(t)texts.push(t);}catch{}
+      }}
+      const joined=[...new Set(texts)].join('\n');
+      let value='';
+      if(field==='targetId'){
+        // Only accept an ID from the ban structure; never take the admin ID that appears before "hat".
+        value=extractTargetFromBanner(joined);
+      }else if(field==='reason'){
+        const lines=joined.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+        const reasonText=[...lines.filter(x=>/grund|pc[ -]?check|verweig|yerweig|posit|cheat|acc|event|troll|discord|redux|clean|banevading|covering|nopov/i.test(x)),joined].join(' ');
+        const r=reasonFromText(reasonText);value=r||'';
+      }else if(field==='sc'){
+        const ipLike=joined.match(/(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{0,4}/ig)||[];const normalized=String(joined||'').toUpperCase().replace(/[OoQq]/g,'0').replace(/[IiLl|!]/g,'1').replace(/[Ss$]/g,'5').replace(/[Gg]/g,'6').replace(/[Zz]/g,'2').replace(/[Tt]/g,'7').replace(/[^0-9A-F]/g,'').toLowerCase();const candidates=normalized.match(/[0-9a-f]{40}/g)||[];value='';if(ipLike.length){const ip=ipLike[ipLike.length-1].replace(/[^0-9A-F]/gi,'').toLowerCase();const pos=normalized.lastIndexOf(ip);if(pos>=0){const after=normalized.slice(pos+ip.length);const m=after.match(/^[0-9a-f]{40}/);value=m?m[0]:'';}}if(!value&&candidates.length===1)value=candidates[0];}
+      else if(field==='date'){const clean=joined.replace(/[OoQq]/g,'0').replace(/[IlL|]/g,'1');const m=clean.match(/\b(0?[1-9]|[12]\d|3[01])\s*[\/\.\-]\s*(0?[1-9]|1[0-2])\s*[\/\.\-]\s*(20\d{2})\b/)||clean.match(/\b(20\d{2})\s*[\/\.\-]\s*(0?[1-9]|1[0-2])\s*[\/\.\-]\s*(0?[1-9]|[12]\d|3[01])\b/);value=m?(String(m[1]).length===4?`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`:`${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`):''}
+      else if(field==='discordId'){const ids=(joined.match(/\b\d{15,22}\b/g)||[]);value=ids.sort((a,b)=>b.length-a.length)[0]||'';}
+      manual.value=value;
+      setStatus(value?`${cfg.label}: nur der benötigte Wert wurde übernommen. Bitte prüfen.`:`${cfg.label}: kein eindeutiger Wert gefunden. Markiere den Bereich enger.` ,value?'good':'warn');
+    }catch(err){setStatus('OCR-Fehler: '+err.message,'warn')}finally{for(const c of canvases)clear(c)}
   }
   $('#ocr').onclick=runOcr;
-  $('#use').onclick=()=>{let v=manual.value.trim();if(field==='server')v=(v.match(/[1-4]/)||['3'])[0];if(field==='sc')v=normalizeHexLoose(v);if(field==='date')v=extractDate(v)||v;if(field==='targetId'){const m=v.match(/\d{1,6}/);v=m?m[0]:'';}if(field==='reason'){v=reasonFromText(v)||v;}if(!v&&field!=='server'){setStatus('Kein Wert vorhanden.','warn');return}if(field==='sc'&&v.length!==40){setStatus('SC muss nach der Bereinigung 40 Zeichen haben.','warn');return}if(field==='targetId'&&!(Number(v)>=0&&Number(v)<=999999)){setStatus('Ziel-ID darf höchstens 6 Ziffern haben.','warn');return}if(window.opener&&!window.opener.closed){window.opener.postMessage({type:'grandrp-manual-field',field,value:v,time:Number(video.currentTime)||0},location.origin);setStatus('Übernommen. Du kannst diesen Tab schließen.','good')}else{setStatus('Ursprungsfenster nicht mehr geöffnet.','warn')}};
-  $('#serverButtons').classList.toggle('hidden',field!=='server'); fieldTitle.textContent=`Feld: ${fieldLabel()}`; document.title=`Grand RP · ${fieldLabel()}`;
-  (async()=>{if(!job){setStatus('Keine POV-ID angegeben.','warn');return;}try{file=await getVideo(job);if(!file){setStatus('POV-Datei nicht gefunden. Bitte zuerst im Hauptfenster neu hochladen.','warn');return;}video.src=URL.createObjectURL(file);$('#meta').textContent=`${file.name} · ${Math.round(file.size/1024/1024)} MB`;if(field==='server'){serverButtons.classList.remove('hidden');manual.value='3';setStatus('Server 3 ist voreingestellt. Bei Bedarf einen anderen Wert wählen.','good');}}catch(err){setStatus('POV konnte nicht geladen werden: '+err.message,'warn')}})();
+  $('#use').onclick=()=>{let v=manual.value.trim();if(field==='server')v=(v.match(/[1-4]/)||['3'])[0];if(field==='sc')v=normalizeHexLoose(v);if(field==='date')v=extractDate(v)||v;if(field==='targetId'){v=normId(v);}if(field==='reason'){v=reasonFromText(v)||v;}if(!v&&field!=='server'){setStatus('Kein Wert vorhanden.','warn');return}if(field==='sc'&&v.length!==40){setStatus('SC muss nach der Bereinigung 40 Zeichen haben.','warn');return}if(field==='targetId'&&!(Number(v)>=0&&Number(v)<=999999)){setStatus('Ziel-ID darf höchstens 6 Ziffern haben.','warn');return}if(window.opener&&!window.opener.closed){window.opener.postMessage({type:'grandrp-manual-field',field,value:v,time:Number(video.currentTime)||0},location.origin);setStatus('Übernommen. Du kannst diesen Tab schließen.','good')}else{setStatus('Ursprungsfenster nicht mehr geöffnet.','warn')}};
+  $('#serverButtons').classList.toggle('hidden',field!=='server'); fieldTitle.textContent=`Feld: ${fieldLabel()}`; document.title=`Grand RP · ${fieldLabel()} · V83`;
+  (async()=>{if(!job){setStatus('Keine POV-ID angegeben.','warn');return;}try{file=await getVideo(job);if(!file){setStatus('POV-Datei nicht gefunden. Bitte zuerst im Hauptfenster neu hochladen.','warn');return;}video.src=URL.createObjectURL(file);$('#meta').textContent=`${file.name} · ${formatSize(file.size)} · Original unverändert`;if(field==='server'){serverButtons.classList.remove('hidden');manual.value='3';setStatus('Server 3 ist voreingestellt. Bei Bedarf einen anderen Wert wählen.','good');}}catch(err){setStatus('POV konnte nicht geladen werden: '+err.message,'warn')}})();
 })();
 </script>
 </body>
