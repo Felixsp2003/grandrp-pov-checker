@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V140
+/* Grand RP DC Checker V142
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,9 +10,9 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V141';
+  const BUILD='V142';
   const META_KEY='grandrp_pov_meta_v42';
-  const ARCHIVE_FILTER_KEY='grandrp_archive_filter_v141';
+  const ARCHIVE_FILTER_KEY='grandrp_archive_filter_v142';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
   const BAN_ADMIN_NAME='Adam Byers';
@@ -1567,6 +1567,35 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       try{showView(view);}catch(err){console.error('Navigation failed',err);}
     });
   }
+  let archiveFiltersInstalled=false;
+  function applyArchiveFilter(filter){
+    const allowed=['all','ban','pccheck','socban','hardban','cheater','negativ','novideo','permaarchive','duplicates'];
+    const next=allowed.includes(String(filter||''))?String(filter):'all';
+    state.filter=next;
+    try{localStorage.setItem(ARCHIVE_FILTER_KEY,next);}catch{}
+    const buttons=$$('#filters .filter');
+    buttons.forEach(x=>x.classList.toggle('active',x.dataset.filter===next));
+    renderArchive();
+    return next;
+  }
+  function setupArchiveFilters(){
+    const box=$('#filters');
+    if(!box||archiveFiltersInstalled)return;
+    archiveFiltersInstalled=true;
+    box.style.position='relative';
+    box.style.zIndex='5';
+    box.style.pointerEvents='auto';
+    box.addEventListener('click',ev=>{
+      const button=ev.target.closest('button.filter[data-filter]');
+      if(!button||!box.contains(button))return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      applyArchiveFilter(button.dataset.filter);
+    },true);
+    window.grandrpSetArchiveFilter=applyArchiveFilter;
+    applyArchiveFilter(state.filter);
+  }
+
   function setupNav(){
     installNavDelegation();
     setupArchiveBulk();
@@ -1601,13 +1630,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if($('#csvFilterDateTo'))$('#csvFilterDateTo').value='';
       renderCsv();
     });
-    $$('.filter').forEach(b=>b.addEventListener('click',()=>{
-      state.filter=b.dataset.filter;
-      try{localStorage.setItem(ARCHIVE_FILTER_KEY,state.filter);}catch{}
-      $$('.filter').forEach(x=>x.classList.toggle('active',x===b));
-      renderArchive();
-    }));
-    $$('.filter').forEach(x=>x.classList.toggle('active',x.dataset.filter===state.filter));
+    setupArchiveFilters();
     restoreSavedView();
   }
 
