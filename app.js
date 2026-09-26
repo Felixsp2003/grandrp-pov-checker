@@ -1268,10 +1268,48 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     if(typeof v==='string'){const n=v.trim().toLowerCase();return ['true','1','yes','ja','perma','perma-ban','permaban'].includes(n);}
     return false;
   }
-  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved&&!isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:isPermaBanValue(e.permaArchive),Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
-  function csvRowsArchiveBase(){return state.entries.filter(e=>e.saved&&isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:true,Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
+  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved&&!isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];const reason=String(e.reason||'');const low=reason.toLowerCase();const types=[];if(/hardban|hard-ban|hard ban|perma.?ban|perma bann|perma-bann/.test(low)||isPermaBanValue(e.perma))types.push('hardban');if(/soc.?ban|social.?club.?ban/.test(low))types.push('socban');if(/cheat|cheater/.test(low))types.push('cheater');if(/pc.?[- ]?check/.test(low))types.push('pccheck');if(/verweiger/.test(low))types.push('verweigerung');if(/troll/.test(low))types.push('trolling');if(/cleaning/.test(low))types.push('cleaning');if(/redux/.test(low))types.push('redux');if(/banevad|ban.?evad/.test(low))types.push('banevading');if(!types.length&&(!e.notBanned||reason))types.push('ban');return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),DateRaw:e.date||'',ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:e.discordId||e.discordID||'',Familie:e.family||'',Ergebnis:e.manualResult||'',Grund:reason,Perma:isPermaBanValue(e.perma),PermaArchiv:isPermaBanValue(e.permaArchive),Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||'',Types:types,VideoStored:!!e.videoStored};});}
+  function csvRowsArchiveBase(){return state.entries.filter(e=>e.saved&&isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),DateRaw:e.date||'',ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:e.discordId||e.discordID||'',Familie:e.family||'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:true,Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||'',Types:['hardban'],VideoStored:!!e.videoStored};});}
   function csvRowsPermaBase(){return csvRowsArchiveBase();}
-  function csvRows(){const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();const reason=(($('#csvFilterReason')?.value)||'all');const sc=(($('#csvFilterSc')?.value)||'all');const perma=(($('#csvFilterPerma')?.value)||'all');return csvRowsBase().filter(r=>{if(reason!=='all'&&r.Grund!==reason)return false;if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;if(perma==='yes'&&r.Perma!==true)return false;if(perma==='no'&&r.Perma===true)return false;if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.Ergebnis,r.Grund].some(v=>String(v||'').toLowerCase().includes(q))))return false;return true;});}
+  function csvDateValue(r){const raw=String(r.DateRaw||'');if(raw){const d=new Date(raw);if(!Number.isNaN(d.getTime()))return d.getTime();}const m=String(r.Datum||'').match(/^(\d{2})\.(\d{2})\.(\d{4})$/);return m?new Date(Number(m[3]),Number(m[2])-1,Number(m[1])).getTime():0;}
+  function csvHasType(r,type){return type==='ban' ? r.Types.includes('ban') : r.Types.includes(type);}
+  function csvRows(){
+    const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();
+    const reason=(($('#csvFilterReason')?.value)||'all');
+    const sc=(($('#csvFilterSc')?.value)||'all');
+    const perma=(($('#csvFilterPerma')?.value)||'all');
+    const type=(($('#csvFilterType')?.value)||'all');
+    const discord=(($('#csvFilterDiscord')?.value)||'all');
+    const proof=(($('#csvFilterProof')?.value)||'all');
+    const from=(($('#csvFilterDateFrom')?.value)||'');
+    const to=(($('#csvFilterDateTo')?.value)||'');
+    const fromTs=from?new Date(from+'T00:00:00').getTime():null;
+    const toTs=to?new Date(to+'T23:59:59').getTime():null;
+    const sort=(($('#csvFilterSort')?.value)||'date_desc');
+    const rows=csvRowsBase().filter(r=>{
+      if(reason!=='all'&&r.Grund!==reason)return false;
+      if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;
+      if(perma==='yes'&&r.Perma!==true)return false;if(perma==='no'&&r.Perma===true)return false;
+      if(type!=='all'&&!csvHasType(r,type))return false;
+      if(discord==='present'&&!r.DiscordID)return false;if(discord==='empty'&&r.DiscordID)return false;
+      if(proof==='present'&&!r.Proof)return false;if(proof==='empty'&&r.Proof)return false;
+      const ts=csvDateValue(r);if(fromTs!==null&&(!ts||ts<fromTs))return false;if(toTs!==null&&(!ts||ts>toTs))return false;
+      if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.RID,r.DiscordID,r.Familie,r.Ergebnis,r.Grund,r.Admin1,r.Admin2,r.Admin3,r.Admin4,r.Admin5].some(v=>String(v||'').toLowerCase().includes(q))))return false;
+      return true;
+    });
+    const countType=t=>rows.filter(r=>csvHasType(r,t)).length;
+    const boolSort=t=>rows.sort((a,b)=>Number(csvHasType(b,t))-Number(csvHasType(a,t))||csvDateValue(b)-csvDateValue(a));
+    switch(sort){
+      case 'date_asc':rows.sort((a,b)=>csvDateValue(a)-csvDateValue(b));break;case 'date_desc':rows.sort((a,b)=>csvDateValue(b)-csvDateValue(a));break;
+      case 'hardban_desc':boolSort('hardban');break;case 'hardban_asc':rows.sort((a,b)=>Number(csvHasType(a,'hardban'))-Number(csvHasType(b,'hardban'))||csvDateValue(b)-csvDateValue(a));break;
+      case 'socban_desc':boolSort('socban');break;case 'cheater_desc':boolSort('cheater');break;case 'pccheck_desc':boolSort('pccheck');break;case 'verweigerung_desc':boolSort('verweigerung');break;case 'banevading_desc':boolSort('banevading');break;
+      case 'perma_desc':rows.sort((a,b)=>Number(b.Perma)-Number(a.Perma)||csvDateValue(b)-csvDateValue(a));break;case 'sc_desc':rows.sort((a,b)=>Number(!!b.SOC)-Number(!!a.SOC)||csvDateValue(b)-csvDateValue(a));break;
+      case 'discord_desc':rows.sort((a,b)=>Number(!!b.DiscordID)-Number(!!a.DiscordID)||csvDateValue(b)-csvDateValue(a));break;case 'proof_desc':rows.sort((a,b)=>Number(!!b.Proof)-Number(!!a.Proof)||csvDateValue(b)-csvDateValue(a));break;
+      case 'id_asc':rows.sort((a,b)=>String(a.ID).localeCompare(String(b.ID),undefined,{numeric:true}));break;case 'id_desc':rows.sort((a,b)=>String(b.ID).localeCompare(String(a.ID),undefined,{numeric:true}));break;
+      case 'reason_asc':rows.sort((a,b)=>String(a.Grund).localeCompare(String(b.Grund)));break;case 'reason_desc':rows.sort((a,b)=>String(b.Grund).localeCompare(String(a.Grund)));break;
+    }
+    return rows;
+  }
 
   function renderCsv(){
     const all=csvRowsBase();
@@ -1378,7 +1416,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     $('#archiveCsvBtn')?.addEventListener('click',downloadArchiveCsv);
     $('#downloadPermaCsvBtn')?.addEventListener('click',downloadPermaCsv);
     $('#copyCsvBtn')?.addEventListener('click',copyCsv);
-    ['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterPerma'].forEach(s=>{
+    ['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterPerma','#csvFilterType','#csvFilterDiscord','#csvFilterProof','#csvFilterSort','#csvFilterDateFrom','#csvFilterDateTo'].forEach(s=>{
       const el=$(s);
       if(!el)return;
       el.addEventListener(el.tagName==='SELECT'?'change':'input',renderCsv);
@@ -1389,7 +1427,12 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if($('#csvFilterReason'))$('#csvFilterReason').value='all';
       if($('#csvFilterSc'))$('#csvFilterSc').value='all';
       if($('#csvFilterPerma'))$('#csvFilterPerma').value='all';
+      if($('#csvFilterType'))$('#csvFilterType').value='all';
       if($('#csvFilterDiscord'))$('#csvFilterDiscord').value='all';
+      if($('#csvFilterProof'))$('#csvFilterProof').value='all';
+      if($('#csvFilterSort'))$('#csvFilterSort').value='date_desc';
+      if($('#csvFilterDateFrom'))$('#csvFilterDateFrom').value='';
+      if($('#csvFilterDateTo'))$('#csvFilterDateTo').value='';
       renderCsv();
     });
     $$('.filter').forEach(b=>b.addEventListener('click',()=>{

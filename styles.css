@@ -65,3 +65,8 @@ button,select,input,textarea,.nav-item,.chip,.filter,.switch{ -webkit-user-selec
 
 /* V113: native archive backup picker. The real file input covers the whole visible label. */
 .archive-restore-button{position:relative;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;user-select:none}.archive-restore-button input[type=file]{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;margin:0!important;padding:0!important;opacity:0!important;cursor:pointer!important;border:0!important;z-index:10!important}.archive-restore-button:focus-within{outline:0;border-color:#553364;color:#fff}.archive-backup-actions .setting-note{font-size:11px;color:var(--muted);padding:0 8px}
+
+/* V140 CSV controls */
+.csv-filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.csv-date{min-width:145px}
+.csv-filter-select,.csv-filter-input{min-height:38px}
