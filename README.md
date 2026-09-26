@@ -1,4 +1,4 @@
-Grand RP DC Checker V139
+Grand RP DC Checker V140
 
 Google Drive bleibt bei abgelaufenem Zugriff als verknüpft gespeichert. Hintergrund-Backups öffnen kein OAuth-Popup mehr; eine erneute Autorisierung erfolgt nur noch über den Button „Google Drive erneut verbinden“.
 

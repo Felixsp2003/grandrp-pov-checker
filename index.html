@@ -37,7 +37,7 @@
     <header class="topbar">
       <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V139</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V140</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -93,12 +93,12 @@
         </select>
         <select id="csvFilterSc" class="csv-filter-select"><option value="all">SOC / SC: Alle</option><option value="present">SC vorhanden</option><option value="empty">SC leer</option></select>
         <select id="csvFilterPerma" class="csv-filter-select" aria-label="Perma-Ban Filter"><option value="all">Perma-Ban: Alle</option><option value="yes">Nur Perma-Ban</option><option value="no">Ohne Perma-Ban</option></select>
-        <select id="csvFilterType" class="csv-filter-select" aria-label="CSV Typ"><option value="all">Typ: Alle</option><option value="hardban">🔥 Hardban</option><option value="socban">SOC-Ban</option><option value="cheater">Cheater</option><option value="pccheck">PC-Check</option><option value="verweigerung">PC-Check Verweigerung</option><option value="trolling">Trolling</option><option value="cleaning">Cleaning</option><option value="redux">Redux</option><option value="banevading">Banevading</option><option value="ban">Sonstiger Bann</option></select>
+        <select id="csvFilterType" class="csv-filter-select" aria-label="CSV Typ"><option value="all">Typ: Alle</option><option value="ban">Nur Bans</option><option value="hardban">Hardbann</option><option value="socban">SOC-Ban</option><option value="cheater">Cheater</option><option value="pccheck">PC-Check</option><option value="verweigert">PC-Check verweigert</option><option value="negativ">Negativ</option></select>
         <select id="csvFilterDiscord" class="csv-filter-select" aria-label="Discord Filter"><option value="all">Discord: Alle</option><option value="present">Discord vorhanden</option><option value="empty">Discord leer</option></select>
         <select id="csvFilterProof" class="csv-filter-select" aria-label="Proof Filter"><option value="all">Proof: Alle</option><option value="present">Proof vorhanden</option><option value="empty">Proof leer</option></select>
-        <select id="csvFilterSort" class="csv-filter-select" aria-label="CSV Sortierung"><option value="date_desc">Neueste zuerst</option><option value="date_asc">Älteste zuerst</option><option value="hardban_desc">🔥 Hardban zuerst</option><option value="hardban_asc">🔥 Hardban zuletzt</option><option value="socban_desc">SOC-Ban zuerst</option><option value="cheater_desc">Cheater zuerst</option><option value="pccheck_desc">PC-Check zuerst</option><option value="verweigerung_desc">Verweigerung zuerst</option><option value="banevading_desc">Banevading zuerst</option><option value="perma_desc">Perma zuerst</option><option value="sc_desc">SC vorhanden zuerst</option><option value="discord_desc">Discord vorhanden zuerst</option><option value="proof_desc">Proof vorhanden zuerst</option><option value="id_asc">ID aufsteigend</option><option value="id_desc">ID absteigend</option><option value="reason_asc">Grund A–Z</option><option value="reason_desc">Grund Z–A</option></select>
-        <input id="csvFilterDateFrom" class="csv-filter-input csv-date" type="date" aria-label="Datum von" title="Datum von">
-        <input id="csvFilterDateTo" class="csv-filter-input csv-date" type="date" aria-label="Datum bis" title="Datum bis">
+        <select id="csvFilterSort" class="csv-filter-select" aria-label="CSV Sortierung"><option value="date_desc">Neueste zuerst</option><option value="date_asc">Älteste zuerst</option><option value="hardban_desc">Hardbann zuerst</option><option value="socban_desc">SOC-Ban zuerst</option><option value="cheater_desc">Cheater zuerst</option><option value="pccheck_desc">PC-Check zuerst</option><option value="verweigert_desc">Verweigerung zuerst</option><option value="ban_desc">Bans zuerst</option><option value="perma_desc">Perma-Ban zuerst</option><option value="sc_desc">SC vorhanden zuerst</option><option value="discord_desc">Discord vorhanden zuerst</option><option value="proof_desc">Proof vorhanden zuerst</option><option value="id_asc">ID aufsteigend</option><option value="id_desc">ID absteigend</option><option value="reason_asc">Grund A–Z</option><option value="reason_desc">Grund Z–A</option></select>
+        <label class="csv-date-filter">Von <input id="csvFilterDateFrom" type="date"></label>
+        <label class="csv-date-filter">Bis <input id="csvFilterDateTo" type="date"></label>
         <button class="ghost" id="csvFilterClear">Filter zurücksetzen</button>
       </div>
       <div class="csv-summary" id="csvSummary"></div>
@@ -109,7 +109,7 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V139</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V140</span></div>
           <p class="hint">POVs bis 2 Minuten werden vollständig in 250-ms-Schritten durchsucht. Längere Videos werden adaptiv gescannt und bei Treffern verdichtet. Das Info-Foto kommt aus einem verifizierten Bann-Cluster; der Bannblock wird für das Info-Foto bevorzugt in den letzten 5 Sekunden verifiziert. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>

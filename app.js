@@ -1214,17 +1214,52 @@
   function duplicateIdMap(entries=state.entries){const map=new Map();for(const e of entries){const id=String(e?.targetId||'').trim();if(/^\d{1,6}$/.test(id))map.set(id,(map.get(id)||0)+1);}return map;}
   function duplicateIdCount(entries=state.entries){let n=0;for(const count of duplicateIdMap(entries).values())if(count>1)n++;return n;}
   function isDuplicateId(entry){const id=String(entry?.targetId||'').trim();return /^\d{1,6}$/.test(id)&&Number(duplicateIdMap().get(id)||0)>1;}
-  function updateCounts(){const all=state.entries;const normal=all.filter(e=>!e.permaArchive);const count=k=>normal.filter(e=>e.types?.includes(k)).length;$('#countAll').textContent=normal.length;$('#countBan').textContent=normal.filter(e=>!e.notBanned).length;$('#countPc').textContent=count('pccheck');$('#countSoc').textContent=count('socban');$('#countHard').textContent=count('hardban');$('#countCheat').textContent=count('cheater');$('#countNeg').textContent=count('negativ');$('#countNoVideo').textContent=normal.filter(e=>!e.videoStored).length;$('#countPerma').textContent=all.filter(e=>e.permaArchive).length;if($('#countDuplicates'))$('#countDuplicates').textContent=String(duplicateIdCount(all));}
+  // Older saved entries may not have a complete `types` array. Derive the filter
+  // categories from the reason as a read-only fallback. This never writes back to storage.
+  function entryFilterTypes(e){
+    const set=new Set(Array.isArray(e?.types)?e.types.map(String):[]);
+    const reason=String(e?.reason||'').toLowerCase();
+    if(/^pc[- ]?check/.test(reason)||reason.includes('pc-check'))set.add('pccheck');
+    if(reason.includes('verweiger')){set.add('pccheck');set.add('verweigert');}
+    if(/soc[- ]?ban|social.?club.?ban/.test(reason))set.add('socban');
+    if(/hard.?ban|hardbann|perma.?ban|perma.?bann/.test(reason)||isPermaBanValue(e?.perma))set.add('hardban');
+    if(/cheat|cheater/.test(reason))set.add('cheater');
+    if(/negativ/.test(reason))set.add('negativ');
+    return set;
+  }
+  function isSpecializedEntry(e){const t=entryFilterTypes(e);return t.has('pccheck')||t.has('socban')||t.has('hardban')||t.has('cheater')||t.has('negativ');}
+  function isBanEntry(e){
+    if(e?.notBanned===true)return false;
+    if(isSpecializedEntry(e))return false;
+    return e?.notBanned===false;
+  }
+  function updateCounts(){
+    const all=state.entries;
+    const normal=all.filter(e=>!e.permaArchive);
+    const count=k=>normal.filter(e=>entryFilterTypes(e).has(k)).length;
+    $('#countAll').textContent=normal.length;
+    $('#countBan').textContent=normal.filter(isBanEntry).length;
+    $('#countPc').textContent=count('pccheck');
+    $('#countSoc').textContent=count('socban');
+    $('#countHard').textContent=count('hardban');
+    $('#countCheat').textContent=count('cheater');
+    $('#countNeg').textContent=count('negativ');
+    $('#countNoVideo').textContent=normal.filter(e=>!e.videoStored).length;
+    $('#countPerma').textContent=all.filter(e=>e.permaArchive).length;
+    if($('#countDuplicates'))$('#countDuplicates').textContent=String(duplicateIdCount(normal));
+  }
   function renderArchive(){
     updateCounts();
     const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;
     const list=state.entries.filter(e=>{
-      if(filter==='permaarchive' && !e.permaArchive)return false;
-      if(filter==='all' && e.permaArchive)return false;
+      // POV-Archiv is an exclusive view: archived POVs must not remain visible
+      // in Alle/Bans/PC-Checks/etc. They remain untouched in storage.
+      if(filter==='permaarchive')return !!e.permaArchive;
+      if(e.permaArchive)return false;
       if(filter==='duplicates' && !isDuplicateId(e))return false;
-      if(filter==='ban'&&e.notBanned)return false;
-      if(filter!=='all'&&filter!=='permaarchive'&&filter!=='ban'&&filter!=='duplicates'&&!e.types?.includes(filter))return false;
-      if(filter==='novideo'&&e.videoStored)return false;
+      if(filter==='ban'&&!isBanEntry(e))return false;
+      if(filter==='novideo'){if(e.videoStored)return false;}
+      else if(filter!=='all'&&filter!=='ban'&&filter!=='duplicates'&&!entryFilterTypes(e).has(filter))return false;
       if(!q)return true;
       return [e.targetId,e.sc,e.reason,e.manualResult,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));
     });
@@ -1268,11 +1303,11 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     if(typeof v==='string'){const n=v.trim().toLowerCase();return ['true','1','yes','ja','perma','perma-ban','permaban'].includes(n);}
     return false;
   }
-  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved&&!isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];const reason=String(e.reason||'');const low=reason.toLowerCase();const types=[];if(/hardban|hard-ban|hard ban|perma.?ban|perma bann|perma-bann/.test(low)||isPermaBanValue(e.perma))types.push('hardban');if(/soc.?ban|social.?club.?ban/.test(low))types.push('socban');if(/cheat|cheater/.test(low))types.push('cheater');if(/pc.?[- ]?check/.test(low))types.push('pccheck');if(/verweiger/.test(low))types.push('verweigerung');if(/troll/.test(low))types.push('trolling');if(/cleaning/.test(low))types.push('cleaning');if(/redux/.test(low))types.push('redux');if(/banevad|ban.?evad/.test(low))types.push('banevading');if(!types.length&&(!e.notBanned||reason))types.push('ban');return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),DateRaw:e.date||'',ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:e.discordId||e.discordID||'',Familie:e.family||'',Ergebnis:e.manualResult||'',Grund:reason,Perma:isPermaBanValue(e.perma),PermaArchiv:isPermaBanValue(e.permaArchive),Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||'',Types:types,VideoStored:!!e.videoStored};});}
-  function csvRowsArchiveBase(){return state.entries.filter(e=>e.saved&&isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),DateRaw:e.date||'',ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:e.discordId||e.discordID||'',Familie:e.family||'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:true,Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||'',Types:['hardban'],VideoStored:!!e.videoStored};});}
+  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved&&!isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),DateRaw:e.date||'',ID:e.targetId||'',SOC:e.sc||'',RID:e.rid||'',DiscordID:e.discordId||e.discordID||'',Familie:e.family||'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:false,Types:[...entryFilterTypes(e)],Ban:isBanEntry(e),Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||'',VideoStored:!!e.videoStored};});}
+  function csvRowsArchiveBase(){return state.entries.filter(e=>e.saved&&isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),DateRaw:e.date||'',ID:e.targetId||'',SOC:e.sc||'',RID:e.rid||'',DiscordID:e.discordId||e.discordID||'',Familie:e.family||'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:true,Types:[...entryFilterTypes(e)],Ban:isBanEntry(e),Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||'',VideoStored:!!e.videoStored};});}
   function csvRowsPermaBase(){return csvRowsArchiveBase();}
   function csvDateValue(r){const raw=String(r.DateRaw||'');if(raw){const d=new Date(raw);if(!Number.isNaN(d.getTime()))return d.getTime();}const m=String(r.Datum||'').match(/^(\d{2})\.(\d{2})\.(\d{4})$/);return m?new Date(Number(m[3]),Number(m[2])-1,Number(m[1])).getTime():0;}
-  function csvHasType(r,type){return type==='ban' ? r.Types.includes('ban') : r.Types.includes(type);}
+  function csvHasType(r,type){return type==='ban'?!!r.Ban:r.Types.includes(type);}
   function csvRows(){
     const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();
     const reason=(($('#csvFilterReason')?.value)||'all');
@@ -1281,11 +1316,11 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     const type=(($('#csvFilterType')?.value)||'all');
     const discord=(($('#csvFilterDiscord')?.value)||'all');
     const proof=(($('#csvFilterProof')?.value)||'all');
+    const sort=(($('#csvFilterSort')?.value)||'date_desc');
     const from=(($('#csvFilterDateFrom')?.value)||'');
     const to=(($('#csvFilterDateTo')?.value)||'');
     const fromTs=from?new Date(from+'T00:00:00').getTime():null;
     const toTs=to?new Date(to+'T23:59:59').getTime():null;
-    const sort=(($('#csvFilterSort')?.value)||'date_desc');
     const rows=csvRowsBase().filter(r=>{
       if(reason!=='all'&&r.Grund!==reason)return false;
       if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;
@@ -1297,16 +1332,24 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.RID,r.DiscordID,r.Familie,r.Ergebnis,r.Grund,r.Admin1,r.Admin2,r.Admin3,r.Admin4,r.Admin5].some(v=>String(v||'').toLowerCase().includes(q))))return false;
       return true;
     });
-    const countType=t=>rows.filter(r=>csvHasType(r,t)).length;
     const boolSort=t=>rows.sort((a,b)=>Number(csvHasType(b,t))-Number(csvHasType(a,t))||csvDateValue(b)-csvDateValue(a));
     switch(sort){
-      case 'date_asc':rows.sort((a,b)=>csvDateValue(a)-csvDateValue(b));break;case 'date_desc':rows.sort((a,b)=>csvDateValue(b)-csvDateValue(a));break;
-      case 'hardban_desc':boolSort('hardban');break;case 'hardban_asc':rows.sort((a,b)=>Number(csvHasType(a,'hardban'))-Number(csvHasType(b,'hardban'))||csvDateValue(b)-csvDateValue(a));break;
-      case 'socban_desc':boolSort('socban');break;case 'cheater_desc':boolSort('cheater');break;case 'pccheck_desc':boolSort('pccheck');break;case 'verweigerung_desc':boolSort('verweigerung');break;case 'banevading_desc':boolSort('banevading');break;
-      case 'perma_desc':rows.sort((a,b)=>Number(b.Perma)-Number(a.Perma)||csvDateValue(b)-csvDateValue(a));break;case 'sc_desc':rows.sort((a,b)=>Number(!!b.SOC)-Number(!!a.SOC)||csvDateValue(b)-csvDateValue(a));break;
-      case 'discord_desc':rows.sort((a,b)=>Number(!!b.DiscordID)-Number(!!a.DiscordID)||csvDateValue(b)-csvDateValue(a));break;case 'proof_desc':rows.sort((a,b)=>Number(!!b.Proof)-Number(!!a.Proof)||csvDateValue(b)-csvDateValue(a));break;
-      case 'id_asc':rows.sort((a,b)=>String(a.ID).localeCompare(String(b.ID),undefined,{numeric:true}));break;case 'id_desc':rows.sort((a,b)=>String(b.ID).localeCompare(String(a.ID),undefined,{numeric:true}));break;
-      case 'reason_asc':rows.sort((a,b)=>String(a.Grund).localeCompare(String(b.Grund)));break;case 'reason_desc':rows.sort((a,b)=>String(b.Grund).localeCompare(String(a.Grund)));break;
+      case 'date_asc':rows.sort((a,b)=>csvDateValue(a)-csvDateValue(b));break;
+      case 'date_desc':rows.sort((a,b)=>csvDateValue(b)-csvDateValue(a));break;
+      case 'hardban_desc':boolSort('hardban');break;
+      case 'socban_desc':boolSort('socban');break;
+      case 'cheater_desc':boolSort('cheater');break;
+      case 'pccheck_desc':boolSort('pccheck');break;
+      case 'verweigert_desc':boolSort('verweigert');break;
+      case 'ban_desc':boolSort('ban');break;
+      case 'perma_desc':rows.sort((a,b)=>Number(b.Perma)-Number(a.Perma)||csvDateValue(b)-csvDateValue(a));break;
+      case 'sc_desc':rows.sort((a,b)=>Number(!!b.SOC)-Number(!!a.SOC)||csvDateValue(b)-csvDateValue(a));break;
+      case 'discord_desc':rows.sort((a,b)=>Number(!!b.DiscordID)-Number(!!a.DiscordID)||csvDateValue(b)-csvDateValue(a));break;
+      case 'proof_desc':rows.sort((a,b)=>Number(!!b.Proof)-Number(!!a.Proof)||csvDateValue(b)-csvDateValue(a));break;
+      case 'id_asc':rows.sort((a,b)=>String(a.ID).localeCompare(String(b.ID),undefined,{numeric:true}));break;
+      case 'id_desc':rows.sort((a,b)=>String(b.ID).localeCompare(String(a.ID),undefined,{numeric:true}));break;
+      case 'reason_asc':rows.sort((a,b)=>String(a.Grund).localeCompare(String(b.Grund)));break;
+      case 'reason_desc':rows.sort((a,b)=>String(b.Grund).localeCompare(String(a.Grund)));break;
     }
     return rows;
   }
