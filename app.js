@@ -1214,17 +1214,45 @@
   function duplicateIdMap(entries=state.entries){const map=new Map();for(const e of entries){const id=String(e?.targetId||'').trim();if(/^\d{1,6}$/.test(id))map.set(id,(map.get(id)||0)+1);}return map;}
   function duplicateIdCount(entries=state.entries){let n=0;for(const count of duplicateIdMap(entries).values())if(count>1)n++;return n;}
   function isDuplicateId(entry){const id=String(entry?.targetId||'').trim();return /^\d{1,6}$/.test(id)&&Number(duplicateIdMap().get(id)||0)>1;}
-  function updateCounts(){const all=state.entries;const normal=all.filter(e=>!e.permaArchive);const count=k=>normal.filter(e=>e.types?.includes(k)).length;$('#countAll').textContent=all.length;$('#countBan').textContent=normal.filter(e=>!e.notBanned).length;$('#countPc').textContent=count('pccheck');$('#countSoc').textContent=count('socban');$('#countHard').textContent=count('hardban');$('#countCheat').textContent=count('cheater');$('#countNeg').textContent=count('negativ');$('#countNoVideo').textContent=normal.filter(e=>!e.videoStored).length;$('#countPerma').textContent=all.filter(e=>e.permaArchive).length;if($('#countDuplicates'))$('#countDuplicates').textContent=String(duplicateIdCount(all));}
+  function inferredEntryTypes(e){
+    const types=new Set(Array.isArray(e?.types)?e.types:[]);
+    const reason=String(e?.reason||'').toLowerCase();
+    if(/^pc[- ]?check/.test(reason))types.add('pccheck');
+    if(/verweig|refus/.test(reason))types.add('verweigert');
+    if(/soc[- ]?ban/.test(reason))types.add('socban');
+    if(/hardban|hardbann/.test(reason))types.add('hardban');
+    if(/cheat/.test(reason))types.add('cheater');
+    if(/negativ/.test(reason))types.add('negativ');
+    return types;
+  }
+  function updateCounts(){
+    const all=state.entries;
+    const normal=all.filter(e=>!e.permaArchive);
+    const count=k=>normal.filter(e=>inferredEntryTypes(e).has(k)).length;
+    $('#countAll').textContent=normal.length;
+    $('#countBan').textContent=normal.filter(e=>!e.notBanned).length;
+    $('#countPc').textContent=count('pccheck');
+    $('#countSoc').textContent=count('socban');
+    $('#countHard').textContent=count('hardban');
+    $('#countCheat').textContent=count('cheater');
+    $('#countNeg').textContent=count('negativ');
+    $('#countNoVideo').textContent=normal.filter(e=>!e.videoStored).length;
+    $('#countPerma').textContent=all.filter(e=>e.permaArchive).length;
+    if($('#countDuplicates'))$('#countDuplicates').textContent=String(duplicateIdCount(normal));
+  }
   function renderArchive(){
     updateCounts();
     const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;
-    const list=state.entries.filter(e=>{
-      if(filter==='permaarchive' && !e.permaArchive)return false;
+    const normal=state.entries.filter(e=>!e.permaArchive);
+    const archived=state.entries.filter(e=>e.permaArchive);
+    const source=filter==='permaarchive'?archived:normal;
+    const list=source.filter(e=>{
+      if(filter==='permaarchive')return true;
       if(filter==='duplicates' && !isDuplicateId(e))return false;
       if(filter==='ban'&&e.notBanned)return false;
       if(filter==='novideo'){
         if(e.videoStored)return false;
-      }else if(filter!=='all'&&filter!=='permaarchive'&&filter!=='ban'&&filter!=='duplicates'&&!e.types?.includes(filter))return false;
+      }else if(filter!=='all'&&filter!=='ban'&&filter!=='duplicates'&&!inferredEntryTypes(e).has(filter))return false;
       if(!q)return true;
       return [e.targetId,e.sc,e.reason,e.manualResult,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));
     });
@@ -1566,17 +1594,27 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if($('#csvFilterDateTo'))$('#csvFilterDateTo').value='';
       renderCsv();
     });
-    // Filter buttons use delegated click handling so dynamically rendered/reloaded pages
-    // cannot lose their handlers. This also avoids the old direct-listener race during boot.
-    document.addEventListener('click',ev=>{
-      const b=ev.target?.closest?.('.filter');
-      if(!b || !document.contains(b))return;
-      ev.preventDefault();
-      ev.stopPropagation();
-      state.filter=String(b.dataset.filter||'all');
-      $$('.filter').forEach(x=>x.classList.toggle('active',x===b));
-      renderArchive();
-    },true);
+    // Archive filter buttons are bound directly to the current DOM nodes.  The previous
+    // document-level capture handler could swallow clicks while the archive was re-rendering.
+    // Direct handlers are simpler and survive normal render cycles because the filter bar itself
+    // is not replaced by renderArchive().
+    $$('.filter').forEach(b=>{
+      if(b.dataset.filterBound==='1')return;
+      b.dataset.filterBound='1';
+      const activate=ev=>{
+        ev.preventDefault();
+        ev.stopPropagation();
+        const next=String(b.dataset.filter||'all');
+        state.filter=next;
+        $$('.filter').forEach(x=>x.classList.toggle('active',x===b));
+        try{renderArchive();}catch(err){console.error('Archiv-Filter fehlgeschlagen',err);toast('Filterfehler: '+(err?.message||err));}
+      };
+      b.addEventListener('pointerdown',()=>b.classList.add('pressing'),{passive:true});
+      b.addEventListener('pointerup',()=>b.classList.remove('pressing'),{passive:true});
+      b.addEventListener('pointercancel',()=>b.classList.remove('pressing'),{passive:true});
+      b.addEventListener('click',activate);
+      b.addEventListener('keydown',ev=>{if(ev.key==='Enter'||ev.key===' '){activate(ev);}},false);
+    });
     restoreSavedView();
   }
 
