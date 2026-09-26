@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V134
+/* Grand RP DC Checker V138
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V134';
+  const BUILD='V138';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -2413,13 +2413,37 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     if(!raw)return false;
     // Nie zuerst auf den verkürzten canonicalReason-Pfad gehen: Bei
     // „PC-Check Verweigerung - Trolling“ darf „Trolling“ nicht verloren gehen.
+    // ACP Sonderfall: Wenn das rote Adminpanel exakt „Admin ban“ meldet,
+    // wird dieser Fall automatisch als Cheating/Hardban/Perma behandelt.
+    // Das ist absichtlich vor der normalen Reason-Klassifizierung, damit
+    // „Admin ban“ niemals als unbekannter Grund im Editor stehen bleibt.
+    const isAdminBan=/^admin\s*ban$/i.test(raw);
     const strong=classifyReasonStrong(raw);
-    const canonical=strong||canonicalReason(raw)?.value||raw;
+    const canonical=isAdminBan?'Cheater':(strong||canonicalReason(raw)?.value||raw);
     const allowed=ALLOWED_REASONS.includes(canonical);
     if(allowed)$('#reason').value=canonical;
     if(allowed)applyAutomaticResultForReason(canonical,true);
+    if(isAdminBan){
+      state.selectedTypes.add('hardban');
+      state.selectedTypes.add('cheater');
+      $$('.chip').forEach(c=>c.classList.toggle('active',state.selectedTypes.has(c.dataset.value)));
+      $('#perma').checked=true;
+    }
     if(allowed && state.editing?.item)syncEditorDraftToQueueItem();
     if(canonical==='PC-Check Verweigerung' && state.editing?.item){maybeAskPermaForQueueItem(state.editing.item,canonical);}else{applyReasonPermaPolicy(canonical,false);}
+    if(isAdminBan){
+      if(state.editing?.item){
+        state.editing.item.result={...(state.editing.item.result||{}),types:[...state.selectedTypes],perma:true,reason:'Cheater'};
+        state.editing.item.types=[...state.selectedTypes];
+        state.editing.item.perma=true;
+      }
+      if(state.editing?.entry){
+        state.editing.entry.types=[...state.selectedTypes];
+        state.editing.entry.perma=true;
+        state.editing.entry.reason='Cheater';
+        state.editing.entry.result={...(state.editing.entry.result||{}),types:[...state.selectedTypes],perma:true,reason:'Cheater'};
+      }
+    }
     renderTitlePreview();
     const ctx=state.editing;
     if(ctx?.item){ctx.item.result={...(ctx.item.result||{}),reason:canonical};ctx.item.reason=canonical;scheduleQueuePersist();}
@@ -2895,7 +2919,32 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   async function driveEnsureFolder(){const q=encodeURIComponent(`name='${DRIVE_FOLDER_NAME.replace(/'/g,"\\'")}' and mimeType='${DRIVE_FOLDER_MIME}' and trashed=false`);const r=await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&pageSize=10&fields=files(id,name,mimeType)`);const d=await r.json();if(d.files?.[0]?.id)return d.files[0].id;const cr=await driveApi('https://www.googleapis.com/drive/v3/files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:DRIVE_FOLDER_NAME,mimeType:DRIVE_FOLDER_MIME})});return (await cr.json()).id;}
   async function driveFindFile(name,folderId){const q=encodeURIComponent(`name='${String(name).replace(/'/g,"\\'")}' and '${folderId}' in parents and trashed=false`);const r=await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=modifiedTime desc&pageSize=20&fields=files(id,name,size,mimeType,modifiedTime,appProperties)`);return (await r.json()).files?.[0]||null;}
   async function driveUploadJson(name,folderId,payload,existingId){const boundary='----grandrpDrive'+Math.random().toString(16).slice(2);const meta=existingId?{name}:{name,parents:[folderId],mimeType:'application/json'};const body=`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(payload)}\r\n--${boundary}--`;const url=existingId?`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(existingId)}?uploadType=multipart&fields=id,name,modifiedTime`:'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime';return (await driveApi(url,{method:existingId?'PATCH':'POST',headers:{'Content-Type':`multipart/related; boundary=${boundary}`},body})).json();}
-  async function syncDriveBackup(){if(driveSyncInProgress)return;driveSyncInProgress=true;renderDriveStatus();const help=$('#driveHelp');try{const token=await driveTokenFresh(false);if(!token)throw new Error('Drive-Zugriff fehlt.');const folder=await driveEnsureFolder();const entries=sanitizeArchiveEntries(state.entries||[]).map(e=>{const copy={...e};delete copy.driveFileId;delete copy.file;delete copy.videoUrl;return copy;});const manifest={format:'grandrp-cloud-archive',version:2,backupType:'metadata-only',createdAt:new Date().toISOString(),note:'Nur Archiv-Metadaten und Proof-/YouTube-Links. Keine POV-Videodateien werden in Google Drive gespeichert.',entries};const mf=await driveFindFile(DRIVE_MANIFEST_NAME,folder);await driveUploadJson(DRIVE_MANIFEST_NAME,folder,manifest,mf?.id||'');saveDriveState({...driveState(),connected:true,clientId:driveState().clientId});if(help)help.textContent=`✓ Archiv-Backup gesichert · ${entries.length} Einträge · nur JSON`;toast(`Archiv-Backup gesichert · ${entries.length} Einträge.`);}catch(err){console.error('Google-Drive-Backup fehlgeschlagen',err);if(help)help.textContent='✕ Cloud-Backup fehlgeschlagen: '+(err?.message||err);toast('Cloud-Backup fehlgeschlagen: '+(err?.message||err));}finally{driveSyncInProgress=false;renderDriveStatus();}}
+  async function syncDriveBackup(options={}){if(driveSyncInProgress)return;driveSyncInProgress=true;renderDriveStatus();const help=$('#driveHelp');const interactive=options.interactive===true;try{
+    const st=driveState();
+    if(!st?.clientId||!st?.accessToken){return;}
+    // Automatische Backups dürfen niemals ungefragt ein Google-OAuth-Popup öffnen.
+    // Ist das Token abgelaufen, wird die Sicherung still übersprungen; ein manueller
+    // Klick auf „Backup“ darf dagegen die normale OAuth-Erneuerung durchführen.
+    let token='';
+    if(Number(st.tokenExpiresAt||0)>Date.now()+15000) token=String(st.accessToken||'');
+    else if(interactive) token=await driveTokenFresh(false);
+    else return;
+    if(!token)return;
+    const folder=await driveEnsureFolder();
+    const entries=sanitizeArchiveEntries(state.entries||[]).map(e=>{const copy={...e};delete copy.driveFileId;delete copy.file;delete copy.videoUrl;return copy;});
+    const manifest={format:'grandrp-cloud-archive',version:2,backupType:'metadata-only',createdAt:new Date().toISOString(),note:'Nur Archiv-Metadaten und Proof-/YouTube-Links. Keine POV-Videodateien werden in Google Drive gespeichert.',entries};
+    const mf=await driveFindFile(DRIVE_MANIFEST_NAME,folder);
+    await driveUploadJson(DRIVE_MANIFEST_NAME,folder,manifest,mf?.id||'');
+    saveDriveState({...driveState(),connected:true,clientId:driveState().clientId});
+    if(help)help.textContent=`✓ Archiv-Backup gesichert · ${entries.length} Einträge · nur JSON`;
+    if(interactive)toast(`Archiv-Backup gesichert · ${entries.length} Einträge.`);
+  }catch(err){
+    console.error('Google-Drive-Backup fehlgeschlagen',err);
+    const msg=String(err?.message||err||'');
+    // „Popup window closed“ ist bei Google OAuth kein Daten-/Archivfehler.
+    // Bei automatischen Backups wird deshalb keine störende rote Fehlermeldung mehr angezeigt.
+    if(interactive){if(help)help.textContent='✕ Cloud-Backup fehlgeschlagen: '+msg;toast('Cloud-Backup fehlgeschlagen: '+msg);}
+  }finally{driveSyncInProgress=false;renderDriveStatus();}}
   async function restoreDriveBackup(){if(driveSyncInProgress)return;driveSyncInProgress=true;renderDriveStatus();const help=$('#driveHelp');try{const folder=await driveEnsureFolder();const mf=await driveFindFile(DRIVE_MANIFEST_NAME,folder);if(!mf)throw new Error('Kein Cloud-Archiv gefunden.');const token=await driveTokenFresh(false);const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(mf.id)}?alt=media`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw new Error(`Cloud-Manifest ${r.status}`);const manifest=await r.json();const entries=sanitizeArchiveEntries(manifest?.entries||[]);if(!entries.length)throw new Error('Cloud-Archiv enthält keine Einträge.');const restored=entries.map(e=>{const copy={...e};delete copy.driveFileId;return copy;});state.entries=restored;state.filter='all';state.archiveSelected.clear();if($('#search'))$('#search').value='';const stamp=Date.now();localStorage.setItem(DIRECT_RESTORE_KEY,JSON.stringify({version:8,updatedAt:stamp,name:DRIVE_MANIFEST_NAME,entries:restored}));localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:8,updatedAt:stamp,entries:restored}));localStorage.setItem(ARCHIVE_AUTHORITATIVE_KEY,JSON.stringify({version:1,updatedAt:stamp,entries:restored}));localStorage.setItem(META_KEY,JSON.stringify(restored));localStorage.setItem(META_UPDATED_KEY,String(stamp));await saveMetaDb(restored,stamp,false);renderArchive();renderCases();renderCsv();renderQueue();showView('archive',false);persistCurrentView('archive');if(help)help.textContent=`✓ Archiv-Backup wiederhergestellt · ${restored.length} Einträge · keine POV-Videos aus Drive`;toast(`Archiv-Backup wiederhergestellt · ${restored.length} Einträge.`);}catch(err){console.error('Cloud-Backup-Wiederherstellung fehlgeschlagen',err);if(help)help.textContent='✕ Cloud-Backup-Wiederherstellung fehlgeschlagen: '+(err?.message||err);toast('Cloud-Backup-Wiederherstellung fehlgeschlagen: '+(err?.message||err));}finally{driveSyncInProgress=false;renderDriveStatus();}}
   function scheduleDriveRecoveryIfEmpty(){
     if(driveSyncInProgress)return;
