@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=133">
+<link rel="stylesheet" href="styles.css?v=140">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -37,7 +37,7 @@
     <header class="topbar">
       <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V139</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V140</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -87,12 +87,42 @@
     <section id="view-csv" class="view">
       <div class="panel-head"><div><h2>CSV erstellen</h2><p>SOC wird mit dem SC aus dem Adminpanel gefüllt. RID bleibt immer leer. Familie bleibt leer. Admin 1–5 werden aus den PC Checkern übernommen.</p></div><div class="top-actions"><button class="ghost" id="refreshCsvBtn">Aktualisieren</button><button class="ghost" id="copyCsvBtn">CSV kopieren</button><button class="pink" id="downloadCsvBtn">CSV herunterladen</button><button class="ghost perma-csv" id="downloadPermaCsvBtn">Perma-CSV herunterladen</button></div></div>
       <div class="csv-filters">
-        <input id="csvFilterSearch" class="csv-filter-input" placeholder="CSV durchsuchen: ID, SOC/SC oder Grund …" autocomplete="off">
-        <select id="csvFilterReason" class="csv-filter-select"><option value="all">Alle Gründe</option>
-          <option>PC-Check Verweigerung</option><option>PC-Check Verweigerung - Trolling</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv - Cleaning</option><option>Event 1.7 (NoPov in PC Check)</option><option>PC Check Positiv (Banevading)</option><option>PC Check Positiv (Covering Cheater)</option><option>Cheater</option><option>Acc 1.4 (Twink)</option><option>Acc 1.4 (Main)</option>
+        <input id="csvFilterSearch" class="csv-filter-input" placeholder="CSV durchsuchen: ID, SOC/SC, Discord, Grund, Admin …" autocomplete="off">
+        <select id="csvFilterType" class="csv-filter-select"><option value="all">Typ / Status: Alle</option><option value="ban">Gebannt</option><option value="hardban">Hardban</option><option value="socban">Soc-Ban</option><option value="cheater">Cheater</option><option value="negativ">Negativ</option><option value="verweigert">Verweigert</option><option value="pccheck">PC-Check</option><option value="pcPositive">PC-Check Positiv</option><option value="pcRefused">PC-Check Verweigerung</option><option value="trolling">Trolling</option><option value="cleaning">Cleaning</option><option value="redux">Redux</option><option value="discordReason">Discord-Grund</option><option value="banevading">Banevading</option><option value="acc14">Acc 1.4</option><option value="event17">Event 1.7</option><option value="perma">Perma-Bann</option><option value="permaArchive">Perma-Archiv</option><option value="notBanned">Nicht gebannt</option><option value="video">Mit Video</option><option value="novideo">Ohne Video</option><option value="docYes">Im Dokument eingetragen</option><option value="docNo">Nicht im Dokument eingetragen</option><option value="complete">Vollständig</option><option value="open">Prüfung offen</option><option value="proof">Mit Proof</option><option value="noProof">Ohne Proof</option><option value="scPresent">SC vorhanden</option><option value="scEmpty">SC leer</option><option value="discordPresent">Discord vorhanden</option><option value="discordEmpty">Discord leer</option></select>
+        <select id="csvFilterReason" class="csv-filter-select"><option value="all">Grund: Alle</option>
+          <option>PC-Check Verweigerung</option><option>PC-Check Verweigerung - Trolling</option><option>PC-Check Positiv 4.1 (Discord)</option><option>PC-Check Positiv</option><option>PC-Check Positiv 4.1 (Redux)</option><option>PC-Check Positiv - Cleaning</option><option>Event 1.7 (NoPov in PC Check)</option><option>PC Check Positiv (Banevading)</option><option>PC Check Positiv (Covering Cheater)</option><option>Acc 1.4 (Twink)</option><option>Acc 1.4 (Main)</option><option>Cheater</option>
         </select>
         <select id="csvFilterSc" class="csv-filter-select"><option value="all">SOC / SC: Alle</option><option value="present">SC vorhanden</option><option value="empty">SC leer</option></select>
-        <select id="csvFilterPerma" class="csv-filter-select" aria-label="Perma-Ban Filter"><option value="all">Perma-Ban: Alle</option><option value="yes">Nur Perma-Ban</option><option value="no">Ohne Perma-Ban</option></select>
+        <select id="csvFilterDiscord" class="csv-filter-select"><option value="all">Discord: Alle</option><option value="present">Discord vorhanden</option><option value="empty">Discord leer</option></select>
+        <select id="csvFilterPerma" class="csv-filter-select"><option value="all">Perma-Ban: Alle</option><option value="yes">Nur Perma-Ban</option><option value="no">Ohne Perma-Ban</option></select>
+        <select id="csvFilterAdmin" class="csv-filter-select"><option value="all">PC-Checker: Alle</option></select>
+        <select id="csvFilterSort" class="csv-filter-select">
+          <option value="date_desc">Sortierung: Datum neu → alt</option><option value="date_asc">Datum alt → neu</option>
+          <option value="id_asc">ID aufsteigend</option><option value="id_desc">ID absteigend</option>
+          <option value="reason_asc">Grund A → Z</option><option value="reason_desc">Grund Z → A</option>
+          <option value="sc_asc">SC A → Z</option><option value="sc_desc">SC Z → A</option>
+          <option value="discord_asc">Discord A → Z</option><option value="discord_desc">Discord Z → A</option>
+          <option value="admin1_asc">Admin 1 A → Z</option><option value="admin1_desc">Admin 1 Z → A</option>
+          <option value="hardban_first">🔥 Hardban zuerst</option><option value="hardban_last">🔥 Hardban zuletzt</option>
+          <option value="socban_first">Soc-Ban zuerst</option><option value="socban_last">Soc-Ban zuletzt</option>
+          <option value="cheater_first">Cheater zuerst</option><option value="cheater_last">Cheater zuletzt</option>
+          <option value="pccheck_first">PC-Checks zuerst</option><option value="pccheck_last">PC-Checks zuletzt</option>
+          <option value="verweigert_first">Verweigerungen zuerst</option><option value="verweigert_last">Verweigerungen zuletzt</option>
+          <option value="trolling_first">Trolling zuerst</option><option value="trolling_last">Trolling zuletzt</option>
+          <option value="cleaning_first">Cleaning zuerst</option><option value="cleaning_last">Cleaning zuletzt</option>
+          <option value="redux_first">Redux zuerst</option><option value="redux_last">Redux zuletzt</option>
+          <option value="discordReason_first">Discord-Grund zuerst</option><option value="discordReason_last">Discord-Grund zuletzt</option>
+          <option value="banevading_first">Banevading zuerst</option><option value="banevading_last">Banevading zuletzt</option>
+          <option value="perma_first">Perma zuerst</option><option value="perma_last">Perma zuletzt</option>
+          <option value="complete_first">Vollständig zuerst</option><option value="complete_last">Vollständig zuletzt</option>
+          <option value="docYes_first">Dokument eingetragen zuerst</option><option value="docYes_last">Dokument eingetragen zuletzt</option>
+          <option value="proof_first">Mit Proof zuerst</option><option value="proof_last">Mit Proof zuletzt</option>
+          <option value="sc_first">Mit SC zuerst</option><option value="sc_last">Mit SC zuletzt</option>
+          <option value="discord_first">Mit Discord zuerst</option><option value="discord_last">Mit Discord zuletzt</option>
+          <option value="missing_first">Fehlende Angaben zuerst</option><option value="missing_last">Fehlende Angaben zuletzt</option>
+        </select>
+        <label class="csv-date-label">Von <input id="csvFilterDateFrom" class="csv-filter-date" type="date"></label>
+        <label class="csv-date-label">Bis <input id="csvFilterDateTo" class="csv-filter-date" type="date"></label>
         <button class="ghost" id="csvFilterClear">Filter zurücksetzen</button>
       </div>
       <div class="csv-summary" id="csvSummary"></div>
@@ -103,7 +133,7 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V139</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V140</span></div>
           <p class="hint">POVs bis 2 Minuten werden vollständig in 250-ms-Schritten durchsucht. Längere Videos werden adaptiv gescannt und bei Treffern verdichtet. Das Info-Foto kommt aus einem verifizierten Bann-Cluster; der Bannblock wird für das Info-Foto bevorzugt in den letzten 5 Sekunden verifiziert. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>
@@ -211,7 +241,7 @@
   }catch{}
 })();
 </script>
-<script src="app.js?v=135"></script>
+<script src="app.js?v=140"></script>
 
 
 </body>
