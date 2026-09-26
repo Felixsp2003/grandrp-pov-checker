@@ -73,3 +73,7 @@ button,select,input,textarea,.nav-item,.chip,.filter,.switch{ -webkit-user-selec
 .filters .filter.pressing{transform:translateY(1px);filter:brightness(1.18)}
 button.filter{appearance:none;-webkit-appearance:none}
 
+
+/* V144 clickable archive filters */
+#filters{position:relative!important;z-index:100!important;pointer-events:auto!important}
+#filters .filter{position:relative!important;z-index:101!important;pointer-events:auto!important;cursor:pointer!important;touch-action:manipulation!important}

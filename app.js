@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V140';
+  const BUILD='V144';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -648,6 +648,28 @@
   const state={entries:[],queue:[],archiveSelected:new Set(),filter:'all',editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:'',tokenClient:null,clientId:'',activeYoutubeSlot:1,ytConnections:loadYoutubeConnectionsLocal(),settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,localFallbackRunner:false,youtubeUploadBlocked:false,tokenExpiresAt:0,tokenRefreshPromise:null,tokenRefreshPromises:new Map()};
   let archiveReadyPromise=Promise.resolve();
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
+  // V144: independent archive-filter handler. It is installed immediately and does not depend
+  // on setupNav(), so a failure in another optional UI initializer cannot disable the filters.
+  function activateArchiveFilter(filter, button=null){
+    const allowed=new Set(['all','ban','pccheck','socban','hardban','cheater','negativ','novideo','permaarchive','duplicates']);
+    const next=allowed.has(String(filter||''))?String(filter):'all';
+    state.filter=next;
+    document.querySelectorAll('#filters .filter').forEach(x=>x.classList.toggle('active',x===button||x.dataset.filter===next));
+    try{renderArchive();}catch(err){console.error('Archiv-Filter fehlgeschlagen',err);try{toast('Filterfehler: '+(err?.message||String(err)));}catch{}}
+    return false;
+  }
+  window.grandrpActivateArchiveFilter=activateArchiveFilter;
+  window.addEventListener('click',ev=>{
+    const b=ev.target?.closest?.('#filters .filter[data-filter]');
+    if(!b)return;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    activateArchiveFilter(b.dataset.filter,b);
+  },true);
+  window.addEventListener('pointerup',ev=>{
+    const b=ev.target?.closest?.('#filters .filter[data-filter]');
+    if(b)b.classList.remove('pressing');
+  },true);
   // Local authentication: plaintext passwords are never stored; only salted PBKDF2 hashes are persisted in this browser.
   const AUTH_USERS_KEY='grandrp_auth_users_v1';
   const AUTH_SESSION_KEY='grandrp_auth_session_v1';
@@ -1598,23 +1620,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     // document-level capture handler could swallow clicks while the archive was re-rendering.
     // Direct handlers are simpler and survive normal render cycles because the filter bar itself
     // is not replaced by renderArchive().
-    $$('.filter').forEach(b=>{
-      if(b.dataset.filterBound==='1')return;
-      b.dataset.filterBound='1';
-      const activate=ev=>{
-        ev.preventDefault();
-        ev.stopPropagation();
-        const next=String(b.dataset.filter||'all');
-        state.filter=next;
-        $$('.filter').forEach(x=>x.classList.toggle('active',x===b));
-        try{renderArchive();}catch(err){console.error('Archiv-Filter fehlgeschlagen',err);toast('Filterfehler: '+(err?.message||err));}
-      };
-      b.addEventListener('pointerdown',()=>b.classList.add('pressing'),{passive:true});
-      b.addEventListener('pointerup',()=>b.classList.remove('pressing'),{passive:true});
-      b.addEventListener('pointercancel',()=>b.classList.remove('pressing'),{passive:true});
-      b.addEventListener('click',activate);
-      b.addEventListener('keydown',ev=>{if(ev.key==='Enter'||ev.key===' '){activate(ev);}},false);
-    });
+    $$('.filter').forEach(b=>b.classList.toggle('active',b.dataset.filter===state.filter));
     restoreSavedView();
   }
 
