@@ -1,31 +1,35 @@
 <!doctype html>
-<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Grand RP · Google-Verbindung</title><style>body{margin:0;background:#08060f;color:#f5effb;font-family:Inter,system-ui,Arial,sans-serif;display:grid;place-items:center;min-height:100vh}.card{width:min(560px,calc(100% - 32px));background:#0f0b18;border:1px solid #281b37;border-radius:14px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.45)}h1{margin:0 0 8px;font-size:22px}p{color:#aaa0b0;line-height:1.5}.ok{color:#69e1af}.err{color:#ff8ebd}.small{font-size:12px}</style></head><body><div class="card"><h1 id="title">Google-Verbindung wird hergestellt…</h1><p id="msg">Bitte warten. Google leitet dich zurück zur Website.</p></div><script>(function(){'use strict';
-const YT_PENDING_KEYS=['grandrp_youtube_oauth_pending_v129','grandrp_youtube_oauth_pending_v89'];
-const YT_RESULT_KEYS=['grandrp_oauth_result_v129','grandrp_oauth_result_v89'];
-const CONNS_KEY='grandrp_youtube_connections_v89';
-const DRIVE_PENDING_KEYS=['grandrp_drive_oauth_pending_v129','grandrp_drive_oauth_pending_v128','grandrp_drive_oauth_pending_v127'];
-const DRIVE_RESULT_KEYS=['grandrp_drive_oauth_result_v129','grandrp_drive_oauth_result_v128','grandrp_drive_oauth_result_v127'];
-const DRIVE_STATE_KEY='grandrp_drive_oauth_state_v129';
-const hash=new URLSearchParams(String(location.hash||'').replace(/^#/,'').trim());
-const returned=String(hash.get('state')||'');
-const token=String(hash.get('access_token')||'');
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Grand RP · YouTube Verbindung</title><style>body{margin:0;background:#08060f;color:#f5effb;font-family:Inter,system-ui,Arial,sans-serif;display:grid;place-items:center;min-height:100vh}.card{width:min(560px,calc(100% - 32px));background:#0f0b18;border:1px solid #281b37;border-radius:14px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.45)}h1{margin:0 0 8px;font-size:22px}p{color:#aaa0b0;line-height:1.5}.ok{color:#69e1af}.err{color:#ff8ebd}.small{font-size:12px}</style></head><body><div class="card"><h1 id="title">YouTube wird verbunden…</h1><p id="msg">Bitte warten. Google leitet dich zurück zur Website.</p></div><script>(function(){
+'use strict';
+const TOKEN='yt_access_token',STATE='grandrp_oauth_state_v51',RESULT='grandrp_oauth_result_v51',EXPIRES='yt_access_expires_at_v50';
+function done(msg,ok){document.getElementById('title').textContent=ok?'YouTube verbunden':'YouTube-Verbindung fehlgeschlagen';document.getElementById('msg').textContent=msg;document.getElementById('msg').className=ok?'ok':'err';}
+const hash=new URLSearchParams(location.hash.replace(/^#/,''));
+const expected=localStorage.getItem(STATE)||sessionStorage.getItem(STATE)||'';
+const returned=hash.get('state')||'';
+const token=hash.get('access_token')||'';
 const expiresIn=Number(hash.get('expires_in')||3600);
-const error=String(hash.get('error')||'');
-const desc=String(hash.get('error_description')||'');
-function read(key,storage){try{const raw=storage.getItem(key)||'';return raw?JSON.parse(raw):null;}catch{return null;}}
-function findPending(keys,state){for(const key of keys){for(const storage of [localStorage,sessionStorage]){const p=read(key,storage);if(p&&String(p.state||'')===state)return {...p,__key:key};}}return null;}
-const typed=returned.startsWith('drive-')?'drive':returned.startsWith('yt-')?'youtube':'';
-let pending=typed==='drive'?findPending(DRIVE_PENDING_KEYS,returned):typed==='youtube'?findPending(YT_PENDING_KEYS,returned):null;
-if(!pending&&returned)pending=findPending(DRIVE_PENDING_KEYS,returned)||findPending(YT_PENDING_KEYS,returned);
-function removePending(p){if(!p)return;for(const storage of [localStorage,sessionStorage]){try{storage.removeItem(p.__key);}catch{}}}
-function setResult(keys,payload){for(const k of keys){try{localStorage.setItem(k,JSON.stringify(payload));}catch{}}}
-function done(msg,ok,isDrive){document.getElementById('title').textContent=ok?(isDrive?'Google Drive verbunden':'YouTube verbunden'):(isDrive?'Google-Drive-Verbindung fehlgeschlagen':'YouTube-Verbindung fehlgeschlagen');document.getElementById('msg').textContent=msg;document.getElementById('msg').className=ok?'ok':'err';}
-function back(){setTimeout(function(){location.replace('./');},700);}
+const error=hash.get('error')||'';
+const desc=hash.get('error_description')||'';
 try{history.replaceState(null,document.title,location.pathname);}catch{}
-const isDrive=typed==='drive'||pending?.purpose==='drive';
-if(error||!token){const msg=desc||error||(isDrive?'Google hat kein Drive-Zugriffstoken zurückgegeben.':'Google hat kein Zugriffstoken zurückgegeben.');setResult(isDrive?DRIVE_RESULT_KEYS:YT_RESULT_KEYS,{message:isDrive?msg:`Verbindung ${pending?.slot||''}: ${msg}`,ok:false,slot:pending?.slot||0});removePending(pending);done(msg,false,isDrive);back();return;}
-if(!pending||!returned||String(pending.state||'')!==returned){const msg=isDrive?'Sicherheitsprüfung für Google Drive fehlgeschlagen. Bitte Google Drive erneut verbinden.':'Sicherheitsprüfung für YouTube fehlgeschlagen. Bitte die betroffene YouTube-Verbindung erneut verbinden.';setResult(isDrive?DRIVE_RESULT_KEYS:YT_RESULT_KEYS,{message:msg,ok:false,slot:pending?.slot||0});removePending(pending);done(msg,false,isDrive);back();return;}
-if(isDrive){localStorage.setItem(DRIVE_STATE_KEY,JSON.stringify({version:3,updatedAt:Date.now(),clientId:String(pending.clientId||''),accessToken:token,tokenExpiresAt:Date.now()+Math.max(60,expiresIn-30)*1000,connected:true,accountHint:'same-as-youtube-1'}));setResult(DRIVE_RESULT_KEYS,{message:'Google Drive erfolgreich verbunden. Verwende dasselbe Google-Konto wie bei YouTube-Verbindung 1.',ok:true});removePending(pending);done('Google Drive erfolgreich verbunden. Du wirst zur Website zurückgeleitet.',true,true);back();return;}
-let list=[];try{const raw=localStorage.getItem(CONNS_KEY);const a=raw?JSON.parse(raw):[];if(Array.isArray(a))list=a;}catch{}if(!list.length)list=[1,2,3].map(slot=>({slot,clientId:'',accessToken:'',tokenExpiresAt:0,connected:false,blockedUntil:0,blockedReason:'',lastError:''}));
-const slot=Math.min(3,Math.max(1,Number(pending.slot)||1));let c=list.find(x=>Number(x?.slot)===slot);if(!c){c={slot,clientId:'',accessToken:'',tokenExpiresAt:0,connected:false,blockedUntil:0,blockedReason:'',lastError:''};list.push(c);}c.clientId=String(pending.clientId||c.clientId||'').trim();c.accessToken=token;c.tokenExpiresAt=Date.now()+Math.max(60,expiresIn-30)*1000;c.blockedUntil=0;c.blockedReason='';c.lastError='';c.connected=!!(c.clientId&&c.accessToken);c.updatedAt=Date.now();try{localStorage.setItem(CONNS_KEY,JSON.stringify(list));}catch{}if(slot===1){try{localStorage.setItem('yt_client_id',c.clientId);localStorage.setItem('yt_access_token',c.accessToken);localStorage.setItem('yt_access_expires_at_v50',String(c.tokenExpiresAt));}catch{}}setResult(YT_RESULT_KEYS,{message:`YouTube-Verbindung ${slot} ist verbunden.`,ok:true,slot});removePending(pending);done(`Verbindung ${slot} erfolgreich. Du wirst zur Website zurückgeleitet.`,true,false);back();
+if(error||!token){
+  const m=desc||error||'Google hat kein Zugriffstoken zurückgegeben.';
+  const data={message:'Google OAuth: '+m,ok:false};
+  localStorage.setItem(RESULT,JSON.stringify(data));sessionStorage.setItem(RESULT,JSON.stringify(data));
+  localStorage.removeItem(STATE);sessionStorage.removeItem(STATE);
+  done(m,false);setTimeout(()=>location.replace('./'),1400);return;
+}
+if(expected && returned!==expected){
+  const m='Sicherheitsprüfung fehlgeschlagen. Bitte erneut verbinden.';
+  const data={message:m,ok:false};
+  localStorage.setItem(RESULT,JSON.stringify(data));sessionStorage.setItem(RESULT,JSON.stringify(data));
+  localStorage.removeItem(STATE);sessionStorage.removeItem(STATE);
+  done(m,false);setTimeout(()=>location.replace('./'),1400);return;
+}
+// Persist the token in both storage types so the main page sees it after returning.
+localStorage.setItem(TOKEN,token);sessionStorage.setItem(TOKEN,token);localStorage.setItem(EXPIRES,String(Date.now()+Math.max(60,expiresIn-30)*1000));localStorage.setItem('grandrp_yt_scope_v51','1');
+const data={message:'YouTube ist verbunden.',ok:true};
+localStorage.setItem(RESULT,JSON.stringify(data));sessionStorage.setItem(RESULT,JSON.stringify(data));
+localStorage.removeItem(STATE);sessionStorage.removeItem(STATE);
+done('Verbindung erfolgreich. Du wirst zurück zur Website geleitet.',true);
+setTimeout(()=>location.replace('./'),700);
 })();</script></body></html>
