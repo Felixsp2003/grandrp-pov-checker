@@ -2,7 +2,7 @@
 
 .settings-actions{flex-wrap:wrap}.settings-actions .ghost{white-space:nowrap}
 
-.csv-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.csv-filter-input,.csv-filter-select{height:38px;border:1px solid var(--line);background:#0c0911;color:#e7dfea;border-radius:8px;padding:0 10px;outline:none}.csv-filter-input{min-width:280px;flex:1}.csv-filter-input:focus,.csv-filter-select:focus{border-color:#553364}.csv-filters .ghost{height:38px}.csv-empty{padding:28px;text-align:center;color:var(--muted)}@media(max-width:760px){.csv-filter-input{min-width:100%}.csv-filter-select{flex:1;min-width:150px}}
+.csv-filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}.csv-filter-input,.csv-filter-select{height:38px;border:1px solid var(--line);background:#0c0911;color:#e7dfea;border-radius:8px;padding:0 10px;outline:none}.csv-filter-input{min-width:280px;flex:1}.csv-date-label{display:flex;align-items:center;gap:6px;height:38px;color:var(--muted);font-size:12px}.csv-filter-date{height:38px;border:1px solid var(--line);background:#0c0911;color:#e7dfea;border-radius:8px;padding:0 8px;outline:none}.csv-filter-date:focus{border-color:#553364}.csv-filter-input:focus,.csv-filter-select:focus{border-color:#553364}.csv-filters .ghost{height:38px}.csv-empty{padding:28px;text-align:center;color:var(--muted)}@media(max-width:760px){.csv-filter-input{min-width:100%}.csv-filter-select{flex:1;min-width:150px}}
 
 /* V48: SC/RID is a 40-character identifier; give it a full-width, readable cell. */
 .meta{min-width:0}.meta>div{min-width:0}.meta .rid-cell{grid-column:1/-1}.meta .rid-cell:not(:empty){overflow-wrap:anywhere;word-break:break-all;line-height:1.35}.meta .rid-cell span{word-break:normal}
