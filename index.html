@@ -37,7 +37,7 @@
     <header class="topbar">
       <div><h1 id="pageTitle">Archiv</h1><p id="pageSubtitle">POV-Fälle, Bans, PC-Checks und CSV-Export</p></div>
       <div class="top-actions">
-        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V140</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
+        <div class="search"><span>⌕</span><input id="search" placeholder="ID, SOC/SC oder Grund suchen"><kbd>/</kbd></div><span class="version-badge">V141</span><span class="active-user" id="activeUserName"></span><button class="ghost" id="logoutBtn">Abmelden</button>
         <button class="ghost" id="reloadBtn">Neu laden</button>
         <button class="ghost" id="headerCsvBtn">CSV erstellen</button>
         <button class="pink" id="headerUploadBtn">Neuer Eintrag</button>
@@ -107,6 +107,12 @@
           <option value="socban_first">Soc-Ban zuerst</option><option value="socban_last">Soc-Ban zuletzt</option>
           <option value="cheater_first">Cheater zuerst</option><option value="cheater_last">Cheater zuletzt</option>
           <option value="pccheck_first">PC-Checks zuerst</option><option value="pccheck_last">PC-Checks zuletzt</option>
+          <option value="ban_first">Bans zuerst</option><option value="ban_last">Bans zuletzt</option>
+          <option value="negativ_first">Negative zuerst</option><option value="negativ_last">Negative zuletzt</option>
+          <option value="novideo_first">Ohne Video zuerst</option><option value="novideo_last">Ohne Video zuletzt</option>
+          <option value="noProof_first">Ohne Proof zuerst</option><option value="noProof_last">Ohne Proof zuletzt</option>
+          <option value="scEmpty_first">Ohne SC zuerst</option><option value="scEmpty_last">Ohne SC zuletzt</option>
+          <option value="discordEmpty_first">Ohne Discord zuerst</option><option value="discordEmpty_last">Ohne Discord zuletzt</option>
           <option value="verweigert_first">Verweigerungen zuerst</option><option value="verweigert_last">Verweigerungen zuletzt</option>
           <option value="trolling_first">Trolling zuerst</option><option value="trolling_last">Trolling zuletzt</option>
           <option value="cleaning_first">Cleaning zuerst</option><option value="cleaning_last">Cleaning zuletzt</option>
@@ -133,7 +139,7 @@
     <section id="view-settings" class="view">
       <div class="settings-grid">
         <div class="settings-card">
-          <div class="card-title">OCR · Schnell & präzise <span class="badge">V140</span></div>
+          <div class="card-title">OCR · Schnell & präzise <span class="badge">V141</span></div>
           <p class="hint">POVs bis 2 Minuten werden vollständig in 250-ms-Schritten durchsucht. Längere Videos werden adaptiv gescannt und bei Treffern verdichtet. Das Info-Foto kommt aus einem verifizierten Bann-Cluster; der Bannblock wird für das Info-Foto bevorzugt in den letzten 5 Sekunden verifiziert. Falsche Admin-IDs, zufällige HUD-Zahlen und fremde SCs werden nicht als Ergebnis übernommen.</p>
           <label>Basis-Frames<input id="frameCount" type="number" min="18" max="28" step="1" value="24"></label>
           <label>Präzisionsfenster (Sekunden)<input id="refineWindow" type="number" min="3" max="7" step="0.5" value="4.5"></label>

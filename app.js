@@ -10,8 +10,9 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V140';
+  const BUILD='V141';
   const META_KEY='grandrp_pov_meta_v42';
+  const ARCHIVE_FILTER_KEY='grandrp_archive_filter_v141';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
   const BAN_ADMIN_NAME='Adam Byers';
@@ -645,7 +646,8 @@
     const global=$('#ytConnectHelp');
     if(global){const count=usableYoutubeConnections().length;global.textContent=count?`${count} YouTube-Verbindung${count===1?'':'en'} verfügbar. Leere Felder werden ignoriert.`:'Keine nutzbare YouTube-Verbindung vorhanden.';}
   }
-  const state={entries:[],queue:[],archiveSelected:new Set(),filter:'all',editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:'',tokenClient:null,clientId:'',activeYoutubeSlot:1,ytConnections:loadYoutubeConnectionsLocal(),settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,localFallbackRunner:false,youtubeUploadBlocked:false,tokenExpiresAt:0,tokenRefreshPromise:null,tokenRefreshPromises:new Map()};
+  const savedArchiveFilter=(()=>{try{const v=localStorage.getItem(ARCHIVE_FILTER_KEY);return ['all','ban','pccheck','socban','hardban','cheater','negativ','novideo','permaarchive','duplicates'].includes(v)?v:'all';}catch{return 'all';}})();
+  const state={entries:[],queue:[],archiveSelected:new Set(),filter:savedArchiveFilter,editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:'',tokenClient:null,clientId:'',activeYoutubeSlot:1,ytConnections:loadYoutubeConnectionsLocal(),settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,localFallbackRunner:false,youtubeUploadBlocked:false,tokenExpiresAt:0,tokenRefreshPromise:null,tokenRefreshPromises:new Map()};
   let archiveReadyPromise=Promise.resolve();
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
   // Local authentication: plaintext passwords are never stored; only salted PBKDF2 hashes are persisted in this browser.
@@ -1214,7 +1216,34 @@
   function duplicateIdMap(entries=state.entries){const map=new Map();for(const e of entries){const id=String(e?.targetId||'').trim();if(/^\d{1,6}$/.test(id))map.set(id,(map.get(id)||0)+1);}return map;}
   function duplicateIdCount(entries=state.entries){let n=0;for(const count of duplicateIdMap(entries).values())if(count>1)n++;return n;}
   function isDuplicateId(entry){const id=String(entry?.targetId||'').trim();return /^\d{1,6}$/.test(id)&&Number(duplicateIdMap().get(id)||0)>1;}
-  function updateCounts(){const all=state.entries;const normal=all.filter(e=>!e.permaArchive);const count=k=>normal.filter(e=>e.types?.includes(k)).length;$('#countAll').textContent=normal.length;$('#countBan').textContent=normal.filter(e=>!e.notBanned).length;$('#countPc').textContent=count('pccheck');$('#countSoc').textContent=count('socban');$('#countHard').textContent=count('hardban');$('#countCheat').textContent=count('cheater');$('#countNeg').textContent=count('negativ');$('#countNoVideo').textContent=normal.filter(e=>!e.videoStored).length;$('#countPerma').textContent=all.filter(e=>e.permaArchive).length;if($('#countDuplicates'))$('#countDuplicates').textContent=String(duplicateIdCount(all));}
+  function archiveEntryMatchesFilter(e,filter){
+    const types=Array.isArray(e?.types)?e.types:[];
+    const reason=String(e?.reason||'').toLowerCase();
+    switch(filter){
+      case 'ban': return !e?.notBanned;
+      case 'pccheck': return types.includes('pccheck')||/^pc[- ]?check/.test(reason);
+      case 'socban': return types.includes('socban')||/soc[- ]?ban/.test(reason);
+      case 'hardban': return types.includes('hardban')||/hardban|hardbann/.test(reason);
+      case 'cheater': return types.includes('cheater')||/cheat/.test(reason);
+      case 'negativ': return types.includes('negativ')||/negativ/.test(reason);
+      case 'novideo': return !e?.videoStored;
+      default: return true;
+    }
+  }
+  function updateCounts(){
+    const all=state.entries;
+    const normal=all.filter(e=>!e.permaArchive);
+    $('#countAll').textContent=normal.length;
+    $('#countBan').textContent=all.filter(e=>archiveEntryMatchesFilter(e,'ban')).length;
+    $('#countPc').textContent=all.filter(e=>archiveEntryMatchesFilter(e,'pccheck')).length;
+    $('#countSoc').textContent=all.filter(e=>archiveEntryMatchesFilter(e,'socban')).length;
+    $('#countHard').textContent=all.filter(e=>archiveEntryMatchesFilter(e,'hardban')).length;
+    $('#countCheat').textContent=all.filter(e=>archiveEntryMatchesFilter(e,'cheater')).length;
+    $('#countNeg').textContent=all.filter(e=>archiveEntryMatchesFilter(e,'negativ')).length;
+    $('#countNoVideo').textContent=all.filter(e=>archiveEntryMatchesFilter(e,'novideo')).length;
+    $('#countPerma').textContent=all.filter(e=>e.permaArchive).length;
+    if($('#countDuplicates'))$('#countDuplicates').textContent=String(duplicateIdCount(all));
+  }
   function renderArchive(){
     updateCounts();
     const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;
@@ -1222,9 +1251,8 @@
       if(filter==='permaarchive' && !e.permaArchive)return false;
       if(filter==='all' && e.permaArchive)return false;
       if(filter==='duplicates' && !isDuplicateId(e))return false;
-      if(filter==='ban'&&e.notBanned)return false;
-      if(filter!=='all'&&filter!=='permaarchive'&&filter!=='ban'&&filter!=='duplicates'&&!e.types?.includes(filter))return false;
-      if(filter==='novideo'&&e.videoStored)return false;
+      if(['ban','pccheck','socban','hardban','cheater','negativ','novideo'].includes(filter) && !archiveEntryMatchesFilter(e,filter))return false;
+      if(!['all','permaarchive','duplicates','ban','pccheck','socban','hardban','cheater','negativ','novideo'].includes(filter) && !e.types?.includes(filter))return false;
       if(!q)return true;
       return [e.targetId,e.sc,e.reason,e.manualResult,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));
     });
@@ -1269,7 +1297,9 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     return false;
   }
   function csvRowsBase(entries=state.entries){
-    return entries.filter(e=>e.saved&&!isPermaBanValue(e.permaArchive)).map(e=>{
+    // CSV filters operate on the complete saved dataset, including POV-Archiv entries.
+    // The dedicated Perma-CSV export remains available separately.
+    return entries.filter(e=>e.saved).map(e=>{
       const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];
       return {
         _id:e.id,
@@ -1374,6 +1404,12 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     const types=Array.isArray(e.types)?e.types:[];
     switch(key){
       case 'hardban': return types.includes('hardban')||/hardban|hardbann/.test(reason)?1:0;
+      case 'ban': return e.notBanned?0:1;
+      case 'negativ': return types.includes('negativ')||/negativ/.test(reason)?1:0;
+      case 'novideo': return e.videoStored?0:1;
+      case 'noProof': return String(r.Proof||'').trim()?0:1;
+      case 'scEmpty': return String(r.SOC||'').trim()?0:1;
+      case 'discordEmpty': return String(r.DiscordID||e.discordId||'').trim()?0:1;
       case 'socban': return types.includes('socban')||/soc[- ]?ban/.test(reason)?1:0;
       case 'cheater': return types.includes('cheater')||/cheat/.test(reason)?1:0;
       case 'pccheck': return types.includes('pccheck')||/^pc[- ]?check/.test(reason)?1:0;
@@ -1441,6 +1477,18 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
         case 'admin1_desc': result=String(b.Admin1||'').localeCompare(String(a.Admin1||''),'de');break;
         case 'hardban_first': result=boolSort('hardban','first');break;
         case 'hardban_last': result=boolSort('hardban','last');break;
+        case 'ban_first': result=boolSort('ban','first');break;
+        case 'ban_last': result=boolSort('ban','last');break;
+        case 'negativ_first': result=boolSort('negativ','first');break;
+        case 'negativ_last': result=boolSort('negativ','last');break;
+        case 'novideo_first': result=boolSort('novideo','first');break;
+        case 'novideo_last': result=boolSort('novideo','last');break;
+        case 'noProof_first': result=boolSort('noProof','first');break;
+        case 'noProof_last': result=boolSort('noProof','last');break;
+        case 'scEmpty_first': result=boolSort('scEmpty','first');break;
+        case 'scEmpty_last': result=boolSort('scEmpty','last');break;
+        case 'discordEmpty_first': result=boolSort('discordEmpty','first');break;
+        case 'discordEmpty_last': result=boolSort('discordEmpty','last');break;
         case 'socban_first': result=boolSort('socban','first');break;
         case 'socban_last': result=boolSort('socban','last');break;
         case 'cheater_first': result=boolSort('cheater','first');break;
@@ -1555,9 +1603,11 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     });
     $$('.filter').forEach(b=>b.addEventListener('click',()=>{
       state.filter=b.dataset.filter;
+      try{localStorage.setItem(ARCHIVE_FILTER_KEY,state.filter);}catch{}
       $$('.filter').forEach(x=>x.classList.toggle('active',x===b));
       renderArchive();
     }));
+    $$('.filter').forEach(x=>x.classList.toggle('active',x.dataset.filter===state.filter));
     restoreSavedView();
   }
 
@@ -3486,7 +3536,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       // Make the UI authoritative as well: clear filters/search and render the exact imported
       // list after persistence has completed.
       state.entries=clean.map(e=>({...e,file:undefined,videoUrl:undefined}));
-      state.filter='all';
+      state.filter='all';try{localStorage.setItem(ARCHIVE_FILTER_KEY,'all');}catch{}
       state.archiveSelected.clear();
       if($('#search'))$('#search').value='';
       if($('#archiveGrid'))renderArchive();
@@ -3516,7 +3566,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if(!clean.length)throw new Error('Keine gültigen Archiv-Einträge zum Übernehmen.');
       if(options.replace===true) state.entries=clean;
       else {const byId=new Map(state.entries.map(e=>[String(e.id),e]));for(const e of clean)byId.set(String(e.id),e);state.entries=[...byId.values()];}
-      state.filter='all';state.archiveSelected.clear();if($('#search'))$('#search').value='';
+      state.filter='all';try{localStorage.setItem(ARCHIVE_FILTER_KEY,'all');}catch{}state.archiveSelected.clear();if($('#search'))$('#search').value='';
       renderArchive();renderCases();renderCsv();
       return state.entries.length;
     };
