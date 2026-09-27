@@ -77,3 +77,8 @@ button.filter{appearance:none;-webkit-appearance:none}
 /* V144 clickable archive filters */
 #filters{position:relative!important;z-index:100!important;pointer-events:auto!important}
 #filters .filter{position:relative!important;z-index:101!important;pointer-events:auto!important;cursor:pointer!important;touch-action:manipulation!important}
+
+/* V145: reliable archive filter hit-area */
+#filters{position:relative!important;z-index:300!important;pointer-events:auto!important;isolation:isolate}
+#filters .filter{position:relative!important;z-index:301!important;pointer-events:auto!important;cursor:pointer!important;touch-action:manipulation!important}
+#filters .filter.pressing{transform:translateY(1px)}

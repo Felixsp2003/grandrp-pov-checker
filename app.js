@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V140
+/* Grand RP DC Checker V145
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,8 +10,9 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V144';
+  const BUILD='V145';
   const META_KEY='grandrp_pov_meta_v42';
+  const ARCHIVE_FILTER_KEY='grandrp_archive_filter_v145';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
   const BAN_ADMIN_NAME='Adam Byers';
@@ -645,31 +646,12 @@
     const global=$('#ytConnectHelp');
     if(global){const count=usableYoutubeConnections().length;global.textContent=count?`${count} YouTube-Verbindung${count===1?'':'en'} verfügbar. Leere Felder werden ignoriert.`:'Keine nutzbare YouTube-Verbindung vorhanden.';}
   }
-  const state={entries:[],queue:[],archiveSelected:new Set(),filter:'all',editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:'',tokenClient:null,clientId:'',activeYoutubeSlot:1,ytConnections:loadYoutubeConnectionsLocal(),settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,localFallbackRunner:false,youtubeUploadBlocked:false,tokenExpiresAt:0,tokenRefreshPromise:null,tokenRefreshPromises:new Map()};
+  const allowedArchiveFilters=new Set(['all','ban','pccheck','socban','hardban','cheater','negativ','novideo','permaarchive','duplicates']);
+  let initialArchiveFilter='all';
+  try{const value=localStorage.getItem(ARCHIVE_FILTER_KEY)||'';if(allowedArchiveFilters.has(value))initialArchiveFilter=value;}catch{}
+  const state={entries:[],queue:[],archiveSelected:new Set(),filter:initialArchiveFilter,editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:'',tokenClient:null,clientId:'',activeYoutubeSlot:1,ytConnections:loadYoutubeConnectionsLocal(),settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,localFallbackRunner:false,youtubeUploadBlocked:false,tokenExpiresAt:0,tokenRefreshPromise:null,tokenRefreshPromises:new Map()};
   let archiveReadyPromise=Promise.resolve();
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
-  // V144: independent archive-filter handler. It is installed immediately and does not depend
-  // on setupNav(), so a failure in another optional UI initializer cannot disable the filters.
-  function activateArchiveFilter(filter, button=null){
-    const allowed=new Set(['all','ban','pccheck','socban','hardban','cheater','negativ','novideo','permaarchive','duplicates']);
-    const next=allowed.has(String(filter||''))?String(filter):'all';
-    state.filter=next;
-    document.querySelectorAll('#filters .filter').forEach(x=>x.classList.toggle('active',x===button||x.dataset.filter===next));
-    try{renderArchive();}catch(err){console.error('Archiv-Filter fehlgeschlagen',err);try{toast('Filterfehler: '+(err?.message||String(err)));}catch{}}
-    return false;
-  }
-  window.grandrpActivateArchiveFilter=activateArchiveFilter;
-  window.addEventListener('click',ev=>{
-    const b=ev.target?.closest?.('#filters .filter[data-filter]');
-    if(!b)return;
-    ev.preventDefault();
-    ev.stopImmediatePropagation();
-    activateArchiveFilter(b.dataset.filter,b);
-  },true);
-  window.addEventListener('pointerup',ev=>{
-    const b=ev.target?.closest?.('#filters .filter[data-filter]');
-    if(b)b.classList.remove('pressing');
-  },true);
   // Local authentication: plaintext passwords are never stored; only salted PBKDF2 hashes are persisted in this browser.
   const AUTH_USERS_KEY='grandrp_auth_users_v1';
   const AUTH_SESSION_KEY='grandrp_auth_session_v1';
@@ -1047,7 +1029,8 @@
         if(!/grandrp.*(?:pov_meta|archive.*backup|archive.*snapshot)/i.test(key))continue;
         const raw=localStorage.getItem(key);if(!raw)continue;
         let parsed;try{parsed=JSON.parse(raw);}catch{continue;}
-        const rows=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.entries)?parsed.entries:[]);
+        let rows=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.entries)?parsed.entries:(Array.isArray(parsed?.archive)?parsed.archive:(Array.isArray(parsed?.data?.entries)?parsed.data.entries:[])));
+        if(!rows.length&&typeof parsed?.raw==='string'){try{const nested=JSON.parse(parsed.raw);rows=Array.isArray(nested)?nested:(Array.isArray(nested?.entries)?nested.entries:[]);}catch{}}
         if(rows.length)candidates.push({entries:rows,updatedAt:Number(parsed?.updatedAt)||Number(localStorage.getItem(META_UPDATED_KEY)||0),source:'localStorage:'+key});
       }
     }catch(err){console.warn('localStorage-Archiv konnte nicht vollständig durchsucht werden',err);}
@@ -1072,6 +1055,9 @@
     // Re-apply direct restore last so it wins deterministically for duplicate IDs.
     if(directFirst)for(const e of sanitizeArchiveEntries(directFirst.entries))if(e?.id)mergedById.set(String(e.id),e);
     const recovered=[...mergedById.values()];
+    // Safety invariant: a failed/empty startup read may never turn an already loaded archive into [] .
+    // This protects against transient IndexedDB/localStorage failures and startup races.
+    if(!recovered.length && state.entries.length) return;
     // Any source that ever recorded a POV as archived is treated as proof of permanent
     // placement. This repairs older V132 stores where the main index could contain the same
     // POV with permaArchive:false while the dedicated archive subset still had it.
@@ -1220,6 +1206,23 @@
     if(!saved){try{saved=localStorage.getItem('grandrp_current_view')||sessionStorage.getItem('grandrp_current_view')||document.documentElement.dataset.initialView||'';}catch{}}
     if(saved&&views[saved])showView(saved,false); else showView('archive',false);
     if(saved&&views[saved])persistCurrentView(saved);
+    try{
+      const stored=localStorage.getItem(ARCHIVE_FILTER_KEY)||'';
+      if(allowedArchiveFilters.has(stored))state.filter=stored;
+    }catch{}
+    const normalCount=state.entries.filter(e=>!e.permaArchive).length;
+    const archiveCount=state.entries.filter(e=>e.permaArchive).length;
+    // If everything is in the POV-Archiv, never leave the user on an empty "Alle" screen after refresh.
+    if((!saved||saved==='archive')&&archiveCount>0&&normalCount===0&&state.filter==='all'){
+      state.filter='permaarchive';
+      try{localStorage.setItem(ARCHIVE_FILTER_KEY,'permaarchive');}catch{}
+    }
+    document.querySelectorAll('#filters .filter').forEach(button=>{
+      const active=button.dataset.filter===state.filter;
+      button.classList.toggle('active',active);
+      button.setAttribute('aria-pressed',active?'true':'false');
+    });
+    if(saved==='archive'||!saved)renderArchive();
   }
   function showView(v,persist=true){
     if(!views[v])v='archive';
@@ -1569,6 +1572,46 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       try{showView(view);}catch(err){console.error('Navigation failed',err);}
     });
   }
+  function setupArchiveFilterButtons(){
+    const box=$('#filters');
+    if(!box||box.dataset.v145Bound==='1')return;
+    box.dataset.v145Bound='1';
+    const apply=button=>{
+      const filter=String(button?.dataset?.filter||'all');
+      if(!allowedArchiveFilters.has(filter))return;
+      state.filter=filter;
+      try{localStorage.setItem(ARCHIVE_FILTER_KEY,filter);}catch{}
+      box.querySelectorAll('.filter').forEach(b=>{
+        const active=b.dataset.filter===filter;
+        b.classList.toggle('active',active);
+        b.setAttribute('aria-pressed',active?'true':'false');
+        b.classList.remove('pressing');
+      });
+      try{renderArchive();}catch(err){console.error('Archiv-Filter konnte nicht angewendet werden',err);toast('Filterfehler: '+(err?.message||String(err)));}
+    };
+    box.querySelectorAll('.filter').forEach(button=>{
+      button.type='button';
+      button.setAttribute('aria-pressed',button.dataset.filter===state.filter?'true':'false');
+      button.addEventListener('pointerdown',()=>button.classList.add('pressing'),{passive:true});
+      button.addEventListener('pointerup',()=>button.classList.remove('pressing'),{passive:true});
+      button.addEventListener('pointercancel',()=>button.classList.remove('pressing'),{passive:true});
+    });
+    // Bubble-phase delegation: Google Forms-like click interception cannot stop the target event
+    // before it reaches this container, and renderArchive never replaces #filters.
+    box.addEventListener('click',ev=>{
+      const button=ev.target.closest('button.filter[data-filter]');
+      if(!button||!box.contains(button))return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      apply(button);
+    });
+    box.querySelectorAll('.filter').forEach(button=>{
+      const active=button.dataset.filter===state.filter;
+      button.classList.toggle('active',active);
+      button.setAttribute('aria-pressed',active?'true':'false');
+    });
+  }
+
   function setupNav(){
     installNavDelegation();
     setupArchiveBulk();
@@ -1616,11 +1659,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if($('#csvFilterDateTo'))$('#csvFilterDateTo').value='';
       renderCsv();
     });
-    // Archive filter buttons are bound directly to the current DOM nodes.  The previous
-    // document-level capture handler could swallow clicks while the archive was re-rendering.
-    // Direct handlers are simpler and survive normal render cycles because the filter bar itself
-    // is not replaced by renderArchive().
-    $$('.filter').forEach(b=>b.classList.toggle('active',b.dataset.filter===state.filter));
+    setupArchiveFilterButtons();
     restoreSavedView();
   }
 
@@ -3461,7 +3500,6 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       a.rel='noopener';
       a.style.position='fixed';a.style.left='-99999px';a.style.top='-99999px';a.style.width='1px';a.style.height='1px';
       document.body.appendChild(a);
-      document.body.appendChild(a);
       a.click();
       setTimeout(()=>{try{a.remove();}catch{};try{URL.revokeObjectURL(url);}catch{};},1500);
       return true;
@@ -3716,6 +3754,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     void pumpUploads();
     renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();renderAuthUsers();
     restoreSavedView();
+    try{renderArchive();}catch(err){console.error('Archiv konnte beim finalen Startup-Rendern nicht angezeigt werden',err);}
     // Last startup step: an explicitly selected backup is authoritative and is re-applied
     // after every normal loader has finished. This prevents stale/empty stores from winning.
     try{await forceApplyDirectRestore({showStatus:false});}catch(err){console.error('Startup-Restore konnte nicht abgeschlossen werden',err);}
