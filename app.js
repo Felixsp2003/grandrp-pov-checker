@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V152';
+  const BUILD='V153';
   const META_KEY='grandrp_pov_meta_v42';
   const ARCHIVE_FILTER_KEY='grandrp_archive_filter_v145';
   const DB_NAME='grandrp_pov_db_v42';
@@ -728,80 +728,15 @@
   const LEGACY_DIRECT_RESTORE_KEY='grandrp_direct_restore_v118';
   const ARCHIVE_SNAPSHOT_PREFIX='__grandrp_archive_snapshot_v106__';
   const ARCHIVE_ENTRY_PREFIX='__grandrp_archive_entry_v106__';
-  // Normal archive persistence mirror. It is separate from recovery/POV-Archiv
-  // snapshots so stale recovery data cannot hide newly checked normal POVs.
-  const LOCAL_ARCHIVE_MASTER_KEY='grandrp_archive_local_master_v1';
-  const LOCAL_ARCHIVE_ENTRY_PREFIX='grandrp_archive_local_entry_v1:';
-  const LOCAL_ARCHIVE_DELETED_KEY='grandrp_archive_local_deleted_v1';
   const DESTRUCTIVE_TOKEN=Object.freeze({name:'explicit-user-delete'});
   const ARCHIVE_SNAPSHOT_COUNT=20;
   let queuePersistTimer=0;
   let archiveRestoreInProgress=false;
+  let driveBackupPending=false;
+  let driveBackupPendingReason='';
+  let driveBackupPendingAllowEmpty=false;
   function sanitizeArchiveEntries(entries){
     return (Array.isArray(entries)?entries:[]).filter(e=>e&&e.id).map(e=>({...e,file:undefined,videoUrl:undefined}));
-  }
-  function localArchiveSafeEntry(entry){
-    const e={...entry};
-    delete e.file; delete e.videoUrl; delete e.ocrPromise;
-    if(e.result&&typeof e.result==='object'){
-      e.result={...e.result};
-      delete e.result.file; delete e.result.videoUrl; delete e.result.ocrPromise;
-    }
-    return e;
-  }
-  function readLocalArchiveDeleted(){
-    try{
-      const a=JSON.parse(localStorage.getItem(LOCAL_ARCHIVE_DELETED_KEY)||'[]');
-      return new Set(Array.isArray(a)?a.map(String):[]);
-    }catch{return new Set();}
-  }
-  function writeLocalArchiveDeleted(set){try{localStorage.setItem(LOCAL_ARCHIVE_DELETED_KEY,JSON.stringify([...set]));}catch{}}
-  function clearLocalArchiveDeletion(id){
-    const set=readLocalArchiveDeleted();
-    if(set.delete(String(id)))writeLocalArchiveDeleted(set);
-  }
-  function saveLocalArchiveMirror(entries=state.entries,updatedAt=Date.now()){
-    const clean=sanitizeArchiveEntries(entries).map(localArchiveSafeEntry);
-    const deleted=readLocalArchiveDeleted();
-    for(const e of clean)deleted.delete(String(e.id));
-    writeLocalArchiveDeleted(deleted);
-    try{localStorage.setItem(LOCAL_ARCHIVE_MASTER_KEY,JSON.stringify({version:1,updatedAt,entries:clean}));}catch(err){console.warn('Lokaler Archiv-Hauptspiegel konnte nicht gespeichert werden',err);}
-    for(const e of clean){
-      try{localStorage.setItem(LOCAL_ARCHIVE_ENTRY_PREFIX+String(e.id),JSON.stringify({version:1,updatedAt,entry:e}));}
-      catch(err){console.warn('Lokaler POV-Eintrag konnte nicht gespeichert werden',e.id,err);}
-    }
-  }
-  function readLocalArchiveMirror(){
-    const deleted=readLocalArchiveDeleted(),merged=new Map();let updatedAt=0;
-    try{
-      const raw=localStorage.getItem(LOCAL_ARCHIVE_MASTER_KEY);
-      if(raw){const p=JSON.parse(raw);updatedAt=Math.max(updatedAt,Number(p?.updatedAt)||0);for(const e of sanitizeArchiveEntries(p?.entries||[]))if(!deleted.has(String(e.id)))merged.set(String(e.id),e);}
-    }catch(err){console.warn('Lokaler Archiv-Hauptspiegel konnte nicht gelesen werden',err);}
-    try{
-      for(let i=0;i<localStorage.length;i++){
-        const key=localStorage.key(i)||'';if(!key.startsWith(LOCAL_ARCHIVE_ENTRY_PREFIX))continue;
-        const raw=localStorage.getItem(key);if(!raw)continue;const p=JSON.parse(raw),e=p?.entry||p;if(!e?.id||deleted.has(String(e.id)))continue;
-        const t=Number(p?.updatedAt)||0;updatedAt=Math.max(updatedAt,t);const old=merged.get(String(e.id));
-        if(!old||t>=Number(old?.updatedAt)||0)merged.set(String(e.id),e);
-      }
-    }catch(err){console.warn('Lokale POV-Einträge konnten nicht vollständig gelesen werden',err);}
-    return {entries:[...merged.values()],updatedAt};
-  }
-  function removeLocalArchiveMirror(id){
-    const key=String(id||'');if(!key)return;
-    const deleted=readLocalArchiveDeleted();deleted.add(key);writeLocalArchiveDeleted(deleted);
-    try{localStorage.removeItem(LOCAL_ARCHIVE_ENTRY_PREFIX+key);}catch{}
-    try{
-      const raw=localStorage.getItem(LOCAL_ARCHIVE_MASTER_KEY);
-      if(raw){const p=JSON.parse(raw);if(Array.isArray(p?.entries)){p.entries=p.entries.filter(e=>String(e?.id||'')!==key);p.updatedAt=Date.now();localStorage.setItem(LOCAL_ARCHIVE_MASTER_KEY,JSON.stringify(p));}}
-    }catch{}
-  }
-  function clearLocalArchiveMirror(){
-    try{
-      localStorage.removeItem(LOCAL_ARCHIVE_MASTER_KEY);
-      const keys=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i)||'';if(k.startsWith(LOCAL_ARCHIVE_ENTRY_PREFIX))keys.push(k);}
-      keys.forEach(k=>localStorage.removeItem(k));localStorage.removeItem(LOCAL_ARCHIVE_DELETED_KEY);
-    }catch{}
   }
   function readArchivePlacement(){
     const merged={};
@@ -1061,8 +996,6 @@
   async function requestPersistentStorage(){try{if(navigator.storage?.persist)await navigator.storage.persist();const persisted=await navigator.storage?.persisted?.();const el=$('#persistentStorageStatus');if(el){el.textContent=persisted?'● Dauerhafter Browser-Speicher aktiv':'● Browser-Speicher nicht garantiert';el.className='connection '+(persisted?'good':'warn');}return !!persisted;}catch{const el=$('#persistentStorageStatus');if(el){el.textContent='● Browser-Speicherstatus nicht verfügbar';el.className='connection warn';}return false;}}
   async function loadMeta(){
     const candidates=[];
-    const localMirror=readLocalArchiveMirror();
-    if(localMirror.entries.length)candidates.push({entries:localMirror.entries,updatedAt:localMirror.updatedAt,source:'LOCAL-MIRROR'});
     // The authoritative synchronous archive copy is the first local source consulted on every
     // page load. This prevents an empty/stale IndexedDB state from making a valid archive appear
     // to disappear after refresh or a hard reload.
@@ -1125,21 +1058,15 @@
     // Re-apply direct restore last so it wins deterministically for duplicate IDs.
     if(directFirst)for(const e of sanitizeArchiveEntries(directFirst.entries))if(e?.id)mergedById.set(String(e.id),e);
     const recovered=[...mergedById.values()];
-    // The normal-save mirror wins for IDs it contains. Recovery/perma snapshots are
-    // allowed to add missing entries, but cannot replace a freshly saved normal POV.
-    for(const e of localMirror.entries||[])if(e?.id)mergedById.set(String(e.id),e);
-    const deleted=readLocalArchiveDeleted();
-    for(const id of deleted)mergedById.delete(String(id));
-    const recoveredFinal=[...mergedById.values()];
     // Safety invariant: a failed/empty startup read may never turn an already loaded archive into [] .
     // This protects against transient IndexedDB/localStorage failures and startup races.
-    if(!recoveredFinal.length && state.entries.length) return;
+    if(!recovered.length && state.entries.length) return;
     // Any source that ever recorded a POV as archived is treated as proof of permanent
     // placement. This repairs older V132 stores where the main index could contain the same
     // POV with permaArchive:false while the dedicated archive subset still had it.
     rememberArchivePlacementFromSources(nonEmpty);
     // Explicit archive placement always wins over recovered/older snapshots.
-    state.entries=applyArchivePlacement(recoveredFinal);
+    state.entries=applyArchivePlacement(recovered);
 
     // If anything was recovered, immediately normalize both stores and create a fresh recovery snapshot.
     if(state.entries.length){
@@ -1165,7 +1092,7 @@
       if(changed)saveMeta();
     }catch(err){console.warn('Archivgrößen konnten nicht synchronisiert werden',err);}
   }
-  function saveMeta(options={}){
+  async function saveMeta(options={}){
     const entries=sanitizeArchiveEntries(state.entries);
     saveArchivePlacement(entries);
     const allowEmpty=!!options.allowEmpty&&options.explicitDelete===true;
@@ -1176,7 +1103,6 @@
     }
     const updatedAt=Date.now();
     if(entries.length){
-      saveLocalArchiveMirror(entries,updatedAt);
       try{
         localStorage.setItem(ARCHIVE_AUTHORITATIVE_KEY,JSON.stringify({version:1,updatedAt,entries}));
       }catch(err){console.warn('Autoritativer Archivstand konnte nicht lokal gespeichert werden',err);}
@@ -1186,19 +1112,19 @@
         localStorage.setItem(META_KEY,JSON.stringify(entries));
         localStorage.setItem(META_UPDATED_KEY,String(updatedAt));
       }catch(err){console.warn('Archiv-Metadaten konnten nicht lokal gespeichert werden',err);}
-      void saveMetaDb(entries,updatedAt,allowEmpty);
+      const dbOk=await saveMetaDb(entries,updatedAt,allowEmpty);
+      if(!dbOk)console.warn('Archiv-Metadaten: IndexedDB-Sicherung konnte nicht bestätigt werden. LocalStorage bleibt als primärer Spiegel erhalten.');
     }else if(allowEmpty){
-      clearLocalArchiveMirror();
       try{
         localStorage.setItem(META_KEY,'[]');
         localStorage.setItem(META_UPDATED_KEY,String(updatedAt));
         localStorage.removeItem(ARCHIVE_AUTHORITATIVE_KEY);
         localStorage.removeItem(DIRECT_RESTORE_KEY);
       }catch{}
-      void saveMetaDb([],updatedAt,true);
+      await saveMetaDb([],updatedAt,true);
     }
-    void saveDurableAppState();
-    scheduleDriveSync();
+    await saveDurableAppState();
+    requestDriveBackup(options.reason||'Archiv gespeichert',{allowEmpty:allowEmpty});
     return true;
   }
   // Safety invariant: normal application code may never delete a stored POV.
@@ -1385,13 +1311,13 @@
       }
       else if(action==='delete'){if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?
 
-Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==e.id);state.archiveSelected.delete(e.id);removeLocalArchiveMirror(e.id);saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}}
+Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==e.id);state.archiveSelected.delete(e.id);await saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true,reason:'POV aus Archiv gelöscht'});renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}}
     };
   }
   function setupArchiveBulk(){
     $('#archiveSelectAll')?.addEventListener('click',()=>{const ids=[...document.querySelectorAll('[data-archive-select]')].map(x=>x.dataset.archiveSelect);ids.forEach(id=>state.archiveSelected.add(id));renderArchive();});
     $('#archiveClearSelection')?.addEventListener('click',()=>{state.archiveSelected.clear();renderArchive();});
-    $('#archiveBulkPerma')?.addEventListener('click',()=>{const ids=[...state.archiveSelected];if(!ids.length){toast('Keine POVs ausgewählt.');return;}let n=0;const placement=readArchivePlacement();for(const e of state.entries){if(ids.includes(e.id)&&!e.permaArchive){e.permaArchive=true;placement[String(e.id)]=true;n++;}}try{localStorage.setItem(ARCHIVE_PLACEMENT_KEY,JSON.stringify(placement));}catch{}state.archiveSelected.clear();saveMeta();renderArchive();renderCsv();toast(`${n} POV(s) ins Archiv verschoben.`);});
+    $('#archiveBulkPerma')?.addEventListener('click',async()=>{const ids=[...state.archiveSelected];if(!ids.length){toast('Keine POVs ausgewählt.');return;}let n=0;const placement=readArchivePlacement();for(const e of state.entries){if(ids.includes(e.id)&&!e.permaArchive){e.permaArchive=true;placement[String(e.id)]=true;n++;}}try{localStorage.setItem(ARCHIVE_PLACEMENT_KEY,JSON.stringify(placement));}catch{}state.archiveSelected.clear();await saveMeta({reason:'POV(s) ins Archiv verschoben'});renderArchive();renderCsv();toast(`${n} POV(s) ins Archiv verschoben.`);});
   }
   function renderCases(){const cases=state.entries.filter(e=>!e.complete);const box=$('#casesList');box.innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button type="button" class="mini" data-action="case-open" data-id="${esc(e.id)}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';box.onclick=async ev=>{const b=ev.target.closest('[data-action="case-open"]');if(!b)return;const e=state.entries.find(x=>x.id===b.dataset.id);if(e){await openEditorFromEntry(e,{});}};}
   function isPermaBanValue(v){
@@ -1742,6 +1668,51 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   }
 
 
+  async function persistCheckedDraft(item,reason='POV geprüft'){
+    if(!item?.id||!item?.result)return false;
+    const r=item.result||{};
+    const base={
+      id:String(item.id),
+      originalName:item.originalName||item.file?.name||r.originalName||'POV',
+      finalName:item.finalName||'',
+      targetId:String(r.targetId||item.targetId||''),
+      reason:String(r.reason||item.reason||''),
+      manualResult:String(r.manualResult||item.manualResult||''),
+      sc:normalizeHexLoose(r.sc||item.sc||''),
+      server:String(r.server||item.server||'3'),
+      date:validDate(r.date)?r.date:(validDate(item.date)?item.date:''),
+      rid:String(r.rid||''),
+      types:Array.isArray(r.types)?[...new Set(r.types)]:[],
+      perma:!!r.perma,
+      permaArchive:!!(r.permaArchive||item.permaArchive),
+      notBanned:!!r.notBanned,
+      documentStatus:r.documentStatus==='eingetragen'?'eingetragen':'nicht eingetragen',
+      pcCheckers:Array.isArray(r.pcCheckers)?r.pcCheckers.slice(0,5):[],
+      pcCheckerManual:Array.isArray(r.pcCheckerManual)?r.pcCheckerManual.slice():[],
+      discordId:String(r.discordId||''),
+      proof:String(r.proof||item.youtube?.url||''),
+      complete:!!r.complete,
+      saved:false,
+      videoStored:true,
+      offline:!!r.offline,
+      sourceSize:Number(r.sourceSize||item.file?.size||0),
+      sourceType:String(r.sourceType||item.file?.type||'video/mp4'),
+      remoteSize:Number(r.remoteSize||0),
+      duration:Number(r.duration||0),
+      timestamps:r.timestamps&&typeof r.timestamps==='object'?{...r.timestamps}:{},
+      infoPhotoField:r.infoPhotoField||'banner',
+      missing:Array.isArray(r.missing)?r.missing.slice():[],
+      youtube:item.youtube||r.youtube||null,
+      draft:true,
+      checkedAt:Date.now(),
+      file:item.file||undefined
+    };
+    state.entries=[base,...state.entries.filter(e=>String(e.id)!==String(base.id))];
+    renderArchive();renderCases();renderCsv();
+    await saveMeta({reason});
+    return true;
+  }
+
   const dropzone=$('#dropzone'), input=$('#fileInput');
   function setupUpload(){
     $('#chooseBtn').onclick=e=>{e.stopPropagation();input.click();};dropzone.onclick=e=>{if(!e.target.closest('button'))input.click();};input.onchange=e=>{addFiles([...e.target.files]);input.value='';};
@@ -1769,6 +1740,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     }
     scheduleQueuePersist();
     renderQueue();
+    requestDriveBackup('POV hinzugefügt');
     await pumpUploads();
   }
   function isYoutubeUploadLimitError(err){
@@ -1843,7 +1815,8 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if(Number(storedCopy.size)!==sourceSize)throw new Error(`Lokale Speicherung beschädigt: Quelle ${formatBytesExact(sourceSize)} · Archiv ${formatBytesExact(storedCopy.size)}.`);
       media=await openLocalVideo(item.file,`POV ${item.file.name}`,storedCopy);
       item.result=await analyzeVideo(media.video,p=>{item.progress=5+Math.round(p*.95);item.status=`YouTube-Limit · lokale OCR ${p}%`;renderQueue();},item.file.name,()=>item.cancelled);
-      item.result.originalName=item.file.name;item.result.sourceSize=sourceSize;item.result.remoteSize=0;item.result.sourceType=item.file.type||'video/mp4';item.result.types=[];item.result.proof='';item.result.youtube=null;
+      item.result.originalName=item.file.name;
+      await persistCheckedDraft(item,'POV geprüft · lokale OCR');item.result.sourceSize=sourceSize;item.result.remoteSize=0;item.result.sourceType=item.file.type||'video/mp4';item.result.types=[];item.result.proof='';item.result.youtube=null;
       item.youtube=null;item.uploadFailed=true;item.uploadStarted=true;item.status=item.result.complete?'YouTube-Limit · OCR fertig · YouTube später erneut':'YouTube-Limit · OCR unvollständig · Prüfung nötig';item.progress=100;renderQueue();
       if(isQueueItemAlive(item)&&!state.editing)openEditor(item);
     }catch(err){
@@ -1873,7 +1846,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     q.innerHTML=state.queue.map(item=>{const fileName=item.finalName||item.file?.name||'POV';const fileSize=Number(item.file?.size||item.result?.sourceSize||item.sourceSize||0);const hasError=/^Fehler:/i.test(item.status||'');const retry=(!item.uploading&&!item.ocrProcessing&&((!!item.youtube&&!item.result)||hasError));const canAct=!!item.result&&!item.uploading&&!item.processing&&!item.ocrProcessing;const label=item.youtube?'OCR erneut':'Erneut hochladen';const resultValue=String(item.manualResult||item.result?.manualResult||'');return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(fileName)}</strong><small>${fileSize?formatSize(fileSize)+' · ':''}${esc(item.status||'Wartet')}</small><div class="queue-result-row"><label>Ergebnis</label><input type="text" class="queue-result-input" data-queue-result data-id="${esc(item.id)}" value="${esc(resultValue)}" placeholder="Ergebnis manuell eintragen"></div><div class="progress"><i style="width:${Number(item.progress)||0}%"></i></div></div><div class="queue-actions">${item.result?`<button type="button" class="mini" data-action="check" data-id="${esc(item.id)}" ${canAct?'':'disabled'}>Prüfen</button><button type="button" class="mini primary" data-action="next" data-id="${esc(item.id)}" ${canAct?'':'disabled'}>Nächste POV</button>`:''}${retry?`<button type="button" class="mini primary" data-action="retry" data-id="${esc(item.id)}">${label}</button>`:''}<button type="button" class="mini" data-action="remove" data-id="${esc(item.id)}">×</button></div></div>`;}).join('');
     $$('[data-queue-result]').forEach(inp=>inp.addEventListener('input',()=>{const x=state.queue.find(i=>i.id===inp.dataset.id);if(!x)return;x.manualResult=String(inp.value||'').trim();if(x.result)x.result.manualResult=x.manualResult;scheduleQueuePersist();}));
     if(activeId){const restored=document.querySelector(`[data-queue-result][data-id="${CSS.escape(activeId)}"]`);if(restored){restored.value=activeValue;restored.focus();try{restored.setSelectionRange(aStart,aEnd);}catch{}}}
-    q.onclick=async e=>{const btn=e.target.closest('button[data-action]');if(!btn||!q.contains(btn))return;const id=btn.dataset.id;const x=state.queue.find(i=>i.id===id);if(!x)return;const action=btn.dataset.action;if(action==='check'){if(!x.result){toast('Für diese POV liegen noch keine OCR-Ergebnisse vor.');return;}openEditor(x);setTimeout(()=>{if(state.editing?.item?.id!==x.id)return;const target=clampId(x.result?.targetId||x.targetId||'');if(!/^\d{1,6}$/.test(target)){toast('Zuerst eine gültige Ziel-ID erkennen/eintragen.');return;}if(normalizeHexLoose(x.result?.sc||x.sc||'').length===40)openAcpReasonForCurrentId();else startAcpSequence();},80);return;}if(action==='next'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}if(x.processing||x.ocrProcessing){toast('Die POV wird noch verarbeitet. Bitte kurz warten.');return;}await nextQueueItem(id);return;}if(action==='retry'){await retryQueueItem(x);return;}if(action==='remove'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}x.cancelled=true;x.editingDone=true;x.ocrProcessing=false;x.processing=false;try{await delVideo(x.id,DESTRUCTIVE_TOKEN);}catch{}state.queue=state.queue.filter(i=>i.id!==id);persistQueueNow();renderQueue();toast('POV aus der Warteschlange entfernt. OCR wurde gestoppt.');}};
+    q.onclick=async e=>{const btn=e.target.closest('button[data-action]');if(!btn||!q.contains(btn))return;const id=btn.dataset.id;const x=state.queue.find(i=>i.id===id);if(!x)return;const action=btn.dataset.action;if(action==='check'){if(!x.result){toast('Für diese POV liegen noch keine OCR-Ergebnisse vor.');return;}openEditor(x);setTimeout(()=>{if(state.editing?.item?.id!==x.id)return;const target=clampId(x.result?.targetId||x.targetId||'');if(!/^\d{1,6}$/.test(target)){toast('Zuerst eine gültige Ziel-ID erkennen/eintragen.');return;}if(normalizeHexLoose(x.result?.sc||x.sc||'').length===40)openAcpReasonForCurrentId();else startAcpSequence();},80);return;}if(action==='next'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}if(x.processing||x.ocrProcessing){toast('Die POV wird noch verarbeitet. Bitte kurz warten.');return;}await nextQueueItem(id);return;}if(action==='retry'){await retryQueueItem(x);return;}if(action==='remove'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}x.cancelled=true;x.editingDone=true;x.ocrProcessing=false;x.processing=false;try{await delVideo(x.id,DESTRUCTIVE_TOKEN);}catch{}state.queue=state.queue.filter(i=>i.id!==id);state.entries=state.entries.filter(e=>String(e.id)!==String(id));await saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true,reason:'POV aus Warteschlange entfernt'});persistQueueNow();renderQueue();renderArchive();renderCases();renderCsv();toast('POV aus der Warteschlange entfernt. OCR wurde gestoppt.');}};
   }
   async function retryLocalOCR(item){
     if(item.processing||item.cancelled)return;
@@ -1888,7 +1861,8 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if(stored && Number(stored.size)!==sourceSize)throw new Error(`OCR-Quelle beschädigt: ${formatBytesExact(sourceSize)} · Archiv ${formatBytesExact(stored.size)}.`);
       media=await openLocalVideo(file,`POV ${file.name}`,stored&&stored!==file?stored:null);
       item.result=await analyzeVideo(media.video,p=>{item.progress=60+Math.round(p*.40);item.status=`OCR ${p}% · erneuter Versuch`;renderQueue();},file.name,()=>item.cancelled);
-      item.result.originalName=file.name;item.result.sourceSize=sourceSize;item.result.remoteSize=Number(item.result.remoteSize||item.youtube?.remoteSize||0);item.result.sourceType=file.type||'video/mp4';item.result.types=[];item.result.proof=item.youtube?.url||item.result.proof||'';item.result.youtube=item.youtube||item.result.youtube;
+      item.result.originalName=file.name;
+      await persistCheckedDraft(item,'POV geprüft · OCR erneut');item.result.sourceSize=sourceSize;item.result.remoteSize=Number(item.result.remoteSize||item.youtube?.remoteSize||0);item.result.sourceType=file.type||'video/mp4';item.result.types=[];item.result.proof=item.youtube?.url||item.result.proof||'';item.result.youtube=item.youtube||item.result.youtube;
       item.status=item.result.complete?`OCR fertig · Prüfung offen`:'OCR unvollständig · Prüfung nötig';item.progress=100;renderQueue();if(isQueueItemAlive(item)){if(!state.editing)openEditor(item);else{item.status+=' · Prüfung wartet';renderQueue();}}
     }catch(err){item.status=item.cancelled?'Aus Warteschlange entfernt':'Fehler: '+(err?.message||err);item.progress=0;renderQueue();}finally{closeLocalVideo(media);item.processing=false;renderQueue();}
   }
@@ -2598,7 +2572,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     if(!window.confirm('Diesen POV wirklich löschen? Die lokale Datei wird gelöscht. Das YouTube-Video bleibt erhalten.'))return false;
     try{
       if(ctx.item){ctx.item.cancelled=true;ctx.item.editingDone=true;ctx.item.processing=false;ctx.item.ocrProcessing=false;await delVideo(ctx.item.id,DESTRUCTIVE_TOKEN);state.queue=state.queue.filter(x=>x.id!==ctx.item.id);state.archiveSelected?.delete(ctx.item.id);persistQueueNow();}
-      else{await delVideo(ctx.entry.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==ctx.entry.id);state.archiveSelected?.delete(ctx.entry.id);removeLocalArchiveMirror(ctx.entry.id);saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});}
+      else{await delVideo(ctx.entry.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==ctx.entry.id);state.archiveSelected?.delete(ctx.entry.id);await saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true,reason:'POV gelöscht'});}
       closeEditor();renderQueue();renderArchive();renderCases();renderCsv();toast('POV gelöscht. YouTube bleibt erhalten.');return true;
     }catch(err){console.error('Direktes Löschen fehlgeschlagen',err);toast('Löschen fehlgeschlagen: '+(err?.message||err));return false;}
   }
@@ -2713,13 +2687,10 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       }
     }
     state.entries=[record,...state.entries.filter(x=>x.id!==record.id)];
-    clearLocalArchiveDeletion(record.id);
-    saveMeta();
-    // Sobald der POV vollständig gespeichert ist, sofort die Cloud-Sicherung anstoßen.
-    // Falls Google Drive nicht verbunden ist, bleibt der Aufruf folgenlos; nach dem Verbinden
-    // bzw. beim nächsten Upload greift die automatische Sicherung erneut.
-    void syncDriveBackup();
-
+    // Erst den vollständigen Archivstand lokal und in IndexedDB bestätigen. Erst danach
+    // wird der Queue-Eintrag entfernt. So kann ein Browser-Refresh niemals genau diesen
+    // frisch geprüften POV zwischen zwei Schreibvorgängen verlieren.
+    await saveMeta({reason:'POV gespeichert / geprüft'});
     // Ein erfolgreich gespeicherter/geprüfter POV ist kein Warteschlangen-Eintrag mehr.
     // Die IndexedDB-Datei bleibt erhalten, weil sie jetzt vom Archiv verwendet wird.
     if(ctx.item){
@@ -3023,6 +2994,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       item.progress=62;renderQueue();
       item.result=await analyzeVideo(media.video,p=>{item.progress=62+Math.round(p*.38);item.status=`OCR läuft ${p}% · Upload-Warteschlange unabhängig`;renderQueue();},item.file.name,()=>item.cancelled);
       item.result.originalName=item.file.name;
+      await persistCheckedDraft(item,'POV geprüft · OCR abgeschlossen');
       item.result.sourceSize=sourceSize;
       item.result.remoteSize=remoteSize||0;
       item.result.sourceType=item.file.type||'video/mp4';
@@ -3256,14 +3228,39 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   function loadDriveState(){try{return JSON.parse(localStorage.getItem(DRIVE_STATE_KEY)||'null')||{connected:false,clientId:'',accessToken:'',tokenExpiresAt:0};}catch{return {connected:false,clientId:'',accessToken:'',tokenExpiresAt:0};}}
   function saveDriveState(v){try{localStorage.setItem(DRIVE_STATE_KEY,JSON.stringify({...v,updatedAt:Date.now()}));}catch(err){console.warn('Drive-Status konnte nicht gespeichert werden',err);}}
   function driveState(){return loadDriveState();}
-  function renderDriveStatus(){const st=driveState(),el=$('#driveStatus'),help=$('#driveHelp'),connect=$('#driveConnectBtn'),sync=$('#driveSyncBtn'),restore=$('#driveRestoreBtn');const linked=!!(st.clientId&&(st.connected||st.accessToken));const tokenValid=!!(st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+15000);if(el){el.className='connection '+(linked?'good':'');el.textContent=linked?(tokenValid?'● Verbunden':'● Verbunden · Erneuerung nötig'):'● Nicht verbunden';}if(connect)connect.textContent=linked?'Google Drive erneut verbinden':'Google Drive verbinden';if(sync)sync.disabled=!linked||driveSyncInProgress;if(restore)restore.disabled=!linked||driveSyncInProgress;if(help){if(!linked)help.textContent='Google Drive ist noch nicht verbunden. Klicke zuerst „Google Drive verbinden“. Danach kannst du „Jetzt alles sichern“ verwenden.';else help.textContent=tokenValid?'Google Drive verbunden. Automatisches Backup nach jedem gespeicherten POV. Es wird nur das Archiv als JSON gesichert – keine POV-Videodateien.':'Google Drive ist verbunden, aber der Zugriff ist abgelaufen. „Jetzt alles sichern“ oder „Cloud-Archiv wiederherstellen“ öffnet die Google-Anmeldung erneut.';}}
+  function renderDriveStatus(){const st=driveState(),el=$('#driveStatus'),help=$('#driveHelp'),connect=$('#driveConnectBtn'),sync=$('#driveSyncBtn'),restore=$('#driveRestoreBtn');const linked=!!(st.clientId&&(st.connected||st.accessToken));const tokenValid=!!(st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+15000);if(el){el.className='connection '+(linked?'good':'');el.textContent=linked?(tokenValid?'● Verbunden':'● Verbunden · Erneuerung nötig'):'● Nicht verbunden';}if(connect)connect.textContent=linked?'Google Drive erneut verbinden':'Google Drive verbinden';if(sync)sync.disabled=!linked||driveSyncInProgress;if(restore)restore.disabled=!linked||driveSyncInProgress;if(help){if(!linked)help.textContent='Google Drive ist noch nicht verbunden. Klicke zuerst „Google Drive verbinden“. Danach kannst du „Jetzt alles sichern“ verwenden.';else help.textContent=tokenValid?'Google Drive verbunden. Automatisches Backup nach jeder Datenänderung. Es wird nur das Archiv als JSON gesichert – keine POV-Videodateien.':'Google Drive ist verbunden, aber der Zugriff ist abgelaufen. „Jetzt alles sichern“ oder „Cloud-Archiv wiederherstellen“ öffnet die Google-Anmeldung erneut.';}}
   async function driveTokenFresh(forceConsent=false){
     let st=driveState();
     if(st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+120000)return st.accessToken;
-    if(forceConsent===false && !st.clientId)throw new Error('Bitte zuerst Google Drive verbinden.');
-    // Manueller Sync/Restore darf den Google-Popup-Flow zur Token-Erneuerung verwenden.
-    // Hintergrund-Syncs rufen diese Funktion nur mit bereits gültigem Token auf.
+    if(!st.clientId)throw new Error('Bitte zuerst Google Drive verbinden.');
+    // Für automatische Backups zuerst still erneuern; nur manuelle Aktionen dürfen
+    // den interaktiven Google-Dialog öffnen.
+    if(!forceConsent){
+      try{return await refreshDriveTokenSilent(st.clientId);}catch(err){console.warn('Stille Drive-Erneuerung fehlgeschlagen',err);}
+    }
     return await startDriveOAuth(st.clientId||'');
+  }
+  async function refreshDriveTokenSilent(clientId){
+    const ready=window.google?.accounts?.oauth2||await waitForGoogleGIS();
+    if(!ready)throw new Error('Google-Anmeldung ist noch nicht geladen.');
+    const cid=String(clientId||'').trim();
+    if(!validClientId(cid))throw new Error('Die Google OAuth Client-ID sieht ungültig aus.');
+    return await new Promise((resolve,reject)=>{
+      let finished=false;
+      const done=(fn,v)=>{if(finished)return;finished=true;fn(v);};
+      try{
+        const client=window.google.accounts.oauth2.initTokenClient({client_id:cid,scope:DRIVE_SCOPE,include_granted_scopes:false,callback:resp=>{
+          if(resp?.error)return done(reject,new Error(resp.error_description||resp.error));
+          const token=String(resp?.access_token||'');
+          if(!token)return done(reject,new Error('Google hat kein Drive-Zugriffstoken zurückgegeben.'));
+          saveDriveState({...driveState(),clientId:cid,accessToken:token,tokenExpiresAt:Date.now()+Math.max(60,Number(resp.expires_in||3600)-30)*1000,connected:true});
+          renderDriveStatus();
+          done(resolve,token);
+        },error_callback:e=>done(reject,new Error(e?.message||e?.type||'Google Drive OAuth fehlgeschlagen.'))});
+        client.requestAccessToken({prompt:''});
+      }catch(err){done(reject,err instanceof Error?err:new Error(String(err)));}
+      setTimeout(()=>done(reject,new Error('Zeitüberschreitung bei der stillen Drive-Erneuerung.')),12000);
+    });
   }
   async function startDriveOAuth(preferredClientId=''){
     const saved=driveState();
@@ -3273,71 +3270,93 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     if(!validClientId(clientId))throw new Error('Die Google OAuth Client-ID sieht ungültig aus.');
     const ready=window.google?.accounts?.oauth2||await waitForGoogleGIS();
     if(!ready)throw new Error('Google-Anmeldung ist noch nicht geladen. Bitte kurz warten und erneut klicken.');
-    const st={purpose:'drive',clientId,createdAt:Date.now()};
     return new Promise((resolve,reject)=>{
       let finished=false;const done=(fn,v)=>{if(finished)return;finished=true;fn(v);};
       try{
         const client=window.google.accounts.oauth2.initTokenClient({client_id:clientId,scope:DRIVE_SCOPE,include_granted_scopes:false,callback:resp=>{
           if(resp?.error)return done(reject,new Error(resp.error_description||resp.error));
           const token=String(resp?.access_token||'');if(!token)return done(reject,new Error('Google hat kein Drive-Zugriffstoken zurückgegeben.'));
-          const ns={version:4,updatedAt:Date.now(),clientId,accessToken:token,tokenExpiresAt:Date.now()+Math.max(60,Number(resp.expires_in||3600)-30)*1000,connected:true,accountHint:'same-as-youtube-1'};
-          saveDriveState(ns);renderDriveStatus();const h=$('#driveHelp');if(h)h.textContent='✓ Google Drive verbunden. Es wird nur das JSON-Archiv gesichert.';toast('Google Drive verbunden.');done(resolve,token);
+          const ns={version:5,updatedAt:Date.now(),clientId,accessToken:token,tokenExpiresAt:Date.now()+Math.max(60,Number(resp.expires_in||3600)-30)*1000,connected:true,accountHint:'same-as-youtube-1'};
+          saveDriveState(ns);renderDriveStatus();const h=$('#driveHelp');if(h)h.textContent='✓ Google Drive verbunden. Automatisches Backup nach jeder Datenänderung.';toast('Google Drive verbunden.');requestDriveBackup('Google Drive verbunden');done(resolve,token);
         },error_callback:e=>done(reject,new Error(e?.message||e?.type||'Google Drive OAuth fehlgeschlagen.'))});
         client.requestAccessToken({prompt:'select_account'});
       }catch(err){done(reject,err instanceof Error?err:new Error(String(err)));}
       setTimeout(()=>done(reject,new Error('Zeitüberschreitung bei der Google-Drive-Anmeldung.')),20000);
     });
   }
-  async function driveApi(url,options={}){let token=await driveTokenFresh(false);let r=await fetch(url,{...options,headers:{...(options.headers||{}),Authorization:`Bearer ${token}`}});if(r.status===401){throw new Error('Google-Drive-Zugriff ist abgelaufen. Bitte „Google Drive erneut verbinden“ klicken.');}if(!r.ok){const body=(await r.text()).slice(0,1200);throw new Error(`Google Drive API ${r.status}: ${body}`);}return r;}
-  async function driveEnsureFolder(){const q=encodeURIComponent(`name='${DRIVE_FOLDER_NAME.replace(/'/g,"\\'")}' and mimeType='${DRIVE_FOLDER_MIME}' and trashed=false`);const r=await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&pageSize=10&fields=files(id,name,mimeType)`);const d=await r.json();if(d.files?.[0]?.id)return d.files[0].id;const cr=await driveApi('https://www.googleapis.com/drive/v3/files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:DRIVE_FOLDER_NAME,mimeType:DRIVE_FOLDER_MIME})});return (await cr.json()).id;}
-  async function driveFindFile(name,folderId){const q=encodeURIComponent(`name='${String(name).replace(/'/g,"\\'")}' and '${folderId}' in parents and trashed=false`);const r=await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=modifiedTime desc&pageSize=20&fields=files(id,name,size,mimeType,modifiedTime,appProperties)`);return (await r.json()).files?.[0]||null;}
+  async function driveApi(url,options={}){let token=await driveTokenFresh(false);let r=await fetch(url,{...options,headers:{...(options.headers||{}),Authorization:`Bearer ${token}`}});if(r.status===401){try{token=await refreshDriveTokenSilent(driveState().clientId);r=await fetch(url,{...options,headers:{...(options.headers||{}),Authorization:`Bearer ${token}`}});}catch{} if(r.status===401)throw new Error('Google-Drive-Zugriff ist abgelaufen. Bitte „Google Drive erneut verbinden“ klicken.');}if(!r.ok){const body=(await r.text()).slice(0,1200);throw new Error(`Google Drive API ${r.status}: ${body}`);}return r;}
+  async function driveEnsureFolder(){const q=encodeURIComponent(`name='${DRIVE_FOLDER_NAME.replace(/'/g,"\'")}' and mimeType='${DRIVE_FOLDER_MIME}' and trashed=false`);const r=await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&pageSize=10&fields=files(id,name,mimeType)`);const d=await r.json();if(d.files?.[0]?.id)return d.files[0].id;const cr=await driveApi('https://www.googleapis.com/drive/v3/files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:DRIVE_FOLDER_NAME,mimeType:DRIVE_FOLDER_MIME})});return (await cr.json()).id;}
+  async function driveFindFile(name,folderId){const q=encodeURIComponent(`name='${String(name).replace(/'/g,"\'")}' and '${folderId}' in parents and trashed=false`);const r=await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=modifiedTime desc&pageSize=20&fields=files(id,name,size,mimeType,modifiedTime,appProperties)`);return (await r.json()).files?.[0]||null;}
   async function driveUploadJson(name,folderId,payload,existingId){const boundary='----grandrpDrive'+Math.random().toString(16).slice(2);const meta=existingId?{name}:{name,parents:[folderId],mimeType:'application/json'};const body=`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(payload)}\r\n--${boundary}--`;const url=existingId?`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(existingId)}?uploadType=multipart&fields=id,name,modifiedTime`:'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime';return (await driveApi(url,{method:existingId?'PATCH':'POST',headers:{'Content-Type':`multipart/related; boundary=${boundary}`},body})).json();}
-  async function syncDriveBackup(options={}){if(driveSyncInProgress)return;driveSyncInProgress=true;renderDriveStatus();const help=$('#driveHelp');const interactive=options.interactive===true;try{
-    let st=driveState();
-    if(!st?.clientId){
-      if(interactive)throw new Error('Bitte zuerst Google Drive verbinden.');
-      return;
+  function requestDriveBackup(reason='Datenänderung',options={}){
+    driveBackupPending=true;
+    driveBackupPendingReason=String(reason||'Datenänderung');
+    driveBackupPendingAllowEmpty=driveBackupPendingAllowEmpty||options?.allowEmpty===true;
+    if(driveSyncInProgress)return;
+    queueMicrotask(()=>{if(!driveSyncInProgress)void syncDriveBackup({reason:driveBackupPendingReason,allowEmpty:driveBackupPendingAllowEmpty});});
+  }
+  async function syncDriveBackup(options={}){
+    if(driveSyncInProgress){driveBackupPending=true;driveBackupPendingReason=String(options.reason||driveBackupPendingReason||'Datenänderung');return false;}
+    driveSyncInProgress=true;
+    driveBackupPending=false;
+    const currentReason=String(options.reason||driveBackupPendingReason||'Datenänderung');
+    const allowEmpty=options?.allowEmpty===true||driveBackupPendingAllowEmpty===true;
+    driveBackupPendingReason='';
+    driveBackupPendingAllowEmpty=false;
+    renderDriveStatus();
+    const help=$('#driveHelp');
+    const interactive=options.interactive===true;
+    try{
+      let st=driveState();
+      if(!st?.clientId){
+        if(interactive)throw new Error('Bitte zuerst Google Drive verbinden.');
+        if(help)help.textContent='Google Drive nicht verbunden · Änderung wurde lokal gespeichert.';
+        return false;
+      }
+      let token='';
+      if(st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+15000) token=String(st.accessToken||'');
+      else if(interactive) token=await driveTokenFresh(true);
+      else token=await driveTokenFresh(false);
+      if(!token)return false;
+      const folder=await driveEnsureFolder();
+      const entries=sanitizeArchiveEntries(state.entries||[]).map(e=>{const copy={...e};delete copy.driveFileId;delete copy.file;delete copy.videoUrl;return copy;});
+      // A normal/startup sync must NEVER replace a valid cloud backup with an empty archive.
+      // Only an explicit user deletion is allowed to upload an empty manifest.
+      if(!entries.length&&!allowEmpty){
+        if(help)help.textContent='Backup übersprungen · lokaler Archivstand ist leer; vorhandenes Cloud-Backup bleibt unangetastet.';
+        return false;
+      }
+      const safeYoutube=(state.ytConnections||[]).map(c=>{const copy={...c};delete copy.accessToken;delete copy.tokenExpiresAt;return copy;});
+      const manifest={format:'grandrp-cloud-archive',version:3,backupType:'metadata-only',createdAt:new Date().toISOString(),reason:currentReason,note:'Archiv-Metadaten, Proof-/YouTube-Links und sichere App-Einstellungen. Keine POV-Videodateien und keine OAuth-Tokens werden in Google Drive gespeichert.',entries,youtubeConnections:safeYoutube,settings:{...(state.settings||{})}};
+      const mf=await driveFindFile(DRIVE_MANIFEST_NAME,folder);
+      await driveUploadJson(DRIVE_MANIFEST_NAME,folder,manifest,mf?.id||'');
+      saveDriveState({...driveState(),connected:true,clientId:driveState().clientId,lastBackupAt:Date.now(),lastBackupReason:currentReason,lastBackupCount:entries.length,lastBackupOk:true,lastError:''});
+      if(help)help.textContent=`✓ Backup gesichert · ${entries.length} Einträge · ${currentReason}`;
+      if(interactive)toast(`Google-Drive-Backup gesichert · ${entries.length} Einträge.`);
+      return true;
+    }catch(err){
+      console.error('Google-Drive-Backup fehlgeschlagen',err);
+      const msg=String(err?.message||err||'');
+      saveDriveState({...driveState(),lastBackupAt:Date.now(),lastBackupReason:currentReason,lastBackupOk:false,lastError:msg});
+      if(help)help.textContent=`✕ Backup fehlgeschlagen: ${msg}`;
+      if(interactive)toast('Cloud-Backup fehlgeschlagen: '+msg);
+      return false;
+    }finally{
+      driveSyncInProgress=false;
+      renderDriveStatus();
+      if(driveBackupPending)queueMicrotask(()=>{const nextReason=driveBackupPendingReason||'Datenänderung';const nextAllowEmpty=driveBackupPendingAllowEmpty===true;driveBackupPending=false;driveBackupPendingReason='';driveBackupPendingAllowEmpty=false;void syncDriveBackup({reason:nextReason,allowEmpty:nextAllowEmpty});});
     }
-    // Automatische Backups öffnen niemals ungefragt ein OAuth-Popup.
-    // Ein manueller Klick darf einen abgelaufenen Zugriff dagegen direkt erneuern.
-    let token='';
-    if(st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+15000) token=String(st.accessToken||'');
-    else if(interactive){
-      token=await driveTokenFresh(false);
-      st=driveState();
-    }
-    else return;
-    if(!token)return;
-    const folder=await driveEnsureFolder();
-    const entries=sanitizeArchiveEntries(state.entries||[]).map(e=>{const copy={...e};delete copy.driveFileId;delete copy.file;delete copy.videoUrl;return copy;});
-    const manifest={format:'grandrp-cloud-archive',version:2,backupType:'metadata-only',createdAt:new Date().toISOString(),note:'Nur Archiv-Metadaten und Proof-/YouTube-Links. Keine POV-Videodateien werden in Google Drive gespeichert.',entries};
-    const mf=await driveFindFile(DRIVE_MANIFEST_NAME,folder);
-    await driveUploadJson(DRIVE_MANIFEST_NAME,folder,manifest,mf?.id||'');
-    saveDriveState({...driveState(),connected:true,clientId:driveState().clientId});
-    if(help)help.textContent=`✓ Archiv-Backup gesichert · ${entries.length} Einträge · nur JSON`;
-    if(interactive)toast(`Archiv-Backup gesichert · ${entries.length} Einträge.`);
-  }catch(err){
-    console.error('Google-Drive-Backup fehlgeschlagen',err);
-    const msg=String(err?.message||err||'');
-    // „Popup window closed“ ist bei Google OAuth kein Daten-/Archivfehler.
-    // Bei automatischen Backups wird deshalb keine störende rote Fehlermeldung mehr angezeigt.
-    if(interactive){if(help)help.textContent='✕ Cloud-Backup fehlgeschlagen: '+msg;toast('Cloud-Backup fehlgeschlagen: '+msg);}
-  }finally{driveSyncInProgress=false;renderDriveStatus();}}
-  async function restoreDriveBackup(){if(driveSyncInProgress)return;driveSyncInProgress=true;renderDriveStatus();const help=$('#driveHelp');try{const folder=await driveEnsureFolder();const mf=await driveFindFile(DRIVE_MANIFEST_NAME,folder);if(!mf)throw new Error('Kein Cloud-Archiv gefunden.');const token=await driveTokenFresh(false);const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(mf.id)}?alt=media`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw new Error(`Cloud-Manifest ${r.status}`);const manifest=await r.json();const entries=sanitizeArchiveEntries(manifest?.entries||[]);if(!entries.length)throw new Error('Cloud-Archiv enthält keine Einträge.');const restored=entries.map(e=>{const copy={...e};delete copy.driveFileId;return copy;});state.entries=restored;state.filter='all';state.archiveSelected.clear();if($('#search'))$('#search').value='';const stamp=Date.now();localStorage.setItem(DIRECT_RESTORE_KEY,JSON.stringify({version:8,updatedAt:stamp,name:DRIVE_MANIFEST_NAME,entries:restored}));localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:8,updatedAt:stamp,entries:restored}));localStorage.setItem(ARCHIVE_AUTHORITATIVE_KEY,JSON.stringify({version:1,updatedAt:stamp,entries:restored}));localStorage.setItem(META_KEY,JSON.stringify(restored));localStorage.setItem(META_UPDATED_KEY,String(stamp));await saveMetaDb(restored,stamp,false);renderArchive();renderCases();renderCsv();renderQueue();showView('archive',false);persistCurrentView('archive');if(help)help.textContent=`✓ Archiv-Backup wiederhergestellt · ${restored.length} Einträge · keine POV-Videos aus Drive`;toast(`Archiv-Backup wiederhergestellt · ${restored.length} Einträge.`);}catch(err){console.error('Cloud-Backup-Wiederherstellung fehlgeschlagen',err);if(help)help.textContent='✕ Cloud-Backup-Wiederherstellung fehlgeschlagen: '+(err?.message||err);toast('Cloud-Backup-Wiederherstellung fehlgeschlagen: '+(err?.message||err));}finally{driveSyncInProgress=false;renderDriveStatus();}}
+  }
+
+  async function restoreDriveBackup(){if(driveSyncInProgress)return;driveSyncInProgress=true;renderDriveStatus();const help=$('#driveHelp');try{const folder=await driveEnsureFolder();const mf=await driveFindFile(DRIVE_MANIFEST_NAME,folder);if(!mf)throw new Error('Kein Cloud-Archiv gefunden.');const token=await driveTokenFresh(false);const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(mf.id)}?alt=media`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw new Error(`Cloud-Manifest ${r.status}`);const manifest=await r.json();const entries=sanitizeArchiveEntries(manifest?.entries||[]);if(!entries.length)throw new Error('Cloud-Archiv enthält keine Einträge.');const restored=entries.map(e=>{const copy={...e};delete copy.driveFileId;return copy;});state.entries=restored;state.filter='all';state.archiveSelected.clear();if($('#search'))$('#search').value='';const stamp=Date.now();localStorage.setItem(DIRECT_RESTORE_KEY,JSON.stringify({version:8,updatedAt:stamp,name:DRIVE_MANIFEST_NAME,entries:restored}));localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:8,updatedAt:stamp,entries:restored}));localStorage.setItem(ARCHIVE_AUTHORITATIVE_KEY,JSON.stringify({version:1,updatedAt:stamp,entries:restored}));localStorage.setItem(META_KEY,JSON.stringify(restored));localStorage.setItem(META_UPDATED_KEY,String(stamp));await saveMetaDb(restored,stamp,false);renderArchive();renderCases();renderCsv();renderQueue();showView('archive',false);persistCurrentView('archive');if(help)help.textContent=`✓ Archiv-Backup wiederhergestellt · ${restored.length} Einträge · keine POV-Videos aus Drive`;requestDriveBackup('Cloud-Archiv wiederhergestellt');toast(`Archiv-Backup wiederhergestellt · ${restored.length} Einträge.`);}catch(err){console.error('Cloud-Backup-Wiederherstellung fehlgeschlagen',err);if(help)help.textContent='✕ Cloud-Backup-Wiederherstellung fehlgeschlagen: '+(err?.message||err);toast('Cloud-Backup-Wiederherstellung fehlgeschlagen: '+(err?.message||err));}finally{driveSyncInProgress=false;renderDriveStatus();}}
   function scheduleDriveRecoveryIfEmpty(){
     if(driveSyncInProgress)return;
     try{const st=driveState();const explicitlyCleared=!!localStorage.getItem(LOCAL_CLEAR_MARKER_KEY);const tokenValid=!!(st?.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+15000);if(!tokenValid||!st?.clientId||state.entries.length||explicitlyCleared)return;}catch{return;}
     setTimeout(()=>{if(!driveSyncInProgress&&!(state.entries||[]).length){void restoreDriveBackup();}},900);
   }
-  function updateDriveResult(){try{const r=JSON.parse(localStorage.getItem(DRIVE_RESULT_KEY)||'null');if(r){const h=$('#driveHelp');if(h)h.textContent=r.message||'';localStorage.removeItem(DRIVE_RESULT_KEY);}}catch{}renderDriveStatus();scheduleDriveSync();scheduleDriveRecoveryIfEmpty();}
+  function updateDriveResult(){try{const r=JSON.parse(localStorage.getItem(DRIVE_RESULT_KEY)||'null');if(r){const h=$('#driveHelp');if(h)h.textContent=r.message||'';localStorage.removeItem(DRIVE_RESULT_KEY);}}catch{}renderDriveStatus();scheduleDriveRecoveryIfEmpty();}
 
-  let driveSyncTimer=0;
-  function scheduleDriveSync(){
-    if(driveSyncInProgress)return;
-    try{const st=driveState();if(!st?.accessToken||!st?.clientId||!(state.entries||[]).length)return;}catch{return;}
-    clearTimeout(driveSyncTimer);
-    driveSyncTimer=setTimeout(()=>{driveSyncTimer=0;void syncDriveBackup();},1800);
-  }
+  function scheduleDriveSync(reason='Datenänderung'){requestDriveBackup(reason);}
   function updateYtStatus(){renderYoutubeConnections();}
   async function waitForYoutubeProcessing(videoId,token,onProgress,expectedSize=0,slot=state.activeYoutubeSlot){
     if(!videoId||!token) throw new Error('YouTube-Video-ID oder Zugriffstoken fehlt.');
@@ -3739,7 +3758,6 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       const key=String(id||'');const entry=state.entries.find(e=>String(e.id)===key);
       if(!entry)throw new Error('Archiv-Eintrag nicht gefunden.');
       await delVideo(entry.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(e=>String(e.id)!==key);state.archiveSelected.delete(entry.id);
-      removeLocalArchiveMirror(entry.id);
       saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});renderArchive();renderCases();renderCsv();return true;
     };
     window.grandrpClearLocalData=async()=>{
@@ -3755,16 +3773,16 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     $('#frameCount').value=state.settings.frames;
     $('#refineWindow').value=state.settings.window;
     $('#refineStep').value=state.settings.step;
-    $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v44_frames',state.settings.frames)};
-    $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v44_window',state.settings.window)};
-    $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v44_step',state.settings.step)};
+    $('#frameCount').onchange=e=>{state.settings.frames=Math.max(18,Math.min(28,Number(e.target.value)||24));localStorage.setItem('v44_frames',state.settings.frames);void saveDurableAppState();requestDriveBackup('OCR-Einstellung geändert')};
+    $('#refineWindow').onchange=e=>{state.settings.window=Math.max(3,Math.min(7,Number(e.target.value)||4.5));localStorage.setItem('v44_window',state.settings.window);void saveDurableAppState();requestDriveBackup('OCR-Einstellung geändert')};
+    $('#refineStep').onchange=e=>{state.settings.step=Math.max(.4,Math.min(1.0,Number(e.target.value)||.5));localStorage.setItem('v44_step',state.settings.step);void saveDurableAppState();requestDriveBackup('OCR-Einstellung geändert')};
     for(let slot=1;slot<=YT_MAX_CONNECTIONS;slot++){
       const input=$(`#ytClientId${slot}`), connectBtn=$(`#ytConnect${slot}`), reauthBtn=$(`#ytReauth${slot}`), disconnectBtn=$(`#ytDisconnect${slot}`);
-      input?.addEventListener('input',e=>setYoutubeConnectionClientId(slot,e.target.value));
-      input?.addEventListener('change',e=>setYoutubeConnectionClientId(slot,e.target.value));
-      connectBtn?.addEventListener('click',()=>initYoutube(slot));
-      reauthBtn?.addEventListener('click',()=>reauthorizeYoutube(slot));
-      disconnectBtn?.addEventListener('click',()=>disconnectYoutube(slot));
+      input?.addEventListener('input',e=>{setYoutubeConnectionClientId(slot,e.target.value);requestDriveBackup(`YouTube-Verbindung ${slot} geändert`);});
+      input?.addEventListener('change',e=>{setYoutubeConnectionClientId(slot,e.target.value);requestDriveBackup(`YouTube-Verbindung ${slot} geändert`);});
+      connectBtn?.addEventListener('click',()=>{initYoutube(slot);requestDriveBackup(`YouTube-Verbindung ${slot} gestartet`);});
+      reauthBtn?.addEventListener('click',()=>{reauthorizeYoutube(slot);requestDriveBackup(`YouTube-Verbindung ${slot} erneuert`);});
+      disconnectBtn?.addEventListener('click',()=>{disconnectYoutube(slot);requestDriveBackup(`YouTube-Verbindung ${slot} getrennt`);});
     }
     try{renderYoutubeConnections();}catch(err){console.error('YouTube-Einstellungen konnten nicht initialisiert werden',err);}
     $('#downloadArchiveBackup')?.addEventListener('click',downloadArchiveBackup);
@@ -3776,7 +3794,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     // Public handlers are assigned even when an optional settings renderer failed.
     window.grandrpRestoreArchiveBackup=restoreArchiveBackup;
     window.grandrpDownloadArchiveBackup=downloadArchiveBackup;
-    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;clearLocalArchiveMirror();state.entries=[];state.queue=[];try{localStorage.setItem(LOCAL_CLEAR_MARKER_KEY,String(Date.now()));localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(ARCHIVE_AUTHORITATIVE_KEY);localStorage.removeItem(DIRECT_RESTORE_KEY);localStorage.removeItem(LEGACY_DIRECT_RESTORE_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
+    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.setItem(LOCAL_CLEAR_MARKER_KEY,String(Date.now()));localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(ARCHIVE_AUTHORITATIVE_KEY);localStorage.removeItem(DIRECT_RESTORE_KEY);localStorage.removeItem(LEGACY_DIRECT_RESTORE_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();requestDriveBackup('Lokale Daten gelöscht',{allowEmpty:true});toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }
 
@@ -3791,6 +3809,35 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     }catch(err){console.error('Ausstehendes Archiv-Backup konnte nicht verarbeitet werden',err);}
   }
 
+  async function mergeCheckedQueueIntoArchive(){
+    const checked=Array.isArray(state.queue)?state.queue.filter(item=>item?.id&&item?.result&&!item.cancelled&&!item.editingDone&&item.status!=='Gespeichert'):[];
+    if(!checked.length)return 0;
+    let changed=0;
+    const byId=new Map((state.entries||[]).map(e=>[String(e.id),e]));
+    for(const item of checked){
+      const r=item.result||{};
+      const existing=byId.get(String(item.id));
+      const draft={
+        id:String(item.id), originalName:item.originalName||item.file?.name||r.originalName||'POV', finalName:item.finalName||'',
+        targetId:String(r.targetId||item.targetId||''), reason:String(r.reason||item.reason||''), manualResult:String(r.manualResult||item.manualResult||''),
+        sc:normalizeHexLoose(r.sc||item.sc||''), server:String(r.server||item.server||'3'), date:validDate(r.date)?r.date:'', rid:String(r.rid||''),
+        types:Array.isArray(r.types)?[...new Set(r.types)]:[], perma:!!r.perma, permaArchive:!!(r.permaArchive||item.permaArchive),
+        notBanned:!!r.notBanned, documentStatus:r.documentStatus==='eingetragen'?'eingetragen':'nicht eingetragen',
+        pcCheckers:Array.isArray(r.pcCheckers)?r.pcCheckers.slice(0,5):[], pcCheckerManual:Array.isArray(r.pcCheckerManual)?r.pcCheckerManual.slice():[],
+        discordId:String(r.discordId||''), proof:String(r.proof||item.youtube?.url||''), complete:!!r.complete, saved:false, videoStored:true,
+        offline:!!r.offline, sourceSize:Number(r.sourceSize||item.file?.size||0), sourceType:String(r.sourceType||item.file?.type||'video/mp4'),
+        remoteSize:Number(r.remoteSize||0), duration:Number(r.duration||0), timestamps:r.timestamps&&typeof r.timestamps==='object'?{...r.timestamps}:{},
+        infoPhotoField:r.infoPhotoField||'banner', missing:Array.isArray(r.missing)?r.missing.slice():[], youtube:item.youtube||r.youtube||null, draft:true, checkedAt:Number(item.checkedAt||Date.now())
+      };
+      if(!existing || Number(draft.checkedAt||0)>=Number(existing.checkedAt||0)){byId.set(String(item.id),draft);changed++;}
+    }
+    if(changed){
+      state.entries=[...byId.values()];
+      await saveMeta({reason:'Geprüfte POVs wiederhergestellt'});
+    }
+    return changed;
+  }
+
   async function bootApp(){
     if(window.__grandrpAppBooted)return;
     try{const saved=JSON.parse(localStorage.getItem(PC_CUSTOM_KEY)||'[]');if(Array.isArray(saved))saved.filter(Boolean).forEach(v=>pcCheckerCustom.add(String(v)));}catch{}
@@ -3802,6 +3849,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     archiveReadyPromise=(async()=>{
       await loadQueue().catch(err=>{console.error('Warteschlange konnte nicht geladen werden',err);state.queue=[];});
       try{await loadMeta();}catch(err){console.error('Archiv konnte nicht geladen werden',err);}
+      try{await mergeCheckedQueueIntoArchive();}catch(err){console.error('Geprüfte POVs konnten beim Start nicht ins lokale Archiv gespiegelt werden',err);}
     })();
     await archiveReadyPromise;
     renderYoutubeConnections();
@@ -3839,7 +3887,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     // after every normal loader has finished. This prevents stale/empty stores from winning.
     try{await forceApplyDirectRestore({showStatus:false});}catch(err){console.error('Startup-Restore konnte nicht abgeschlossen werden',err);}
     updateDriveResult();
-    scheduleDriveSync();
+    if((state.entries||[]).length)requestDriveBackup('App-Start / Datenabgleich');
   }
   function persistActiveViewNow(){try{const active=document.querySelector('.view.active')?.id?.replace(/^view-/,'');if(active&&views[active])persistCurrentView(active);}catch{}}
   document.addEventListener('visibilitychange',persistActiveViewNow);
