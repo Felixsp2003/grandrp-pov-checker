@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V147
+/* Grand RP DC Checker V148
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V147';
+  const BUILD='V148';
   const META_KEY='grandrp_pov_meta_v42';
   const ARCHIVE_FILTER_KEY='grandrp_archive_filter_v145';
   const DB_NAME='grandrp_pov_db_v42';
@@ -719,7 +719,6 @@
   const QUEUE_UPDATED_KEY='grandrp_pov_queue_updated_v1';
   const ARCHIVE_BACKUP_KEY='grandrp_archive_emergency_backup_v1';
   const ARCHIVE_AUTHORITATIVE_KEY='grandrp_archive_authoritative_v132';
-  const ARCHIVE_DELETED_KEY='grandrp_archive_deleted_v1';
   // Explicit POV-Archiv placement is stored separately from archive snapshots.
   // This prevents an older snapshot from moving a POV back to the normal list after refresh.
   const ARCHIVE_PLACEMENT_KEY='grandrp_pov_archive_placement_v133';
@@ -729,6 +728,11 @@
   const LEGACY_DIRECT_RESTORE_KEY='grandrp_direct_restore_v118';
   const ARCHIVE_SNAPSHOT_PREFIX='__grandrp_archive_snapshot_v106__';
   const ARCHIVE_ENTRY_PREFIX='__grandrp_archive_entry_v106__';
+  // Extra synchronous metadata mirror for every saved archive entry.
+  // This is metadata-only (never the video file) and is used as a last-resort
+  // recovery source if the main archive index is stale, partial, or lost.
+  const ARCHIVE_LOCAL_ENTRY_PREFIX='grandrp_archive_entry_local_v1__';
+
   const DESTRUCTIVE_TOKEN=Object.freeze({name:'explicit-user-delete'});
   const ARCHIVE_SNAPSHOT_COUNT=20;
   let queuePersistTimer=0;
@@ -736,6 +740,30 @@
   function sanitizeArchiveEntries(entries){
     return (Array.isArray(entries)?entries:[]).filter(e=>e&&e.id).map(e=>({...e,file:undefined,videoUrl:undefined}));
   }
+  function archiveLocalEntryKey(id){return ARCHIVE_LOCAL_ENTRY_PREFIX+String(id||'');}
+  function writeLocalArchiveEntryMirrors(entries){
+    for(const entry of sanitizeArchiveEntries(entries)){
+      try{localStorage.setItem(archiveLocalEntryKey(entry.id),JSON.stringify({version:1,updatedAt:Date.now(),entry}));}
+      catch(err){console.warn('Lokaler Einzel-Mirror konnte nicht gespeichert werden',entry?.id,err);}
+    }
+  }
+  function readLocalArchiveEntryMirrors(){
+    const out=[];
+    try{
+      for(let i=0;i<localStorage.length;i++){
+        const key=localStorage.key(i)||'';
+        if(!key.startsWith(ARCHIVE_LOCAL_ENTRY_PREFIX))continue;
+        const raw=localStorage.getItem(key); if(!raw)continue;
+        try{
+          const parsed=JSON.parse(raw);
+          const entry=parsed?.entry||parsed;
+          if(entry?.id)out.push({entries:[entry],updatedAt:Number(parsed?.updatedAt)||0,source:'localEntry:'+key});
+        }catch{}
+      }
+    }catch(err){console.warn('Lokale Einzel-Mirrors konnten nicht gelesen werden',err);}
+    return out;
+  }
+  function removeLocalArchiveEntryMirror(id){try{if(id)localStorage.removeItem(archiveLocalEntryKey(id));}catch{}}
   function readArchivePlacement(){
     const merged={};
     const keys=[ARCHIVE_PLACEMENT_KEY,...LEGACY_ARCHIVE_PLACEMENT_KEYS];
@@ -877,61 +905,24 @@
     if(!clean.length && !allowEmpty) return false;
     try{
       const db=await openDB();
-      if(!clean.length && allowEmpty){
-        // Explicitly confirmed deletion: clear only the metadata indexes. Video files are
-        // deleted separately by the explicit delete action via delVideo().
-        await new Promise((res,rej)=>{
-          const tx=db.transaction(STORE,'readwrite');
-          const os=tx.objectStore(STORE);
-          os.put({version:4,updatedAt,entries:[]},META_DB_KEY);
-          os.put([],PERMA_DB_KEY);
-          tx.oncomplete=res;tx.onerror=()=>rej(tx.error);
-        });
-        return true;
-      }
-
-      // Persist append-only per-entry records in their own transaction first. This is the
-      // durable recovery layer and must survive even when a large aggregate index/snapshot
-      // transaction fails or the browser is under storage pressure.
+      const snapshotKey=`${ARCHIVE_SNAPSHOT_PREFIX}${String(updatedAt).padStart(16,'0')}_${Math.random().toString(36).slice(2,8)}`;
       await new Promise((res,rej)=>{
         const tx=db.transaction(STORE,'readwrite');
         const os=tx.objectStore(STORE);
+        // Durable main index + perma subset.
+        os.put({version:4,updatedAt,entries:clean},META_DB_KEY);
+        os.put(clean.filter(e=>e.permaArchive),PERMA_DB_KEY);
+        // Append-only per-entry records: normal saves NEVER delete or replace other entry records.
         for(const entry of clean){
           os.put({version:1,updatedAt,entry},`${ARCHIVE_ENTRY_PREFIX}${entry.id}`);
         }
+        // Immutable recovery snapshot.
+        if(clean.length) os.put({version:1,updatedAt,entries:clean},snapshotKey);
         tx.oncomplete=res;tx.onerror=()=>rej(tx.error);
       });
-
-      // The compact main index is useful for normal startup. It is intentionally separate
-      // from the append-only records so a failure here cannot discard the durable records.
-      try{
-        await new Promise((res,rej)=>{
-          const tx=db.transaction(STORE,'readwrite');
-          const os=tx.objectStore(STORE);
-          os.put({version:4,updatedAt,entries:clean},META_DB_KEY);
-          os.put(clean.filter(e=>e.permaArchive),PERMA_DB_KEY);
-          tx.oncomplete=res;tx.onerror=()=>rej(tx.error);
-        });
-      }catch(err){
-        console.warn('Hauptindex konnte nicht gespeichert werden; append-only Archivrecords bleiben erhalten.',err);
-      }
-
-      // Immutable recovery snapshot is best-effort and never required for normal startup.
-      try{
-        const snapshotKey=`${ARCHIVE_SNAPSHOT_PREFIX}${String(updatedAt).padStart(16,'0')}_${Math.random().toString(36).slice(2,8)}`;
-        await new Promise((res,rej)=>{
-          const tx=db.transaction(STORE,'readwrite');
-          tx.objectStore(STORE).put({version:1,updatedAt,entries:clean},snapshotKey);
-          tx.oncomplete=res;tx.onerror=()=>rej(tx.error);
-        });
-      }catch(err){
-        console.warn('Archiv-Recovery-Snapshot konnte nicht gespeichert werden; normale Archivdaten bleiben erhalten.',err);
-      }
+      // Recovery snapshots are intentionally NEVER auto-deleted.
       return true;
-    }catch(err){
-      console.warn('Archiv-Metadaten konnten nicht dauerhaft in IndexedDB gesichert werden',err);
-      return false;
-    }
+    }catch(err){console.warn('Archiv-Metadaten konnten nicht in IndexedDB gesichert werden',err);return false;}
   }
   async function getQueueDb(){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const r=tx.objectStore(STORE).get(QUEUE_DB_KEY);tx.oncomplete=()=>{const val=r.result;res(Array.isArray(val)?{items:val,updatedAt:0}:((val&&Array.isArray(val.items))?{items:val.items,updatedAt:Number(val.updatedAt)||0}:{items:[],updatedAt:0}));};tx.onerror=()=>rej(tx.error);});}catch{return {items:[],updatedAt:0};}}
   async function saveQueueDb(items,updatedAt=Date.now()){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put({version:2,updatedAt,items},QUEUE_DB_KEY);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}catch(err){console.warn('Warteschlange konnte nicht in IndexedDB gesichert werden',err);}}
@@ -1072,6 +1063,10 @@
         if(rows.length)candidates.push({entries:rows,updatedAt:Number(parsed?.updatedAt)||Number(localStorage.getItem(META_UPDATED_KEY)||0),source:'localStorage:'+key});
       }
     }catch(err){console.warn('localStorage-Archiv konnte nicht vollständig durchsucht werden',err);}
+    // Last-resort synchronous per-entry mirrors. These are written on every successful save
+    // and are intentionally independent from the main META_KEY value.
+    try{candidates.push(...readLocalArchiveEntryMirrors());}
+    catch(err){console.warn('Lokale Archiv-Einzel-Mirrors konnten nicht übernommen werden',err);}
 
     // Merge durable sources by ID. A direct restore has explicit precedence so an imported
     // entry cannot be replaced by an older/stale IndexedDB or localStorage copy. Empty sources
@@ -1127,99 +1122,31 @@
       if(changed)saveMeta();
     }catch(err){console.warn('Archivgrößen konnten nicht synchronisiert werden',err);}
   }
-  function readDeletedArchiveIds(){
-    const out=new Set();
-    try{
-      const raw=localStorage.getItem(ARCHIVE_DELETED_KEY);
-      const parsed=raw?JSON.parse(raw):[];
-      if(Array.isArray(parsed))for(const id of parsed)if(id)out.add(String(id));
-    }catch{}
-    return out;
-  }
-  function markArchiveIdDeleted(id){
-    const key=String(id||'');
-    if(!key)return;
-    try{
-      const ids=readDeletedArchiveIds();
-      ids.add(key);
-      localStorage.setItem(ARCHIVE_DELETED_KEY,JSON.stringify([...ids].slice(-5000)));
-    }catch{}
-  }
-  function unmarkArchiveIds(ids){
-    const wanted=new Set((ids||[]).filter(Boolean).map(String));
-    if(!wanted.size)return;
-    try{
-      const remaining=[...readDeletedArchiveIds()].filter(id=>!wanted.has(id));
-      if(remaining.length)localStorage.setItem(ARCHIVE_DELETED_KEY,JSON.stringify(remaining));
-      else localStorage.removeItem(ARCHIVE_DELETED_KEY);
-    }catch{}
-  }
-  function readStoredArchiveSync(){
-    const sources=[];
-    const keys=[ARCHIVE_AUTHORITATIVE_KEY,META_KEY,ARCHIVE_BACKUP_KEY];
-    for(const key of keys){
-      try{
-        const raw=localStorage.getItem(key);if(!raw)continue;
-        const parsed=JSON.parse(raw);
-        const rows=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.entries)?parsed.entries:(Array.isArray(parsed?.archive)?parsed.archive:[]));
-        if(rows.length)sources.push(sanitizeArchiveEntries(rows));
-      }catch{}
-    }
-    return sources;
-  }
-  function mergeArchiveEntriesForSafeSave(currentEntries){
-    const current=sanitizeArchiveEntries(currentEntries);
-    const currentIds=new Set(current.map(e=>String(e.id)));
-    const deleted=readDeletedArchiveIds();
-    const byId=new Map();
-    // Older durable rows are retained so a stale tab can never overwrite/delete a newer entry
-    // that exists in another tab. Explicitly deleted IDs are filtered out by tombstone.
-    for(const source of readStoredArchiveSync()){
-      for(const e of source){
-        const id=String(e?.id||'');
-        if(!id||deleted.has(id))continue;
-        if(!byId.has(id))byId.set(id,e);
-      }
-    }
-    // Current UI state wins for IDs it actually has. New IDs are appended automatically.
-    for(const e of current){
-      const id=String(e?.id||'');
-      if(!id)continue;
-      byId.set(id,e);
-    }
-    // A fresh save re-validates any IDs present in the active state.
-    unmarkArchiveIds([...currentIds]);
-    return [...byId.values()];
-  }
-
   async function saveMeta(options={}){
-    let entries=sanitizeArchiveEntries(state.entries);
-    const explicitDelete=options.explicitDelete===true;
-    const allowEmpty=!!options.allowEmpty&&explicitDelete;
-
-    // Normal saves MERGE with the durable local archive instead of replacing it. This is the
-    // critical cross-refresh/cross-tab safeguard: a stale page can no longer overwrite newer
-    // saved POVs with its older state. Explicitly confirmed deletes still use replacement mode.
-    if(!explicitDelete) entries=mergeArchiveEntriesForSafeSave(entries);
-
+    const entries=sanitizeArchiveEntries(state.entries);
+    saveArchivePlacement(entries);
+    const allowEmpty=!!options.allowEmpty&&options.explicitDelete===true;
+    // Hard safety rule: normal code is NEVER allowed to overwrite an existing archive with [].
     if(!entries.length&&!allowEmpty){
       console.warn('Archiv-Schutz: Leerer Archivstand wurde nicht gespeichert. Bestehende Daten bleiben unangetastet.');
       return false;
     }
     const updatedAt=Date.now();
-    state.entries=applyArchivePlacement(entries);
-    saveArchivePlacement(state.entries);
     if(entries.length){
-      try{localStorage.setItem(ARCHIVE_AUTHORITATIVE_KEY,JSON.stringify({version:1,updatedAt,entries:sanitizeArchiveEntries(state.entries)}));}
-      catch(err){console.warn('Autoritativer Archivstand konnte nicht lokal gespeichert werden',err);}
+      // Synchronous mirror first: even a fast reload immediately after saving has a
+      // metadata copy that is independent of the main archive index.
+      writeLocalArchiveEntryMirrors(entries);
+      try{
+        localStorage.setItem(ARCHIVE_AUTHORITATIVE_KEY,JSON.stringify({version:1,updatedAt,entries}));
+      }catch(err){console.warn('Autoritativer Archivstand konnte nicht lokal gespeichert werden',err);}
       try{
         const previous=localStorage.getItem(META_KEY);
         if(previous && previous!=='[]')localStorage.setItem(ARCHIVE_BACKUP_KEY,JSON.stringify({version:1,updatedAt,raw:previous}));
-        localStorage.setItem(META_KEY,JSON.stringify(sanitizeArchiveEntries(state.entries)));
+        localStorage.setItem(META_KEY,JSON.stringify(entries));
         localStorage.setItem(META_UPDATED_KEY,String(updatedAt));
-      }catch(err){console.warn('Archiv-Metadaten konnten nicht lokal gespeichert werden; IndexedDB wird als Fallback verwendet.',err);}
-      const ok=await saveMetaDb(state.entries,updatedAt,false);
-      if(!ok)console.warn('Archiv-Metadaten konnten auch nicht dauerhaft in IndexedDB gesichert werden.');
+      }catch(err){console.warn('Archiv-Metadaten konnten nicht lokal gespeichert werden',err);}
+      const dbOk=await saveMetaDb(entries,updatedAt,allowEmpty);
+      if(!dbOk)console.warn('Archiv-Index konnte nicht in IndexedDB bestätigt werden; lokaler Einzel-Mirror bleibt als Recovery erhalten.');
     }else if(allowEmpty){
       try{
         localStorage.setItem(META_KEY,'[]');
@@ -1411,19 +1338,19 @@
             placement[String(e.id)]=true;
             localStorage.setItem(ARCHIVE_PLACEMENT_KEY,JSON.stringify(placement));
           }catch(err){console.warn('POV-Archiv-Platzierung konnte nicht gespeichert werden',err);}
-          void saveMeta();renderArchive();renderCsv();
+          saveMeta();renderArchive();renderCsv();
           toast('POV ins POV-Archiv verschoben.');
         }
       }
       else if(action==='delete'){if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?
 
-Das YouTube-Video wird NICHT gelöscht.`))return;try{markArchiveIdDeleted(e.id);await delVideo(e.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==e.id);state.archiveSelected.delete(e.id);await saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}}
+Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==e.id);state.archiveSelected.delete(e.id);removeLocalArchiveEntryMirror(e.id);saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}}
     };
   }
   function setupArchiveBulk(){
     $('#archiveSelectAll')?.addEventListener('click',()=>{const ids=[...document.querySelectorAll('[data-archive-select]')].map(x=>x.dataset.archiveSelect);ids.forEach(id=>state.archiveSelected.add(id));renderArchive();});
     $('#archiveClearSelection')?.addEventListener('click',()=>{state.archiveSelected.clear();renderArchive();});
-    $('#archiveBulkPerma')?.addEventListener('click',()=>{const ids=[...state.archiveSelected];if(!ids.length){toast('Keine POVs ausgewählt.');return;}let n=0;const placement=readArchivePlacement();for(const e of state.entries){if(ids.includes(e.id)&&!e.permaArchive){e.permaArchive=true;placement[String(e.id)]=true;n++;}}try{localStorage.setItem(ARCHIVE_PLACEMENT_KEY,JSON.stringify(placement));}catch{}state.archiveSelected.clear();void saveMeta();renderArchive();renderCsv();toast(`${n} POV(s) ins Archiv verschoben.`);});
+    $('#archiveBulkPerma')?.addEventListener('click',()=>{const ids=[...state.archiveSelected];if(!ids.length){toast('Keine POVs ausgewählt.');return;}let n=0;const placement=readArchivePlacement();for(const e of state.entries){if(ids.includes(e.id)&&!e.permaArchive){e.permaArchive=true;placement[String(e.id)]=true;n++;}}try{localStorage.setItem(ARCHIVE_PLACEMENT_KEY,JSON.stringify(placement));}catch{}state.archiveSelected.clear();saveMeta();renderArchive();renderCsv();toast(`${n} POV(s) ins Archiv verschoben.`);});
   }
   function renderCases(){const cases=state.entries.filter(e=>!e.complete);const box=$('#casesList');box.innerHTML=cases.length?cases.map(e=>`<div class="case-row"><div><strong>${esc(e.originalName)}</strong><small>${esc(e.missing.join(' · ')||'Prüfung nötig')}</small></div><button type="button" class="mini" data-action="case-open" data-id="${esc(e.id)}">Prüfen</button></div>`).join(''):'<div class="empty"><div class="empty-icon">✓</div><h2>Keine offenen Fälle</h2><p>Alle gespeicherten Fälle haben die Pflichtangaben.</p></div>';box.onclick=async ev=>{const b=ev.target.closest('[data-action="case-open"]');if(!b)return;const e=state.entries.find(x=>x.id===b.dataset.id);if(e){await openEditorFromEntry(e,{});}};}
   function isPermaBanValue(v){
@@ -2630,7 +2557,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{markArchiveIdDeleted(e.id);
     if(!window.confirm('Diesen POV wirklich löschen? Die lokale Datei wird gelöscht. Das YouTube-Video bleibt erhalten.'))return false;
     try{
       if(ctx.item){ctx.item.cancelled=true;ctx.item.editingDone=true;ctx.item.processing=false;ctx.item.ocrProcessing=false;await delVideo(ctx.item.id,DESTRUCTIVE_TOKEN);state.queue=state.queue.filter(x=>x.id!==ctx.item.id);state.archiveSelected?.delete(ctx.item.id);persistQueueNow();}
-      else{markArchiveIdDeleted(ctx.entry.id);await delVideo(ctx.entry.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==ctx.entry.id);state.archiveSelected?.delete(ctx.entry.id);await saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});}
+      else{await delVideo(ctx.entry.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==ctx.entry.id);state.archiveSelected?.delete(ctx.entry.id);removeLocalArchiveEntryMirror(ctx.entry.id);saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});}
       closeEditor();renderQueue();renderArchive();renderCases();renderCsv();toast('POV gelöscht. YouTube bleibt erhalten.');return true;
     }catch(err){console.error('Direktes Löschen fehlgeschlagen',err);toast('Löschen fehlgeschlagen: '+(err?.message||err));return false;}
   }
@@ -2725,7 +2652,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{markArchiveIdDeleted(e.id);
     const timestamps={...(base.result?.timestamps||base.timestamps||{})};
     if(!Number.isFinite(Number(timestamps.pcCheck))){const d=Number(base.result?.duration||base.duration||0);if(d>0)timestamps.pcCheck=Math.max(0,Math.min(d/2,Math.max(0,d-.05)));}
     const stickyArchive=!!base.permaArchive||!!ctx.item?.result?.permaArchive||!!ctx.entry?.permaArchive||!!readArchivePlacement()[String(base.id||'')];
-    const record={id:base.id||crypto.randomUUID(),updatedAt:Date.now(),originalName:base.originalName||base.file.name,finalName,targetId,reason,manualResult:resultText,sc:offline?'':sc,server,date,rid:'',types:finalTypes,perma:$('#perma').checked,permaArchive:stickyArchive||$('#permaArchive').checked,notBanned:$('#notBanned').checked,documentStatus:$('#documentStatus').value==='eingetragen'?'eingetragen':'nicht eingetragen',pcCheckers:getPcCheckers(),pcCheckerManual:[...pcCheckerCustom],discordId:'',proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',duration:Number(base.result?.duration||base.duration||0)||0,timestamps,infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
+    const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,manualResult:resultText,sc:offline?'':sc,server,date,rid:'',types:finalTypes,perma:$('#perma').checked,permaArchive:stickyArchive||$('#permaArchive').checked,notBanned:$('#notBanned').checked,documentStatus:$('#documentStatus').value==='eingetragen'?'eingetragen':'nicht eingetragen',pcCheckers:getPcCheckers(),pcCheckerManual:[...pcCheckerCustom],discordId:'',proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',duration:Number(base.result?.duration||base.duration||0)||0,timestamps,infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
     await putVideo(record.id,namedFile);
     // YouTube must receive the exact final filename (including .mp4). The title update
     // is completed and verified before the saved POV is finalized in the UI.
@@ -2745,8 +2672,8 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{markArchiveIdDeleted(e.id);
       }
     }
     state.entries=[record,...state.entries.filter(x=>x.id!==record.id)];
-    const persisted=await saveMeta();
-    if(!persisted)throw new Error('Archiv konnte nicht dauerhaft gespeichert werden. Die POV wurde daher nicht als abgeschlossen markiert.');
+    const archiveSaved=await saveMeta();
+    if(!archiveSaved){state.entries=state.entries.filter(x=>x.id!==record.id);toast('POV konnte nicht dauerhaft gespeichert werden. Die POV bleibt in der Warteschlange.');return false;}
     // Sobald der POV vollständig gespeichert ist, sofort die Cloud-Sicherung anstoßen.
     // Falls Google Drive nicht verbunden ist, bleibt der Aufruf folgenlos; nach dem Verbinden
     // bzw. beim nächsten Upload greift die automatische Sicherung erneut.
@@ -3770,12 +3697,12 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{markArchiveIdDeleted(e.id);
     window.grandrpDeleteArchiveEntry=async(id)=>{
       const key=String(id||'');const entry=state.entries.find(e=>String(e.id)===key);
       if(!entry)throw new Error('Archiv-Eintrag nicht gefunden.');
-      markArchiveIdDeleted(entry.id);await delVideo(entry.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(e=>String(e.id)!==key);state.archiveSelected.delete(entry.id);
+      await delVideo(entry.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(e=>String(e.id)!==key);state.archiveSelected.delete(entry.id);removeLocalArchiveEntryMirror(entry.id);
       saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});renderArchive();renderCases();renderCsv();return true;
     };
     window.grandrpClearLocalData=async()=>{
       state.entries=[];state.queue=[];
-      try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(ARCHIVE_AUTHORITATIVE_KEY);localStorage.removeItem(DIRECT_RESTORE_KEY);localStorage.removeItem(LEGACY_DIRECT_RESTORE_KEY);localStorage.removeItem(ARCHIVE_DELETED_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);}catch{}
+      try{localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(ARCHIVE_AUTHORITATIVE_KEY);localStorage.removeItem(DIRECT_RESTORE_KEY);localStorage.removeItem(LEGACY_DIRECT_RESTORE_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);}catch{}
       await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();return true;
     };
     window.grandrpForceArchiveRender=()=>{renderArchive();return state.entries.length;};
@@ -3807,7 +3734,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{markArchiveIdDeleted(e.id);
     // Public handlers are assigned even when an optional settings renderer failed.
     window.grandrpRestoreArchiveBackup=restoreArchiveBackup;
     window.grandrpDownloadArchiveBackup=downloadArchiveBackup;
-    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.setItem(LOCAL_CLEAR_MARKER_KEY,String(Date.now()));localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(ARCHIVE_AUTHORITATIVE_KEY);localStorage.removeItem(DIRECT_RESTORE_KEY);localStorage.removeItem(LEGACY_DIRECT_RESTORE_KEY);localStorage.removeItem(ARCHIVE_DELETED_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
+    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.setItem(LOCAL_CLEAR_MARKER_KEY,String(Date.now()));localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(ARCHIVE_AUTHORITATIVE_KEY);localStorage.removeItem(DIRECT_RESTORE_KEY);localStorage.removeItem(LEGACY_DIRECT_RESTORE_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');try{for(let i=localStorage.length-1;i>=0;i--){const key=localStorage.key(i)||'';if(key.startsWith(ARCHIVE_LOCAL_ENTRY_PREFIX))localStorage.removeItem(key);}}catch{}}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }
 
