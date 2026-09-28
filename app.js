@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V150
+/* Grand RP DC Checker V138
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,7 +10,7 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V150';
+  const BUILD='V151';
   const META_KEY='grandrp_pov_meta_v42';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
@@ -893,6 +893,22 @@
   }
   async function getQueueDb(){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const r=tx.objectStore(STORE).get(QUEUE_DB_KEY);tx.oncomplete=()=>{const val=r.result;res(Array.isArray(val)?{items:val,updatedAt:0}:((val&&Array.isArray(val.items))?{items:val.items,updatedAt:Number(val.updatedAt)||0}:{items:[],updatedAt:0}));};tx.onerror=()=>rej(tx.error);});}catch{return {items:[],updatedAt:0};}}
   async function saveQueueDb(items,updatedAt=Date.now()){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put({version:2,updatedAt,items},QUEUE_DB_KEY);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}catch(err){console.warn('Warteschlange konnte nicht in IndexedDB gesichert werden',err);}}
+  // Legacy-compatible queue persistence: keep a second durable Blob key so a page refresh
+  // cannot lose an otherwise valid upload-queue entry merely because the primary file lookup
+  // raced with IndexedDB startup. Archive storage itself is unchanged.
+  const QUEUE_FILE_PREFIX='__grandrp_upload_queue_file_v1__';
+  async function putQueueFile(id,file){
+    if(!id||!file)return false;
+    try{const db=await openDB();await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(file,`${QUEUE_FILE_PREFIX}${id}`);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});return true;}catch(err){console.warn('Queue-Datei-Spiegel konnte nicht gespeichert werden',err);return false;}
+  }
+  async function getQueueFile(id){
+    if(!id)return null;
+    try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const r=tx.objectStore(STORE).get(`${QUEUE_FILE_PREFIX}${id}`);r.onsuccess=()=>res(r.result||null);r.onerror=()=>rej(r.error);});}catch{return null;}
+  }
+  async function delQueueFile(id){
+    if(!id)return;
+    try{const db=await openDB();await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(`${QUEUE_FILE_PREFIX}${id}`);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}catch{}
+  }
   function queueMetaSnapshot(){
     return state.queue.filter(item=>item && item.id && !item.editingDone && item.status!=='Gespeichert').map(item=>{
       const out={...item};
@@ -944,8 +960,10 @@
       if(!meta?.id || meta.editingDone || meta.status==='Gespeichert'){changed=true;continue;}
       let file=null;
       try{file=await getVideo(meta.id);}catch{}
-      if(!file){changed=true;continue;}
-      const item={...meta,file,ocrPromise:null};
+      if(!file){try{file=await getQueueFile(meta.id);}catch{};if(file){try{await putVideo(meta.id,file);}catch{}}}
+      // Keep metadata even when a Blob is temporarily unavailable. The old behavior showed
+      // the queue entry instead of silently deleting it during a full page reload.
+      const item={...meta,file:file||null,ocrPromise:null};
       item.cancelled=false;
       item.processing=false;
       item.uploading=false;
@@ -1268,241 +1286,85 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     if(typeof v==='string'){const n=v.trim().toLowerCase();return ['true','1','yes','ja','perma','perma-ban','permaban'].includes(n);}
     return false;
   }
-  function csvRowsBase(entries=state.entries){
-    return entries.filter(e=>e.saved&&!isPermaBanValue(e.permaArchive)).map(e=>{
-      const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];
-      return {
-        _id:e.id,
-        Proof:e.proof||'',
-        Datum:formatDateDE(e.date),
-        ID:e.targetId||'',
-        SOC:e.sc||'',
-        RID:'',
-        DiscordID:'',
-        Familie:'',
-        Ergebnis:e.manualResult||'',
-        Grund:e.reason||'',
-        Perma:isPermaBanValue(e.perma),
-        PermaArchiv:isPermaBanValue(e.permaArchive),
-        Admin1:admins[0]||'',
-        Admin2:admins[1]||'',
-        Admin3:admins[2]||'',
-        Admin4:admins[3]||'',
-        Admin5:admins[4]||'',
-        _entry:e,
-        _admins:admins
-      };
-    });
-  }
-  function csvRowsArchiveBase(){
-    return state.entries.filter(e=>e.saved&&isPermaBanValue(e.permaArchive)).map(e=>{
-      const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];
-      return {
-        _id:e.id,
-        Proof:e.proof||'',
-        Datum:formatDateDE(e.date),
-        ID:e.targetId||'',
-        SOC:e.sc||'',
-        RID:'',
-        DiscordID:'',
-        Familie:'',
-        Ergebnis:e.manualResult||'',
-        Grund:e.reason||'',
-        Perma:isPermaBanValue(e.perma),
-        PermaArchiv:true,
-        Admin1:admins[0]||'',
-        Admin2:admins[1]||'',
-        Admin3:admins[2]||'',
-        Admin4:admins[3]||'',
-        Admin5:admins[4]||'',
-        _entry:e,
-        _admins:admins
-      };
-    });
-  }
+  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved&&!isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:isPermaBanValue(e.permaArchive),Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
+  function csvRowsArchiveBase(){return state.entries.filter(e=>e.saved&&isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:true,Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
   function csvRowsPermaBase(){return csvRowsArchiveBase();}
-  function csvEntryMatchesType(e,type){
-    const types=Array.isArray(e?.types)?e.types:[];
-    const reason=String(e?.reason||'').toLowerCase();
-    const isPc=/^pc[- ]?check/.test(reason);
-    const isRefusal=/verweiger/i.test(reason);
-    const isTrolling=/troll/i.test(reason);
-    const isCleaning=/cleaning/i.test(reason);
-    const isRedux=/redux/i.test(reason);
-    const isDiscordReason=/discord/i.test(reason);
-    const isBanevading=/banevading|ban ?evading/i.test(reason);
-    const isAcc14=/acc\s*1\.4/i.test(reason);
-    const isEvent17=/event\s*1\.7/i.test(reason);
-    switch(type){
-      case 'ban': return !e?.notBanned;
-      case 'hardban': return types.includes('hardban')||/hardban|hardbann/i.test(reason);
-      case 'socban': return types.includes('socban')||/soc[- ]?ban/i.test(reason);
-      case 'cheater': return types.includes('cheater')||/cheat/i.test(reason);
-      case 'negativ': return types.includes('negativ');
-      case 'verweigert': return types.includes('verweigert')||isRefusal;
-      case 'pccheck': return types.includes('pccheck')||isPc;
-      case 'pcPositive': return isPc&&!isRefusal;
-      case 'pcRefused': return isRefusal;
-      case 'trolling': return isTrolling;
-      case 'cleaning': return isCleaning;
-      case 'redux': return isRedux;
-      case 'discordReason': return isDiscordReason;
-      case 'banevading': return isBanevading;
-      case 'acc14': return isAcc14;
-      case 'event17': return isEvent17;
-      case 'perma': return isPermaBanValue(e?.perma);
-      case 'permaArchive': return isPermaBanValue(e?.permaArchive);
-      case 'notBanned': return !!e?.notBanned;
-      case 'video': return !!e?.videoStored;
-      case 'novideo': return !e?.videoStored;
-      case 'docYes': return e?.documentStatus==='eingetragen';
-      case 'docNo': return e?.documentStatus!=='eingetragen';
-      case 'complete': return !!e?.complete;
-      case 'open': return !e?.complete;
-      case 'proof': return !!String(e?.proof||'').trim();
-      case 'noProof': return !String(e?.proof||'').trim();
-      case 'scPresent': return !!String(e?.sc||'').trim();
-      case 'scEmpty': return !String(e?.sc||'').trim();
-      case 'discordPresent': return !!String(e?.discordId||'').trim();
-      case 'discordEmpty': return !String(e?.discordId||'').trim();
-      default: return true;
-    }
-  }
-  function csvPriorityValue(r,key){
-    const e=r._entry||{};
-    const reason=String(r.Grund||'').toLowerCase();
-    const types=Array.isArray(e.types)?e.types:[];
-    switch(key){
-      case 'hardban': return types.includes('hardban')||/hardban|hardbann/.test(reason)?1:0;
-      case 'socban': return types.includes('socban')||/soc[- ]?ban/.test(reason)?1:0;
-      case 'cheater': return types.includes('cheater')||/cheat/.test(reason)?1:0;
-      case 'pccheck': return types.includes('pccheck')||/^pc[- ]?check/.test(reason)?1:0;
-      case 'verweigert': return types.includes('verweigert')||/verweiger/.test(reason)?1:0;
-      case 'trolling': return /troll/.test(reason)?1:0;
-      case 'cleaning': return /cleaning/.test(reason)?1:0;
-      case 'redux': return /redux/.test(reason)?1:0;
-      case 'discordReason': return /discord/.test(reason)?1:0;
-      case 'banevading': return /banevading|ban ?evading/.test(reason)?1:0;
-      case 'perma': return isPermaBanValue(e.perma)?1:0;
-      case 'complete': return e.complete?1:0;
-      case 'docYes': return e.documentStatus==='eingetragen'?1:0;
-      case 'proof': return String(r.Proof||'').trim()?1:0;
-      case 'sc': return String(r.SOC||'').trim()?1:0;
-      case 'discord': return String(r.DiscordID||'').trim()?1:0;
-      case 'missing': return Array.isArray(e.missing)&&e.missing.length?1:0;
-      default: return 0;
-    }
-  }
-  function csvRows(){
-    const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();
-    const reason=(($('#csvFilterReason')?.value)||'all');
-    const sc=(($('#csvFilterSc')?.value)||'all');
-    const discord=(($('#csvFilterDiscord')?.value)||'all');
-    const perma=(($('#csvFilterPerma')?.value)||'all');
-    const type=(($('#csvFilterType')?.value)||'all');
-    const admin=(($('#csvFilterAdmin')?.value)||'all').toLowerCase();
-    const sort=(($('#csvFilterSort')?.value)||'date_desc');
-    const from=(($('#csvFilterDateFrom')?.value)||'');
-    const to=(($('#csvFilterDateTo')?.value)||'');
-    const rows=csvRowsBase().filter(r=>{
-      const e=r._entry||{};
-      if(reason!=='all'&&r.Grund!==reason)return false;
-      if(sc==='present'&&!String(r.SOC||'').trim())return false;
-      if(sc==='empty'&&String(r.SOC||'').trim())return false;
-      if(discord==='present'&&!String(e.discordId||'').trim())return false;
-      if(discord==='empty'&&String(e.discordId||'').trim())return false;
-      if(perma==='yes'&&!isPermaBanValue(r.Perma))return false;
-      if(perma==='no'&&isPermaBanValue(r.Perma))return false;
-      if(type!=='all'&&!csvEntryMatchesType(e,type))return false;
-      if(admin!=='all'&&!r._admins.some(v=>String(v||'').toLowerCase()===admin))return false;
-      if(from&&String(e.date||'')<from)return false;
-      if(to&&String(e.date||'')>to)return false;
-      if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.DiscordID,e.discordId,r.Ergebnis,r.Grund,r.Admin1,r.Admin2,r.Admin3,r.Admin4,r.Admin5].some(v=>String(v||'').toLowerCase().includes(q))))return false;
-      return true;
-    });
-    const cmp=(a,b)=>{
-      const boolSort=(key,dir)=>{
-        const av=csvPriorityValue(a,key),bv=csvPriorityValue(b,key);
-        return dir==='last'?av-bv:bv-av;
-      };
-      let result=0;
-      switch(sort){
-        case 'date_asc': result=String(a._entry?.date||'').localeCompare(String(b._entry?.date||''));break;
-        case 'date_desc': result=String(b._entry?.date||'').localeCompare(String(a._entry?.date||''));break;
-        case 'id_asc': result=String(a.ID||'').localeCompare(String(b.ID||''),undefined,{numeric:true});break;
-        case 'id_desc': result=String(b.ID||'').localeCompare(String(a.ID||''),undefined,{numeric:true});break;
-        case 'reason_asc': result=String(a.Grund||'').localeCompare(String(b.Grund||''),'de');break;
-        case 'reason_desc': result=String(b.Grund||'').localeCompare(String(a.Grund||''),'de');break;
-        case 'sc_asc': result=String(a.SOC||'').localeCompare(String(b.SOC||''));break;
-        case 'sc_desc': result=String(b.SOC||'').localeCompare(String(a.SOC||''));break;
-        case 'discord_asc': result=String(a.DiscordID||'').localeCompare(String(b.DiscordID||''),undefined,{numeric:true});break;
-        case 'discord_desc': result=String(b.DiscordID||'').localeCompare(String(a.DiscordID||''),undefined,{numeric:true});break;
-        case 'admin1_asc': result=String(a.Admin1||'').localeCompare(String(b.Admin1||''),'de');break;
-        case 'admin1_desc': result=String(b.Admin1||'').localeCompare(String(a.Admin1||''),'de');break;
-        case 'hardban_first': result=boolSort('hardban','first');break;
-        case 'hardban_last': result=boolSort('hardban','last');break;
-        case 'socban_first': result=boolSort('socban','first');break;
-        case 'socban_last': result=boolSort('socban','last');break;
-        case 'cheater_first': result=boolSort('cheater','first');break;
-        case 'cheater_last': result=boolSort('cheater','last');break;
-        case 'pccheck_first': result=boolSort('pccheck','first');break;
-        case 'pccheck_last': result=boolSort('pccheck','last');break;
-        case 'verweigert_first': result=boolSort('verweigert','first');break;
-        case 'verweigert_last': result=boolSort('verweigert','last');break;
-        case 'trolling_first': result=boolSort('trolling','first');break;
-        case 'trolling_last': result=boolSort('trolling','last');break;
-        case 'cleaning_first': result=boolSort('cleaning','first');break;
-        case 'cleaning_last': result=boolSort('cleaning','last');break;
-        case 'redux_first': result=boolSort('redux','first');break;
-        case 'redux_last': result=boolSort('redux','last');break;
-        case 'discordReason_first': result=boolSort('discordReason','first');break;
-        case 'discordReason_last': result=boolSort('discordReason','last');break;
-        case 'banevading_first': result=boolSort('banevading','first');break;
-        case 'banevading_last': result=boolSort('banevading','last');break;
-        case 'perma_first': result=boolSort('perma','first');break;
-        case 'perma_last': result=boolSort('perma','last');break;
-        case 'complete_first': result=boolSort('complete','first');break;
-        case 'complete_last': result=boolSort('complete','last');break;
-        case 'docYes_first': result=boolSort('docYes','first');break;
-        case 'docYes_last': result=boolSort('docYes','last');break;
-        case 'proof_first': result=boolSort('proof','first');break;
-        case 'proof_last': result=boolSort('proof','last');break;
-        case 'sc_first': result=boolSort('sc','first');break;
-        case 'sc_last': result=boolSort('sc','last');break;
-        case 'discord_first': result=boolSort('discord','first');break;
-        case 'discord_last': result=boolSort('discord','last');break;
-        case 'missing_first': result=boolSort('missing','first');break;
-        case 'missing_last': result=boolSort('missing','last');break;
-        default: result=0;
-      }
-      if(result!==0)return result;
-      // Keep identical-priority rows stable and predictable.
-      const dateFallback=String(b._entry?.date||'').localeCompare(String(a._entry?.date||''));
-      if(dateFallback!==0)return dateFallback;
-      return String(a._id||'').localeCompare(String(b._id||''));
-    };
-    return rows.sort(cmp);
-  }
-  function syncCsvAdminOptions(){
-    const sel=$('#csvFilterAdmin');if(!sel)return;
-    const current=sel.value;
-    const names=new Set();
-    state.entries.forEach(e=>(Array.isArray(e.pcCheckers)?e.pcCheckers:[]).slice(0,5).forEach(v=>{if(String(v||'').trim())names.add(String(v).trim());}));
-    const ordered=[...names].sort((a,b)=>a.localeCompare(b,'de'));
-    sel.innerHTML='<option value="all">PC-Checker: Alle</option>'+ordered.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
-    if(ordered.includes(current))sel.value=current;
-  }
+  function csvRows(){const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();const reason=(($('#csvFilterReason')?.value)||'all');const sc=(($('#csvFilterSc')?.value)||'all');const perma=(($('#csvFilterPerma')?.value)||'all');return csvRowsBase().filter(r=>{if(reason!=='all'&&r.Grund!==reason)return false;if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;if(perma==='yes'&&r.Perma!==true)return false;if(perma==='no'&&r.Perma===true)return false;if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.Ergebnis,r.Grund].some(v=>String(v||'').toLowerCase().includes(q))))return false;return true;});}
+
   function renderCsv(){
-    syncCsvAdminOptions();
-    const all=csvRowsBase(),rows=csvRows(),perma=csvRowsPermaBase();
-    $('#csvSummary').textContent=`${rows.length} von ${all.length} Einträgen · ${perma.length} Perma-Archiv`;
-    const body=$('#csvPreviewBody');if(!body)return;
+    const all=csvRowsBase();
+    const rows=csvRows();
+    const perma=csvRowsPermaBase();
+    const summary=$('#csvSummary');
+    if(summary)summary.textContent=`${rows.length} von ${all.length} Einträgen · ${perma.length} Perma-Archiv`;
+    const body=$('#csvPreviewBody');
+    if(!body)return;
     body.innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.Proof)}</td><td>${esc(r.Datum)}</td><td>${esc(r.ID)}</td><td>${esc(r.SOC)}</td><td>${esc(r.RID)}</td><td>${esc(r.DiscordID)}</td><td>${esc(r.Familie)}</td><td>${esc(r.Ergebnis)}</td><td>${esc(r.Grund)}</td><td>${esc(r.Admin1)}</td><td>${esc(r.Admin2)}</td><td>${esc(r.Admin3)}</td><td>${esc(r.Admin4)}</td><td>${esc(r.Admin5)}</td><td><button type="button" class="mini" data-csv-open="${esc(r._id)}">Bearbeiten</button></td></tr>`).join(''):'<tr><td colspan=15 class="csv-empty">Keine Einträge passen zum Filter.</td></tr>';
     body.onclick=async ev=>{
-      const b=ev.target.closest('[data-csv-open]');if(!b)return;
-      const entry=state.entries.find(e=>e.id===b.dataset.csvOpen);if(entry)await openEditorFromEntry(entry,{});
+      const b=ev.target.closest('[data-csv-open]');
+      if(!b)return;
+      const entry=state.entries.find(e=>e.id===b.dataset.csvOpen);
+      if(entry)await openEditorFromEntry(entry,{});
     };
     $('#csvEmpty')?.classList.toggle('hidden',all.length>0);
+  }
+
+
+  function csvTextFromRows(rows){
+    const header=['Proof','Datum','ID','SOC','RID','Discord ID','Familie','Ergebnis','Grund','Admin 1','Admin 2','Admin 3','Admin 4','Admin 5'];
+    const line=values=>values.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(';');
+    const safeRows=Array.isArray(rows)?rows:[];
+    return '\uFEFF'+[line(header),...safeRows.map(r=>line([
+      r.Proof,r.Datum,r.ID,r.SOC,r.RID,r.DiscordID,r.Familie,r.Ergebnis,r.Grund,
+      r.Admin1,r.Admin2,r.Admin3,r.Admin4,r.Admin5
+    ]))].join('\r\n');
+  }
+  function downloadCsv(){
+    try{
+      const rows=csvRows();
+      if(!rows.length){toast('Keine CSV-Einträge für den aktuellen Filter.');return false;}
+      const blob=new Blob([csvTextFromRows(rows)],{type:'text/csv;charset=utf-8'});
+      const ok=triggerBrowserDownload(blob,`grandrp_bans-${new Date().toISOString().slice(0,10)}.csv`);
+      if(ok)toast(`${rows.length} CSV-Einträge exportiert.`);
+      return ok;
+    }catch(err){console.error('CSV-Download fehlgeschlagen',err);toast('CSV-Download fehlgeschlagen: '+(err?.message||err));return false;}
+  }
+  function downloadArchiveCsv(){
+    try{
+      const rows=csvRowsArchiveBase();
+      if(!rows.length){toast('Keine POVs im POV-Archiv vorhanden.');return false;}
+      const blob=new Blob([csvTextFromRows(rows)],{type:'text/csv;charset=utf-8'});
+      const ok=triggerBrowserDownload(blob,`grandrp_pov-archiv-${new Date().toISOString().slice(0,10)}.csv`);
+      if(ok)toast(`${rows.length} POV-Archiv-Einträge exportiert.`);
+      return ok;
+    }catch(err){console.error('POV-Archiv-CSV-Download fehlgeschlagen',err);toast('POV-Archiv-CSV-Download fehlgeschlagen: '+(err?.message||err));return false;}
+  }
+  function downloadPermaCsv(){
+    try{
+      const rows=csvRowsBase().filter(r=>r.Perma===true);
+      if(!rows.length){toast('Keine Perma-Ban-Einträge vorhanden.');return false;}
+      const blob=new Blob([csvTextFromRows(rows)],{type:'text/csv;charset=utf-8'});
+      const ok=triggerBrowserDownload(blob,`grandrp_perma-bans-${new Date().toISOString().slice(0,10)}.csv`);
+      if(ok)toast(`${rows.length} Perma-Ban-Einträge exportiert.`);
+      return ok;
+    }catch(err){console.error('Perma-CSV-Download fehlgeschlagen',err);toast('Perma-CSV-Download fehlgeschlagen: '+(err?.message||err));return false;}
+  }
+  async function copyCsv(){
+    try{
+      const text=csvTextFromRows(csvRows());
+      if(!text || text.split('\r\n').length<2){toast('Keine CSV-Einträge für den aktuellen Filter.');return false;}
+      if(navigator.clipboard?.writeText){
+        await navigator.clipboard.writeText(text);
+      }else{
+        const area=document.createElement('textarea');
+        area.value=text;area.setAttribute('readonly','');area.style.position='fixed';area.style.left='-99999px';
+        document.body.appendChild(area);area.select();
+        const ok=document.execCommand('copy');area.remove();
+        if(!ok)throw new Error('Kopieren ist in diesem Browser nicht verfügbar.');
+      }
+      toast('CSV in die Zwischenablage kopiert.');
+      return true;
+    }catch(err){console.error('CSV-Kopieren fehlgeschlagen',err);toast('CSV-Kopieren nicht verfügbar.');return false;}
   }
 
 
@@ -1534,7 +1396,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     $('#archiveCsvBtn')?.addEventListener('click',downloadArchiveCsv);
     $('#downloadPermaCsvBtn')?.addEventListener('click',downloadPermaCsv);
     $('#copyCsvBtn')?.addEventListener('click',copyCsv);
-    ['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterDiscord','#csvFilterPerma','#csvFilterType','#csvFilterAdmin','#csvFilterSort','#csvFilterDateFrom','#csvFilterDateTo'].forEach(s=>{
+    ['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterPerma'].forEach(s=>{
       const el=$(s);
       if(!el)return;
       el.addEventListener(el.tagName==='SELECT'?'change':'input',renderCsv);
@@ -1575,6 +1437,9 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     for(const item of pending){
       try{
         await putVideo(item.id,item.file);
+        await putQueueFile(item.id,item.file);
+        const check=await getVideo(item.id);
+        if(!check||Number(check.size)!==Number(item.file.size))throw new Error('Dauerhafte lokale Speicherung konnte nicht verifiziert werden.');
       }catch(err){
         item.status='Fehler: Lokale Speicherung fehlgeschlagen: '+(err?.message||err);
         item.uploadFailed=true;
@@ -1685,10 +1550,10 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   function renderQueue(){
     scheduleQueuePersist();const q=$('#uploadQueue');if(!q)return;const active=document.activeElement;const activeId=active?.matches?.('[data-queue-result]')?active.dataset.id:'';const activeValue=activeId?active.value:'';const aStart=activeId?Number(active.selectionStart||activeValue.length):0;const aEnd=activeId?Number(active.selectionEnd||activeValue.length):0;
     $('#queueCount').textContent=`${state.queue.length} ${state.queue.length===1?'Datei':'Dateien'}`;
-    q.innerHTML=state.queue.map(item=>{const fileName=item.finalName||item.file?.name||'POV';const fileSize=Number(item.file?.size||item.result?.sourceSize||item.sourceSize||0);const hasError=/^Fehler:/i.test(item.status||'');const retry=(!item.uploading&&!item.ocrProcessing&&((!!item.youtube&&!item.result)||hasError));const canAct=!!item.result&&!item.uploading&&!item.processing&&!item.ocrProcessing;const label=item.youtube?'OCR erneut':'Erneut hochladen';const resultValue=String(item.manualResult||item.result?.manualResult||'');return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(fileName)}</strong><small>${fileSize?formatSize(fileSize)+' · ':''}${esc(item.status||'Wartet')}</small><div class="queue-result-row"><label>Ergebnis</label><input type="text" class="queue-result-input" data-queue-result data-id="${esc(item.id)}" value="${esc(resultValue)}" placeholder="Ergebnis manuell eintragen"></div><div class="progress"><i style="width:${Number(item.progress)||0}%"></i></div></div><div class="queue-actions">${item.result?`<button type="button" class="mini" data-action="check" data-id="${esc(item.id)}" ${canAct?'':'disabled'}>Prüfen</button><button type="button" class="mini primary" data-action="next" data-id="${esc(item.id)}" ${canAct?'':'disabled'}>Nächste POV</button>`:''}${retry?`<button type="button" class="mini primary" data-action="retry" data-id="${esc(item.id)}">${label}</button>`:''}<button type="button" class="mini" data-action="remove" data-id="${esc(item.id)}">×</button></div></div>`;}).join('');
+    q.innerHTML=state.queue.map(item=>{const fileName=item.finalName||item.file?.name||'POV';const fileSize=Number(item.file?.size||item.result?.sourceSize||item.sourceSize||0);const missingFile=!item.file;const hasError=/^Fehler:/i.test(item.status||'');const retry=(!item.uploading&&!item.ocrProcessing&&((!!item.youtube&&!item.result)||hasError));const canAct=!!item.result&&!!item.file&&!item.uploading&&!item.processing&&!item.ocrProcessing;const label=item.youtube?'OCR erneut':'Erneut hochladen';const resultValue=String(item.manualResult||item.result?.manualResult||'');return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(fileName)}</strong><small>${fileSize?formatSize(fileSize)+' · ':''}${esc(missingFile?'Lokale Datei wird wiederhergestellt…':(item.status||'Wartet'))}</small><div class="queue-result-row"><label>Ergebnis</label><input type="text" class="queue-result-input" data-queue-result data-id="${esc(item.id)}" value="${esc(resultValue)}" placeholder="Ergebnis manuell eintragen"></div><div class="progress"><i style="width:${Number(item.progress)||0}%"></i></div></div><div class="queue-actions">${item.result?`<button type="button" class="mini" data-action="check" data-id="${esc(item.id)}" ${canAct?'':'disabled'}>Prüfen</button><button type="button" class="mini primary" data-action="next" data-id="${esc(item.id)}" ${canAct?'':'disabled'}>Nächste POV</button>`:''}${retry?`<button type="button" class="mini primary" data-action="retry" data-id="${esc(item.id)}">${label}</button>`:''}<button type="button" class="mini" data-action="remove" data-id="${esc(item.id)}">×</button></div></div>`;}).join('');
     $$('[data-queue-result]').forEach(inp=>inp.addEventListener('input',()=>{const x=state.queue.find(i=>i.id===inp.dataset.id);if(!x)return;x.manualResult=String(inp.value||'').trim();if(x.result)x.result.manualResult=x.manualResult;scheduleQueuePersist();}));
     if(activeId){const restored=document.querySelector(`[data-queue-result][data-id="${CSS.escape(activeId)}"]`);if(restored){restored.value=activeValue;restored.focus();try{restored.setSelectionRange(aStart,aEnd);}catch{}}}
-    q.onclick=async e=>{const btn=e.target.closest('button[data-action]');if(!btn||!q.contains(btn))return;const id=btn.dataset.id;const x=state.queue.find(i=>i.id===id);if(!x)return;const action=btn.dataset.action;if(action==='check'){if(!x.result){toast('Für diese POV liegen noch keine OCR-Ergebnisse vor.');return;}openEditor(x);setTimeout(()=>{if(state.editing?.item?.id!==x.id)return;const target=clampId(x.result?.targetId||x.targetId||'');if(!/^\d{1,6}$/.test(target)){toast('Zuerst eine gültige Ziel-ID erkennen/eintragen.');return;}if(normalizeHexLoose(x.result?.sc||x.sc||'').length===40)openAcpReasonForCurrentId();else startAcpSequence();},80);return;}if(action==='next'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}if(x.processing||x.ocrProcessing){toast('Die POV wird noch verarbeitet. Bitte kurz warten.');return;}await nextQueueItem(id);return;}if(action==='retry'){await retryQueueItem(x);return;}if(action==='remove'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}x.cancelled=true;x.editingDone=true;x.ocrProcessing=false;x.processing=false;try{await delVideo(x.id,DESTRUCTIVE_TOKEN);}catch{}state.queue=state.queue.filter(i=>i.id!==id);persistQueueNow();renderQueue();toast('POV aus der Warteschlange entfernt. OCR wurde gestoppt.');}};
+    q.onclick=async e=>{const btn=e.target.closest('button[data-action]');if(!btn||!q.contains(btn))return;const id=btn.dataset.id;const x=state.queue.find(i=>i.id===id);if(!x)return;const action=btn.dataset.action;if(action==='check'){if(!x.result){toast('Für diese POV liegen noch keine OCR-Ergebnisse vor.');return;}openEditor(x);setTimeout(()=>{if(state.editing?.item?.id!==x.id)return;const target=clampId(x.result?.targetId||x.targetId||'');if(!/^\d{1,6}$/.test(target)){toast('Zuerst eine gültige Ziel-ID erkennen/eintragen.');return;}if(normalizeHexLoose(x.result?.sc||x.sc||'').length===40)openAcpReasonForCurrentId();else startAcpSequence();},80);return;}if(action==='next'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}if(x.processing||x.ocrProcessing){toast('Die POV wird noch verarbeitet. Bitte kurz warten.');return;}await nextQueueItem(id);return;}if(action==='retry'){await retryQueueItem(x);return;}if(action==='remove'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}x.cancelled=true;x.editingDone=true;x.ocrProcessing=false;x.processing=false;try{await delVideo(x.id,DESTRUCTIVE_TOKEN);}catch{}await delQueueFile(x.id);state.queue=state.queue.filter(i=>i.id!==id);persistQueueNow();renderQueue();toast('POV aus der Warteschlange entfernt. OCR wurde gestoppt.');}};
   }
   async function retryLocalOCR(item){
     if(item.processing||item.cancelled)return;
@@ -2412,7 +2277,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     if(ctx.item?.uploading){toast('YouTube-Upload läuft noch.');return false;}
     if(!window.confirm('Diesen POV wirklich löschen? Die lokale Datei wird gelöscht. Das YouTube-Video bleibt erhalten.'))return false;
     try{
-      if(ctx.item){ctx.item.cancelled=true;ctx.item.editingDone=true;ctx.item.processing=false;ctx.item.ocrProcessing=false;await delVideo(ctx.item.id,DESTRUCTIVE_TOKEN);state.queue=state.queue.filter(x=>x.id!==ctx.item.id);state.archiveSelected?.delete(ctx.item.id);persistQueueNow();}
+      if(ctx.item){ctx.item.cancelled=true;ctx.item.editingDone=true;ctx.item.processing=false;ctx.item.ocrProcessing=false;await delVideo(ctx.item.id,DESTRUCTIVE_TOKEN);await delQueueFile(ctx.item.id);state.queue=state.queue.filter(x=>x.id!==ctx.item.id);state.archiveSelected?.delete(ctx.item.id);persistQueueNow();}
       else{await delVideo(ctx.entry.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==ctx.entry.id);state.archiveSelected?.delete(ctx.entry.id);saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});}
       closeEditor();renderQueue();renderArchive();renderCases();renderCsv();toast('POV gelöscht. YouTube bleibt erhalten.');return true;
     }catch(err){console.error('Direktes Löschen fehlgeschlagen',err);toast('Löschen fehlgeschlagen: '+(err?.message||err));return false;}
@@ -2475,6 +2340,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     const stickyArchive=!!base.permaArchive||!!ctx.item?.result?.permaArchive||!!ctx.entry?.permaArchive||!!readArchivePlacement()[String(base.id||'')];
     const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,manualResult:resultText,sc:offline?'':sc,server,date,rid:'',types:finalTypes,perma:$('#perma').checked,permaArchive:stickyArchive||$('#permaArchive').checked,notBanned:$('#notBanned').checked,documentStatus:$('#documentStatus').value==='eingetragen'?'eingetragen':'nicht eingetragen',pcCheckers:getPcCheckers(),pcCheckerManual:[...pcCheckerCustom],discordId:'',proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',duration:Number(base.result?.duration||base.duration||0)||0,timestamps,infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
     await putVideo(record.id,namedFile);
+    await delQueueFile(record.id);
     // YouTube must receive the exact final filename (including .mp4). The title update
     // is completed and verified before the saved POV is finalized in the UI.
     if(yt?.id){
