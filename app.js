@@ -1,4 +1,4 @@
-/* Grand RP DC Checker V138
+/* Grand RP DC Checker V145
  * Rebuilt OCR pipeline:
  * - Target ID is ONLY 1..6 digits and MUST be the id after "hat ... [ID] für/fur ...".
  * - SC is treated as the second long identifier after an IPv6-like IP; offline/no-IP => SC empty.
@@ -10,8 +10,9 @@
   'use strict';
 
   const isNode = typeof module !== 'undefined' && module.exports;
-  const BUILD='V151';
+  const BUILD='V152';
   const META_KEY='grandrp_pov_meta_v42';
+  const ARCHIVE_FILTER_KEY='grandrp_archive_filter_v145';
   const DB_NAME='grandrp_pov_db_v42';
   const STORE='videos';
   const BAN_ADMIN_NAME='Adam Byers';
@@ -645,7 +646,10 @@
     const global=$('#ytConnectHelp');
     if(global){const count=usableYoutubeConnections().length;global.textContent=count?`${count} YouTube-Verbindung${count===1?'':'en'} verfügbar. Leere Felder werden ignoriert.`:'Keine nutzbare YouTube-Verbindung vorhanden.';}
   }
-  const state={entries:[],queue:[],archiveSelected:new Set(),filter:'all',editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:'',tokenClient:null,clientId:'',activeYoutubeSlot:1,ytConnections:loadYoutubeConnectionsLocal(),settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,localFallbackRunner:false,youtubeUploadBlocked:false,tokenExpiresAt:0,tokenRefreshPromise:null,tokenRefreshPromises:new Map()};
+  const allowedArchiveFilters=new Set(['all','ban','pccheck','socban','hardban','cheater','negativ','novideo','permaarchive','duplicates']);
+  let initialArchiveFilter='all';
+  try{const value=localStorage.getItem(ARCHIVE_FILTER_KEY)||'';if(allowedArchiveFilters.has(value))initialArchiveFilter=value;}catch{}
+  const state={entries:[],queue:[],archiveSelected:new Set(),filter:initialArchiveFilter,editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:'',tokenClient:null,clientId:'',activeYoutubeSlot:1,ytConnections:loadYoutubeConnectionsLocal(),settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,localFallbackRunner:false,youtubeUploadBlocked:false,tokenExpiresAt:0,tokenRefreshPromise:null,tokenRefreshPromises:new Map()};
   let archiveReadyPromise=Promise.resolve();
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
   // Local authentication: plaintext passwords are never stored; only salted PBKDF2 hashes are persisted in this browser.
@@ -724,12 +728,80 @@
   const LEGACY_DIRECT_RESTORE_KEY='grandrp_direct_restore_v118';
   const ARCHIVE_SNAPSHOT_PREFIX='__grandrp_archive_snapshot_v106__';
   const ARCHIVE_ENTRY_PREFIX='__grandrp_archive_entry_v106__';
+  // Normal archive persistence mirror. It is separate from recovery/POV-Archiv
+  // snapshots so stale recovery data cannot hide newly checked normal POVs.
+  const LOCAL_ARCHIVE_MASTER_KEY='grandrp_archive_local_master_v1';
+  const LOCAL_ARCHIVE_ENTRY_PREFIX='grandrp_archive_local_entry_v1:';
+  const LOCAL_ARCHIVE_DELETED_KEY='grandrp_archive_local_deleted_v1';
   const DESTRUCTIVE_TOKEN=Object.freeze({name:'explicit-user-delete'});
   const ARCHIVE_SNAPSHOT_COUNT=20;
   let queuePersistTimer=0;
   let archiveRestoreInProgress=false;
   function sanitizeArchiveEntries(entries){
     return (Array.isArray(entries)?entries:[]).filter(e=>e&&e.id).map(e=>({...e,file:undefined,videoUrl:undefined}));
+  }
+  function localArchiveSafeEntry(entry){
+    const e={...entry};
+    delete e.file; delete e.videoUrl; delete e.ocrPromise;
+    if(e.result&&typeof e.result==='object'){
+      e.result={...e.result};
+      delete e.result.file; delete e.result.videoUrl; delete e.result.ocrPromise;
+    }
+    return e;
+  }
+  function readLocalArchiveDeleted(){
+    try{
+      const a=JSON.parse(localStorage.getItem(LOCAL_ARCHIVE_DELETED_KEY)||'[]');
+      return new Set(Array.isArray(a)?a.map(String):[]);
+    }catch{return new Set();}
+  }
+  function writeLocalArchiveDeleted(set){try{localStorage.setItem(LOCAL_ARCHIVE_DELETED_KEY,JSON.stringify([...set]));}catch{}}
+  function clearLocalArchiveDeletion(id){
+    const set=readLocalArchiveDeleted();
+    if(set.delete(String(id)))writeLocalArchiveDeleted(set);
+  }
+  function saveLocalArchiveMirror(entries=state.entries,updatedAt=Date.now()){
+    const clean=sanitizeArchiveEntries(entries).map(localArchiveSafeEntry);
+    const deleted=readLocalArchiveDeleted();
+    for(const e of clean)deleted.delete(String(e.id));
+    writeLocalArchiveDeleted(deleted);
+    try{localStorage.setItem(LOCAL_ARCHIVE_MASTER_KEY,JSON.stringify({version:1,updatedAt,entries:clean}));}catch(err){console.warn('Lokaler Archiv-Hauptspiegel konnte nicht gespeichert werden',err);}
+    for(const e of clean){
+      try{localStorage.setItem(LOCAL_ARCHIVE_ENTRY_PREFIX+String(e.id),JSON.stringify({version:1,updatedAt,entry:e}));}
+      catch(err){console.warn('Lokaler POV-Eintrag konnte nicht gespeichert werden',e.id,err);}
+    }
+  }
+  function readLocalArchiveMirror(){
+    const deleted=readLocalArchiveDeleted(),merged=new Map();let updatedAt=0;
+    try{
+      const raw=localStorage.getItem(LOCAL_ARCHIVE_MASTER_KEY);
+      if(raw){const p=JSON.parse(raw);updatedAt=Math.max(updatedAt,Number(p?.updatedAt)||0);for(const e of sanitizeArchiveEntries(p?.entries||[]))if(!deleted.has(String(e.id)))merged.set(String(e.id),e);}
+    }catch(err){console.warn('Lokaler Archiv-Hauptspiegel konnte nicht gelesen werden',err);}
+    try{
+      for(let i=0;i<localStorage.length;i++){
+        const key=localStorage.key(i)||'';if(!key.startsWith(LOCAL_ARCHIVE_ENTRY_PREFIX))continue;
+        const raw=localStorage.getItem(key);if(!raw)continue;const p=JSON.parse(raw),e=p?.entry||p;if(!e?.id||deleted.has(String(e.id)))continue;
+        const t=Number(p?.updatedAt)||0;updatedAt=Math.max(updatedAt,t);const old=merged.get(String(e.id));
+        if(!old||t>=Number(old?.updatedAt)||0)merged.set(String(e.id),e);
+      }
+    }catch(err){console.warn('Lokale POV-Einträge konnten nicht vollständig gelesen werden',err);}
+    return {entries:[...merged.values()],updatedAt};
+  }
+  function removeLocalArchiveMirror(id){
+    const key=String(id||'');if(!key)return;
+    const deleted=readLocalArchiveDeleted();deleted.add(key);writeLocalArchiveDeleted(deleted);
+    try{localStorage.removeItem(LOCAL_ARCHIVE_ENTRY_PREFIX+key);}catch{}
+    try{
+      const raw=localStorage.getItem(LOCAL_ARCHIVE_MASTER_KEY);
+      if(raw){const p=JSON.parse(raw);if(Array.isArray(p?.entries)){p.entries=p.entries.filter(e=>String(e?.id||'')!==key);p.updatedAt=Date.now();localStorage.setItem(LOCAL_ARCHIVE_MASTER_KEY,JSON.stringify(p));}}
+    }catch{}
+  }
+  function clearLocalArchiveMirror(){
+    try{
+      localStorage.removeItem(LOCAL_ARCHIVE_MASTER_KEY);
+      const keys=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i)||'';if(k.startsWith(LOCAL_ARCHIVE_ENTRY_PREFIX))keys.push(k);}
+      keys.forEach(k=>localStorage.removeItem(k));localStorage.removeItem(LOCAL_ARCHIVE_DELETED_KEY);
+    }catch{}
   }
   function readArchivePlacement(){
     const merged={};
@@ -893,22 +965,6 @@
   }
   async function getQueueDb(){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const r=tx.objectStore(STORE).get(QUEUE_DB_KEY);tx.oncomplete=()=>{const val=r.result;res(Array.isArray(val)?{items:val,updatedAt:0}:((val&&Array.isArray(val.items))?{items:val.items,updatedAt:Number(val.updatedAt)||0}:{items:[],updatedAt:0}));};tx.onerror=()=>rej(tx.error);});}catch{return {items:[],updatedAt:0};}}
   async function saveQueueDb(items,updatedAt=Date.now()){try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put({version:2,updatedAt,items},QUEUE_DB_KEY);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}catch(err){console.warn('Warteschlange konnte nicht in IndexedDB gesichert werden',err);}}
-  // Legacy-compatible queue persistence: keep a second durable Blob key so a page refresh
-  // cannot lose an otherwise valid upload-queue entry merely because the primary file lookup
-  // raced with IndexedDB startup. Archive storage itself is unchanged.
-  const QUEUE_FILE_PREFIX='__grandrp_upload_queue_file_v1__';
-  async function putQueueFile(id,file){
-    if(!id||!file)return false;
-    try{const db=await openDB();await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(file,`${QUEUE_FILE_PREFIX}${id}`);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});return true;}catch(err){console.warn('Queue-Datei-Spiegel konnte nicht gespeichert werden',err);return false;}
-  }
-  async function getQueueFile(id){
-    if(!id)return null;
-    try{const db=await openDB();return await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const r=tx.objectStore(STORE).get(`${QUEUE_FILE_PREFIX}${id}`);r.onsuccess=()=>res(r.result||null);r.onerror=()=>rej(r.error);});}catch{return null;}
-  }
-  async function delQueueFile(id){
-    if(!id)return;
-    try{const db=await openDB();await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(`${QUEUE_FILE_PREFIX}${id}`);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}catch{}
-  }
   function queueMetaSnapshot(){
     return state.queue.filter(item=>item && item.id && !item.editingDone && item.status!=='Gespeichert').map(item=>{
       const out={...item};
@@ -960,10 +1016,8 @@
       if(!meta?.id || meta.editingDone || meta.status==='Gespeichert'){changed=true;continue;}
       let file=null;
       try{file=await getVideo(meta.id);}catch{}
-      if(!file){try{file=await getQueueFile(meta.id);}catch{};if(file){try{await putVideo(meta.id,file);}catch{}}}
-      // Keep metadata even when a Blob is temporarily unavailable. The old behavior showed
-      // the queue entry instead of silently deleting it during a full page reload.
-      const item={...meta,file:file||null,ocrPromise:null};
+      if(!file){changed=true;continue;}
+      const item={...meta,file,ocrPromise:null};
       item.cancelled=false;
       item.processing=false;
       item.uploading=false;
@@ -1007,6 +1061,8 @@
   async function requestPersistentStorage(){try{if(navigator.storage?.persist)await navigator.storage.persist();const persisted=await navigator.storage?.persisted?.();const el=$('#persistentStorageStatus');if(el){el.textContent=persisted?'● Dauerhafter Browser-Speicher aktiv':'● Browser-Speicher nicht garantiert';el.className='connection '+(persisted?'good':'warn');}return !!persisted;}catch{const el=$('#persistentStorageStatus');if(el){el.textContent='● Browser-Speicherstatus nicht verfügbar';el.className='connection warn';}return false;}}
   async function loadMeta(){
     const candidates=[];
+    const localMirror=readLocalArchiveMirror();
+    if(localMirror.entries.length)candidates.push({entries:localMirror.entries,updatedAt:localMirror.updatedAt,source:'LOCAL-MIRROR'});
     // The authoritative synchronous archive copy is the first local source consulted on every
     // page load. This prevents an empty/stale IndexedDB state from making a valid archive appear
     // to disappear after refresh or a hard reload.
@@ -1043,7 +1099,8 @@
         if(!/grandrp.*(?:pov_meta|archive.*backup|archive.*snapshot)/i.test(key))continue;
         const raw=localStorage.getItem(key);if(!raw)continue;
         let parsed;try{parsed=JSON.parse(raw);}catch{continue;}
-        const rows=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.entries)?parsed.entries:[]);
+        let rows=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.entries)?parsed.entries:(Array.isArray(parsed?.archive)?parsed.archive:(Array.isArray(parsed?.data?.entries)?parsed.data.entries:[])));
+        if(!rows.length&&typeof parsed?.raw==='string'){try{const nested=JSON.parse(parsed.raw);rows=Array.isArray(nested)?nested:(Array.isArray(nested?.entries)?nested.entries:[]);}catch{}}
         if(rows.length)candidates.push({entries:rows,updatedAt:Number(parsed?.updatedAt)||Number(localStorage.getItem(META_UPDATED_KEY)||0),source:'localStorage:'+key});
       }
     }catch(err){console.warn('localStorage-Archiv konnte nicht vollständig durchsucht werden',err);}
@@ -1068,12 +1125,21 @@
     // Re-apply direct restore last so it wins deterministically for duplicate IDs.
     if(directFirst)for(const e of sanitizeArchiveEntries(directFirst.entries))if(e?.id)mergedById.set(String(e.id),e);
     const recovered=[...mergedById.values()];
+    // The normal-save mirror wins for IDs it contains. Recovery/perma snapshots are
+    // allowed to add missing entries, but cannot replace a freshly saved normal POV.
+    for(const e of localMirror.entries||[])if(e?.id)mergedById.set(String(e.id),e);
+    const deleted=readLocalArchiveDeleted();
+    for(const id of deleted)mergedById.delete(String(id));
+    const recoveredFinal=[...mergedById.values()];
+    // Safety invariant: a failed/empty startup read may never turn an already loaded archive into [] .
+    // This protects against transient IndexedDB/localStorage failures and startup races.
+    if(!recoveredFinal.length && state.entries.length) return;
     // Any source that ever recorded a POV as archived is treated as proof of permanent
     // placement. This repairs older V132 stores where the main index could contain the same
     // POV with permaArchive:false while the dedicated archive subset still had it.
     rememberArchivePlacementFromSources(nonEmpty);
     // Explicit archive placement always wins over recovered/older snapshots.
-    state.entries=applyArchivePlacement(recovered);
+    state.entries=applyArchivePlacement(recoveredFinal);
 
     // If anything was recovered, immediately normalize both stores and create a fresh recovery snapshot.
     if(state.entries.length){
@@ -1110,6 +1176,7 @@
     }
     const updatedAt=Date.now();
     if(entries.length){
+      saveLocalArchiveMirror(entries,updatedAt);
       try{
         localStorage.setItem(ARCHIVE_AUTHORITATIVE_KEY,JSON.stringify({version:1,updatedAt,entries}));
       }catch(err){console.warn('Autoritativer Archivstand konnte nicht lokal gespeichert werden',err);}
@@ -1121,6 +1188,7 @@
       }catch(err){console.warn('Archiv-Metadaten konnten nicht lokal gespeichert werden',err);}
       void saveMetaDb(entries,updatedAt,allowEmpty);
     }else if(allowEmpty){
+      clearLocalArchiveMirror();
       try{
         localStorage.setItem(META_KEY,'[]');
         localStorage.setItem(META_UPDATED_KEY,String(updatedAt));
@@ -1216,6 +1284,23 @@
     if(!saved){try{saved=localStorage.getItem('grandrp_current_view')||sessionStorage.getItem('grandrp_current_view')||document.documentElement.dataset.initialView||'';}catch{}}
     if(saved&&views[saved])showView(saved,false); else showView('archive',false);
     if(saved&&views[saved])persistCurrentView(saved);
+    try{
+      const stored=localStorage.getItem(ARCHIVE_FILTER_KEY)||'';
+      if(allowedArchiveFilters.has(stored))state.filter=stored;
+    }catch{}
+    const normalCount=state.entries.filter(e=>!e.permaArchive).length;
+    const archiveCount=state.entries.filter(e=>e.permaArchive).length;
+    // If everything is in the POV-Archiv, never leave the user on an empty "Alle" screen after refresh.
+    if((!saved||saved==='archive')&&archiveCount>0&&normalCount===0&&state.filter==='all'){
+      state.filter='permaarchive';
+      try{localStorage.setItem(ARCHIVE_FILTER_KEY,'permaarchive');}catch{}
+    }
+    document.querySelectorAll('#filters .filter').forEach(button=>{
+      const active=button.dataset.filter===state.filter;
+      button.classList.toggle('active',active);
+      button.setAttribute('aria-pressed',active?'true':'false');
+    });
+    if(saved==='archive'||!saved)renderArchive();
   }
   function showView(v,persist=true){
     if(!views[v])v='archive';
@@ -1232,17 +1317,45 @@
   function duplicateIdMap(entries=state.entries){const map=new Map();for(const e of entries){const id=String(e?.targetId||'').trim();if(/^\d{1,6}$/.test(id))map.set(id,(map.get(id)||0)+1);}return map;}
   function duplicateIdCount(entries=state.entries){let n=0;for(const count of duplicateIdMap(entries).values())if(count>1)n++;return n;}
   function isDuplicateId(entry){const id=String(entry?.targetId||'').trim();return /^\d{1,6}$/.test(id)&&Number(duplicateIdMap().get(id)||0)>1;}
-  function updateCounts(){const all=state.entries;const normal=all.filter(e=>!e.permaArchive);const count=k=>normal.filter(e=>e.types?.includes(k)).length;$('#countAll').textContent=normal.length;$('#countBan').textContent=normal.filter(e=>!e.notBanned).length;$('#countPc').textContent=count('pccheck');$('#countSoc').textContent=count('socban');$('#countHard').textContent=count('hardban');$('#countCheat').textContent=count('cheater');$('#countNeg').textContent=count('negativ');$('#countNoVideo').textContent=normal.filter(e=>!e.videoStored).length;$('#countPerma').textContent=all.filter(e=>e.permaArchive).length;if($('#countDuplicates'))$('#countDuplicates').textContent=String(duplicateIdCount(all));}
+  function inferredEntryTypes(e){
+    const types=new Set(Array.isArray(e?.types)?e.types:[]);
+    const reason=String(e?.reason||'').toLowerCase();
+    if(/^pc[- ]?check/.test(reason))types.add('pccheck');
+    if(/verweig|refus/.test(reason))types.add('verweigert');
+    if(/soc[- ]?ban/.test(reason))types.add('socban');
+    if(/hardban|hardbann/.test(reason))types.add('hardban');
+    if(/cheat/.test(reason))types.add('cheater');
+    if(/negativ/.test(reason))types.add('negativ');
+    return types;
+  }
+  function updateCounts(){
+    const all=state.entries;
+    const normal=all.filter(e=>!e.permaArchive);
+    const count=k=>normal.filter(e=>inferredEntryTypes(e).has(k)).length;
+    $('#countAll').textContent=normal.length;
+    $('#countBan').textContent=normal.filter(e=>!e.notBanned).length;
+    $('#countPc').textContent=count('pccheck');
+    $('#countSoc').textContent=count('socban');
+    $('#countHard').textContent=count('hardban');
+    $('#countCheat').textContent=count('cheater');
+    $('#countNeg').textContent=count('negativ');
+    $('#countNoVideo').textContent=normal.filter(e=>!e.videoStored).length;
+    $('#countPerma').textContent=all.filter(e=>e.permaArchive).length;
+    if($('#countDuplicates'))$('#countDuplicates').textContent=String(duplicateIdCount(normal));
+  }
   function renderArchive(){
     updateCounts();
     const q=($('#search').value||'').toLowerCase().trim();const filter=state.filter;
-    const list=state.entries.filter(e=>{
-      if(filter==='permaarchive' && !e.permaArchive)return false;
-      if(filter==='all' && e.permaArchive)return false;
+    const normal=state.entries.filter(e=>!e.permaArchive);
+    const archived=state.entries.filter(e=>e.permaArchive);
+    const source=filter==='permaarchive'?archived:normal;
+    const list=source.filter(e=>{
+      if(filter==='permaarchive')return true;
       if(filter==='duplicates' && !isDuplicateId(e))return false;
       if(filter==='ban'&&e.notBanned)return false;
-      if(filter!=='all'&&filter!=='permaarchive'&&filter!=='ban'&&filter!=='duplicates'&&!e.types?.includes(filter))return false;
-      if(filter==='novideo'&&e.videoStored)return false;
+      if(filter==='novideo'){
+        if(e.videoStored)return false;
+      }else if(filter!=='all'&&filter!=='ban'&&filter!=='duplicates'&&!inferredEntryTypes(e).has(filter))return false;
       if(!q)return true;
       return [e.targetId,e.sc,e.reason,e.manualResult,e.server,e.proof].some(v=>String(v||'').toLowerCase().includes(q));
     });
@@ -1272,7 +1385,7 @@
       }
       else if(action==='delete'){if(!confirm(`POV „${e.finalName||e.originalName||e.id}“ aus dem Archiv löschen?
 
-Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==e.id);state.archiveSelected.delete(e.id);saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}}
+Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==e.id);state.archiveSelected.delete(e.id);removeLocalArchiveMirror(e.id);saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});renderArchive();renderCases();renderCsv();toast('POV aus dem Archiv gelöscht. YouTube bleibt erhalten.');}catch(err){console.error(err);toast('Löschen fehlgeschlagen: '+(err?.message||err));}}
     };
   }
   function setupArchiveBulk(){
@@ -1286,85 +1399,241 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     if(typeof v==='string'){const n=v.trim().toLowerCase();return ['true','1','yes','ja','perma','perma-ban','permaban'].includes(n);}
     return false;
   }
-  function csvRowsBase(entries=state.entries){return entries.filter(e=>e.saved&&!isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:isPermaBanValue(e.permaArchive),Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
-  function csvRowsArchiveBase(){return state.entries.filter(e=>e.saved&&isPermaBanValue(e.permaArchive)).map(e=>{const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];return {_id:e.id,Proof:e.proof||'',Datum:formatDateDE(e.date),ID:e.targetId||'',SOC:e.sc||'',RID:'',DiscordID:'',Familie:'',Ergebnis:e.manualResult||'',Grund:e.reason||'',Perma:isPermaBanValue(e.perma),PermaArchiv:true,Admin1:admins[0]||'',Admin2:admins[1]||'',Admin3:admins[2]||'',Admin4:admins[3]||'',Admin5:admins[4]||''};});}
+  function csvRowsBase(entries=state.entries){
+    return entries.filter(e=>e.saved&&!isPermaBanValue(e.permaArchive)).map(e=>{
+      const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];
+      return {
+        _id:e.id,
+        Proof:e.proof||'',
+        Datum:formatDateDE(e.date),
+        ID:e.targetId||'',
+        SOC:e.sc||'',
+        RID:'',
+        DiscordID:'',
+        Familie:'',
+        Ergebnis:e.manualResult||'',
+        Grund:e.reason||'',
+        Perma:isPermaBanValue(e.perma),
+        PermaArchiv:isPermaBanValue(e.permaArchive),
+        Admin1:admins[0]||'',
+        Admin2:admins[1]||'',
+        Admin3:admins[2]||'',
+        Admin4:admins[3]||'',
+        Admin5:admins[4]||'',
+        _entry:e,
+        _admins:admins
+      };
+    });
+  }
+  function csvRowsArchiveBase(){
+    return state.entries.filter(e=>e.saved&&isPermaBanValue(e.permaArchive)).map(e=>{
+      const admins=Array.isArray(e.pcCheckers)?e.pcCheckers.slice(0,5):[];
+      return {
+        _id:e.id,
+        Proof:e.proof||'',
+        Datum:formatDateDE(e.date),
+        ID:e.targetId||'',
+        SOC:e.sc||'',
+        RID:'',
+        DiscordID:'',
+        Familie:'',
+        Ergebnis:e.manualResult||'',
+        Grund:e.reason||'',
+        Perma:isPermaBanValue(e.perma),
+        PermaArchiv:true,
+        Admin1:admins[0]||'',
+        Admin2:admins[1]||'',
+        Admin3:admins[2]||'',
+        Admin4:admins[3]||'',
+        Admin5:admins[4]||'',
+        _entry:e,
+        _admins:admins
+      };
+    });
+  }
   function csvRowsPermaBase(){return csvRowsArchiveBase();}
-  function csvRows(){const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();const reason=(($('#csvFilterReason')?.value)||'all');const sc=(($('#csvFilterSc')?.value)||'all');const perma=(($('#csvFilterPerma')?.value)||'all');return csvRowsBase().filter(r=>{if(reason!=='all'&&r.Grund!==reason)return false;if(sc==='present'&&!r.SOC)return false;if(sc==='empty'&&r.SOC)return false;if(perma==='yes'&&r.Perma!==true)return false;if(perma==='no'&&r.Perma===true)return false;if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.Ergebnis,r.Grund].some(v=>String(v||'').toLowerCase().includes(q))))return false;return true;});}
-
+  function csvEntryMatchesType(e,type){
+    const types=Array.isArray(e?.types)?e.types:[];
+    const reason=String(e?.reason||'').toLowerCase();
+    const isPc=/^pc[- ]?check/.test(reason);
+    const isRefusal=/verweiger/i.test(reason);
+    const isTrolling=/troll/i.test(reason);
+    const isCleaning=/cleaning/i.test(reason);
+    const isRedux=/redux/i.test(reason);
+    const isDiscordReason=/discord/i.test(reason);
+    const isBanevading=/banevading|ban ?evading/i.test(reason);
+    const isAcc14=/acc\s*1\.4/i.test(reason);
+    const isEvent17=/event\s*1\.7/i.test(reason);
+    switch(type){
+      case 'ban': return !e?.notBanned;
+      case 'hardban': return types.includes('hardban')||/hardban|hardbann/i.test(reason);
+      case 'socban': return types.includes('socban')||/soc[- ]?ban/i.test(reason);
+      case 'cheater': return types.includes('cheater')||/cheat/i.test(reason);
+      case 'negativ': return types.includes('negativ');
+      case 'verweigert': return types.includes('verweigert')||isRefusal;
+      case 'pccheck': return types.includes('pccheck')||isPc;
+      case 'pcPositive': return isPc&&!isRefusal;
+      case 'pcRefused': return isRefusal;
+      case 'trolling': return isTrolling;
+      case 'cleaning': return isCleaning;
+      case 'redux': return isRedux;
+      case 'discordReason': return isDiscordReason;
+      case 'banevading': return isBanevading;
+      case 'acc14': return isAcc14;
+      case 'event17': return isEvent17;
+      case 'perma': return isPermaBanValue(e?.perma);
+      case 'permaArchive': return isPermaBanValue(e?.permaArchive);
+      case 'notBanned': return !!e?.notBanned;
+      case 'video': return !!e?.videoStored;
+      case 'novideo': return !e?.videoStored;
+      case 'docYes': return e?.documentStatus==='eingetragen';
+      case 'docNo': return e?.documentStatus!=='eingetragen';
+      case 'complete': return !!e?.complete;
+      case 'open': return !e?.complete;
+      case 'proof': return !!String(e?.proof||'').trim();
+      case 'noProof': return !String(e?.proof||'').trim();
+      case 'scPresent': return !!String(e?.sc||'').trim();
+      case 'scEmpty': return !String(e?.sc||'').trim();
+      case 'discordPresent': return !!String(e?.discordId||'').trim();
+      case 'discordEmpty': return !String(e?.discordId||'').trim();
+      default: return true;
+    }
+  }
+  function csvPriorityValue(r,key){
+    const e=r._entry||{};
+    const reason=String(r.Grund||'').toLowerCase();
+    const types=Array.isArray(e.types)?e.types:[];
+    switch(key){
+      case 'hardban': return types.includes('hardban')||/hardban|hardbann/.test(reason)?1:0;
+      case 'socban': return types.includes('socban')||/soc[- ]?ban/.test(reason)?1:0;
+      case 'cheater': return types.includes('cheater')||/cheat/.test(reason)?1:0;
+      case 'pccheck': return types.includes('pccheck')||/^pc[- ]?check/.test(reason)?1:0;
+      case 'verweigert': return types.includes('verweigert')||/verweiger/.test(reason)?1:0;
+      case 'trolling': return /troll/.test(reason)?1:0;
+      case 'cleaning': return /cleaning/.test(reason)?1:0;
+      case 'redux': return /redux/.test(reason)?1:0;
+      case 'discordReason': return /discord/.test(reason)?1:0;
+      case 'banevading': return /banevading|ban ?evading/.test(reason)?1:0;
+      case 'perma': return isPermaBanValue(e.perma)?1:0;
+      case 'complete': return e.complete?1:0;
+      case 'docYes': return e.documentStatus==='eingetragen'?1:0;
+      case 'proof': return String(r.Proof||'').trim()?1:0;
+      case 'sc': return String(r.SOC||'').trim()?1:0;
+      case 'discord': return String(r.DiscordID||'').trim()?1:0;
+      case 'missing': return Array.isArray(e.missing)&&e.missing.length?1:0;
+      default: return 0;
+    }
+  }
+  function csvRows(){
+    const q=(($('#csvFilterSearch')?.value)||'').toLowerCase().trim();
+    const reason=(($('#csvFilterReason')?.value)||'all');
+    const sc=(($('#csvFilterSc')?.value)||'all');
+    const discord=(($('#csvFilterDiscord')?.value)||'all');
+    const perma=(($('#csvFilterPerma')?.value)||'all');
+    const type=(($('#csvFilterType')?.value)||'all');
+    const admin=(($('#csvFilterAdmin')?.value)||'all').toLowerCase();
+    const sort=(($('#csvFilterSort')?.value)||'date_desc');
+    const from=(($('#csvFilterDateFrom')?.value)||'');
+    const to=(($('#csvFilterDateTo')?.value)||'');
+    const rows=csvRowsBase().filter(r=>{
+      const e=r._entry||{};
+      if(reason!=='all'&&r.Grund!==reason)return false;
+      if(sc==='present'&&!String(r.SOC||'').trim())return false;
+      if(sc==='empty'&&String(r.SOC||'').trim())return false;
+      if(discord==='present'&&!String(e.discordId||'').trim())return false;
+      if(discord==='empty'&&String(e.discordId||'').trim())return false;
+      if(perma==='yes'&&!isPermaBanValue(r.Perma))return false;
+      if(perma==='no'&&isPermaBanValue(r.Perma))return false;
+      if(type!=='all'&&!csvEntryMatchesType(e,type))return false;
+      if(admin!=='all'&&!r._admins.some(v=>String(v||'').toLowerCase()===admin))return false;
+      if(from&&String(e.date||'')<from)return false;
+      if(to&&String(e.date||'')>to)return false;
+      if(q&&!([r.Proof,r.Datum,r.ID,r.SOC,r.DiscordID,e.discordId,r.Ergebnis,r.Grund,r.Admin1,r.Admin2,r.Admin3,r.Admin4,r.Admin5].some(v=>String(v||'').toLowerCase().includes(q))))return false;
+      return true;
+    });
+    const cmp=(a,b)=>{
+      const boolSort=(key,dir)=>{
+        const av=csvPriorityValue(a,key),bv=csvPriorityValue(b,key);
+        return dir==='last'?av-bv:bv-av;
+      };
+      let result=0;
+      switch(sort){
+        case 'date_asc': result=String(a._entry?.date||'').localeCompare(String(b._entry?.date||''));break;
+        case 'date_desc': result=String(b._entry?.date||'').localeCompare(String(a._entry?.date||''));break;
+        case 'id_asc': result=String(a.ID||'').localeCompare(String(b.ID||''),undefined,{numeric:true});break;
+        case 'id_desc': result=String(b.ID||'').localeCompare(String(a.ID||''),undefined,{numeric:true});break;
+        case 'reason_asc': result=String(a.Grund||'').localeCompare(String(b.Grund||''),'de');break;
+        case 'reason_desc': result=String(b.Grund||'').localeCompare(String(a.Grund||''),'de');break;
+        case 'sc_asc': result=String(a.SOC||'').localeCompare(String(b.SOC||''));break;
+        case 'sc_desc': result=String(b.SOC||'').localeCompare(String(a.SOC||''));break;
+        case 'discord_asc': result=String(a.DiscordID||'').localeCompare(String(b.DiscordID||''),undefined,{numeric:true});break;
+        case 'discord_desc': result=String(b.DiscordID||'').localeCompare(String(a.DiscordID||''),undefined,{numeric:true});break;
+        case 'admin1_asc': result=String(a.Admin1||'').localeCompare(String(b.Admin1||''),'de');break;
+        case 'admin1_desc': result=String(b.Admin1||'').localeCompare(String(a.Admin1||''),'de');break;
+        case 'hardban_first': result=boolSort('hardban','first');break;
+        case 'hardban_last': result=boolSort('hardban','last');break;
+        case 'socban_first': result=boolSort('socban','first');break;
+        case 'socban_last': result=boolSort('socban','last');break;
+        case 'cheater_first': result=boolSort('cheater','first');break;
+        case 'cheater_last': result=boolSort('cheater','last');break;
+        case 'pccheck_first': result=boolSort('pccheck','first');break;
+        case 'pccheck_last': result=boolSort('pccheck','last');break;
+        case 'verweigert_first': result=boolSort('verweigert','first');break;
+        case 'verweigert_last': result=boolSort('verweigert','last');break;
+        case 'trolling_first': result=boolSort('trolling','first');break;
+        case 'trolling_last': result=boolSort('trolling','last');break;
+        case 'cleaning_first': result=boolSort('cleaning','first');break;
+        case 'cleaning_last': result=boolSort('cleaning','last');break;
+        case 'redux_first': result=boolSort('redux','first');break;
+        case 'redux_last': result=boolSort('redux','last');break;
+        case 'discordReason_first': result=boolSort('discordReason','first');break;
+        case 'discordReason_last': result=boolSort('discordReason','last');break;
+        case 'banevading_first': result=boolSort('banevading','first');break;
+        case 'banevading_last': result=boolSort('banevading','last');break;
+        case 'perma_first': result=boolSort('perma','first');break;
+        case 'perma_last': result=boolSort('perma','last');break;
+        case 'complete_first': result=boolSort('complete','first');break;
+        case 'complete_last': result=boolSort('complete','last');break;
+        case 'docYes_first': result=boolSort('docYes','first');break;
+        case 'docYes_last': result=boolSort('docYes','last');break;
+        case 'proof_first': result=boolSort('proof','first');break;
+        case 'proof_last': result=boolSort('proof','last');break;
+        case 'sc_first': result=boolSort('sc','first');break;
+        case 'sc_last': result=boolSort('sc','last');break;
+        case 'discord_first': result=boolSort('discord','first');break;
+        case 'discord_last': result=boolSort('discord','last');break;
+        case 'missing_first': result=boolSort('missing','first');break;
+        case 'missing_last': result=boolSort('missing','last');break;
+        default: result=0;
+      }
+      if(result!==0)return result;
+      // Keep identical-priority rows stable and predictable.
+      const dateFallback=String(b._entry?.date||'').localeCompare(String(a._entry?.date||''));
+      if(dateFallback!==0)return dateFallback;
+      return String(a._id||'').localeCompare(String(b._id||''));
+    };
+    return rows.sort(cmp);
+  }
+  function syncCsvAdminOptions(){
+    const sel=$('#csvFilterAdmin');if(!sel)return;
+    const current=sel.value;
+    const names=new Set();
+    state.entries.forEach(e=>(Array.isArray(e.pcCheckers)?e.pcCheckers:[]).slice(0,5).forEach(v=>{if(String(v||'').trim())names.add(String(v).trim());}));
+    const ordered=[...names].sort((a,b)=>a.localeCompare(b,'de'));
+    sel.innerHTML='<option value="all">PC-Checker: Alle</option>'+ordered.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    if(ordered.includes(current))sel.value=current;
+  }
   function renderCsv(){
-    const all=csvRowsBase();
-    const rows=csvRows();
-    const perma=csvRowsPermaBase();
-    const summary=$('#csvSummary');
-    if(summary)summary.textContent=`${rows.length} von ${all.length} Einträgen · ${perma.length} Perma-Archiv`;
-    const body=$('#csvPreviewBody');
-    if(!body)return;
+    syncCsvAdminOptions();
+    const all=csvRowsBase(),rows=csvRows(),perma=csvRowsPermaBase();
+    $('#csvSummary').textContent=`${rows.length} von ${all.length} Einträgen · ${perma.length} Perma-Archiv`;
+    const body=$('#csvPreviewBody');if(!body)return;
     body.innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.Proof)}</td><td>${esc(r.Datum)}</td><td>${esc(r.ID)}</td><td>${esc(r.SOC)}</td><td>${esc(r.RID)}</td><td>${esc(r.DiscordID)}</td><td>${esc(r.Familie)}</td><td>${esc(r.Ergebnis)}</td><td>${esc(r.Grund)}</td><td>${esc(r.Admin1)}</td><td>${esc(r.Admin2)}</td><td>${esc(r.Admin3)}</td><td>${esc(r.Admin4)}</td><td>${esc(r.Admin5)}</td><td><button type="button" class="mini" data-csv-open="${esc(r._id)}">Bearbeiten</button></td></tr>`).join(''):'<tr><td colspan=15 class="csv-empty">Keine Einträge passen zum Filter.</td></tr>';
     body.onclick=async ev=>{
-      const b=ev.target.closest('[data-csv-open]');
-      if(!b)return;
-      const entry=state.entries.find(e=>e.id===b.dataset.csvOpen);
-      if(entry)await openEditorFromEntry(entry,{});
+      const b=ev.target.closest('[data-csv-open]');if(!b)return;
+      const entry=state.entries.find(e=>e.id===b.dataset.csvOpen);if(entry)await openEditorFromEntry(entry,{});
     };
     $('#csvEmpty')?.classList.toggle('hidden',all.length>0);
-  }
-
-
-  function csvTextFromRows(rows){
-    const header=['Proof','Datum','ID','SOC','RID','Discord ID','Familie','Ergebnis','Grund','Admin 1','Admin 2','Admin 3','Admin 4','Admin 5'];
-    const line=values=>values.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(';');
-    const safeRows=Array.isArray(rows)?rows:[];
-    return '\uFEFF'+[line(header),...safeRows.map(r=>line([
-      r.Proof,r.Datum,r.ID,r.SOC,r.RID,r.DiscordID,r.Familie,r.Ergebnis,r.Grund,
-      r.Admin1,r.Admin2,r.Admin3,r.Admin4,r.Admin5
-    ]))].join('\r\n');
-  }
-  function downloadCsv(){
-    try{
-      const rows=csvRows();
-      if(!rows.length){toast('Keine CSV-Einträge für den aktuellen Filter.');return false;}
-      const blob=new Blob([csvTextFromRows(rows)],{type:'text/csv;charset=utf-8'});
-      const ok=triggerBrowserDownload(blob,`grandrp_bans-${new Date().toISOString().slice(0,10)}.csv`);
-      if(ok)toast(`${rows.length} CSV-Einträge exportiert.`);
-      return ok;
-    }catch(err){console.error('CSV-Download fehlgeschlagen',err);toast('CSV-Download fehlgeschlagen: '+(err?.message||err));return false;}
-  }
-  function downloadArchiveCsv(){
-    try{
-      const rows=csvRowsArchiveBase();
-      if(!rows.length){toast('Keine POVs im POV-Archiv vorhanden.');return false;}
-      const blob=new Blob([csvTextFromRows(rows)],{type:'text/csv;charset=utf-8'});
-      const ok=triggerBrowserDownload(blob,`grandrp_pov-archiv-${new Date().toISOString().slice(0,10)}.csv`);
-      if(ok)toast(`${rows.length} POV-Archiv-Einträge exportiert.`);
-      return ok;
-    }catch(err){console.error('POV-Archiv-CSV-Download fehlgeschlagen',err);toast('POV-Archiv-CSV-Download fehlgeschlagen: '+(err?.message||err));return false;}
-  }
-  function downloadPermaCsv(){
-    try{
-      const rows=csvRowsBase().filter(r=>r.Perma===true);
-      if(!rows.length){toast('Keine Perma-Ban-Einträge vorhanden.');return false;}
-      const blob=new Blob([csvTextFromRows(rows)],{type:'text/csv;charset=utf-8'});
-      const ok=triggerBrowserDownload(blob,`grandrp_perma-bans-${new Date().toISOString().slice(0,10)}.csv`);
-      if(ok)toast(`${rows.length} Perma-Ban-Einträge exportiert.`);
-      return ok;
-    }catch(err){console.error('Perma-CSV-Download fehlgeschlagen',err);toast('Perma-CSV-Download fehlgeschlagen: '+(err?.message||err));return false;}
-  }
-  async function copyCsv(){
-    try{
-      const text=csvTextFromRows(csvRows());
-      if(!text || text.split('\r\n').length<2){toast('Keine CSV-Einträge für den aktuellen Filter.');return false;}
-      if(navigator.clipboard?.writeText){
-        await navigator.clipboard.writeText(text);
-      }else{
-        const area=document.createElement('textarea');
-        area.value=text;area.setAttribute('readonly','');area.style.position='fixed';area.style.left='-99999px';
-        document.body.appendChild(area);area.select();
-        const ok=document.execCommand('copy');area.remove();
-        if(!ok)throw new Error('Kopieren ist in diesem Browser nicht verfügbar.');
-      }
-      toast('CSV in die Zwischenablage kopiert.');
-      return true;
-    }catch(err){console.error('CSV-Kopieren fehlgeschlagen',err);toast('CSV-Kopieren nicht verfügbar.');return false;}
   }
 
 
@@ -1381,6 +1650,46 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       try{showView(view);}catch(err){console.error('Navigation failed',err);}
     });
   }
+  function setupArchiveFilterButtons(){
+    const box=$('#filters');
+    if(!box||box.dataset.v145Bound==='1')return;
+    box.dataset.v145Bound='1';
+    const apply=button=>{
+      const filter=String(button?.dataset?.filter||'all');
+      if(!allowedArchiveFilters.has(filter))return;
+      state.filter=filter;
+      try{localStorage.setItem(ARCHIVE_FILTER_KEY,filter);}catch{}
+      box.querySelectorAll('.filter').forEach(b=>{
+        const active=b.dataset.filter===filter;
+        b.classList.toggle('active',active);
+        b.setAttribute('aria-pressed',active?'true':'false');
+        b.classList.remove('pressing');
+      });
+      try{renderArchive();}catch(err){console.error('Archiv-Filter konnte nicht angewendet werden',err);toast('Filterfehler: '+(err?.message||String(err)));}
+    };
+    box.querySelectorAll('.filter').forEach(button=>{
+      button.type='button';
+      button.setAttribute('aria-pressed',button.dataset.filter===state.filter?'true':'false');
+      button.addEventListener('pointerdown',()=>button.classList.add('pressing'),{passive:true});
+      button.addEventListener('pointerup',()=>button.classList.remove('pressing'),{passive:true});
+      button.addEventListener('pointercancel',()=>button.classList.remove('pressing'),{passive:true});
+    });
+    // Bubble-phase delegation: Google Forms-like click interception cannot stop the target event
+    // before it reaches this container, and renderArchive never replaces #filters.
+    box.addEventListener('click',ev=>{
+      const button=ev.target.closest('button.filter[data-filter]');
+      if(!button||!box.contains(button))return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      apply(button);
+    });
+    box.querySelectorAll('.filter').forEach(button=>{
+      const active=button.dataset.filter===state.filter;
+      button.classList.toggle('active',active);
+      button.setAttribute('aria-pressed',active?'true':'false');
+    });
+  }
+
   function setupNav(){
     installNavDelegation();
     setupArchiveBulk();
@@ -1390,13 +1699,26 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     $('#headerCsvBtn')?.addEventListener('click',()=>showView('csv'));
     $('#reloadBtn')?.addEventListener('click',()=>renderArchive());
     $('#casesRefresh')?.addEventListener('click',renderCases);
-    $('#search')?.addEventListener('input',renderArchive);
+    const headerSearch=$('#search');
+    if(headerSearch){
+      const runHeaderSearch=()=>renderArchive();
+      headerSearch.addEventListener('input',runHeaderSearch);
+      headerSearch.addEventListener('change',runHeaderSearch);
+      headerSearch.addEventListener('keyup',runHeaderSearch);
+      headerSearch.addEventListener('search',runHeaderSearch);
+    }
+    // '/' focuses the archive search unless the user is already typing in a field.
+    document.addEventListener('keydown',ev=>{
+      if(ev.key==='/' && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)){
+        ev.preventDefault();headerSearch?.focus();headerSearch?.select();
+      }
+    });
     $('#refreshCsvBtn')?.addEventListener('click',renderCsv);
     $('#downloadCsvBtn')?.addEventListener('click',downloadCsv);
     $('#archiveCsvBtn')?.addEventListener('click',downloadArchiveCsv);
     $('#downloadPermaCsvBtn')?.addEventListener('click',downloadPermaCsv);
     $('#copyCsvBtn')?.addEventListener('click',copyCsv);
-    ['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterPerma'].forEach(s=>{
+    ['#csvFilterSearch','#csvFilterReason','#csvFilterSc','#csvFilterDiscord','#csvFilterPerma','#csvFilterType','#csvFilterAdmin','#csvFilterSort','#csvFilterDateFrom','#csvFilterDateTo'].forEach(s=>{
       const el=$(s);
       if(!el)return;
       el.addEventListener(el.tagName==='SELECT'?'change':'input',renderCsv);
@@ -1408,13 +1730,14 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       if($('#csvFilterSc'))$('#csvFilterSc').value='all';
       if($('#csvFilterPerma'))$('#csvFilterPerma').value='all';
       if($('#csvFilterDiscord'))$('#csvFilterDiscord').value='all';
+      if($('#csvFilterType'))$('#csvFilterType').value='all';
+      if($('#csvFilterAdmin'))$('#csvFilterAdmin').value='all';
+      if($('#csvFilterSort'))$('#csvFilterSort').value='date_desc';
+      if($('#csvFilterDateFrom'))$('#csvFilterDateFrom').value='';
+      if($('#csvFilterDateTo'))$('#csvFilterDateTo').value='';
       renderCsv();
     });
-    $$('.filter').forEach(b=>b.addEventListener('click',()=>{
-      state.filter=b.dataset.filter;
-      $$('.filter').forEach(x=>x.classList.toggle('active',x===b));
-      renderArchive();
-    }));
+    setupArchiveFilterButtons();
     restoreSavedView();
   }
 
@@ -1437,9 +1760,6 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     for(const item of pending){
       try{
         await putVideo(item.id,item.file);
-        await putQueueFile(item.id,item.file);
-        const check=await getVideo(item.id);
-        if(!check||Number(check.size)!==Number(item.file.size))throw new Error('Dauerhafte lokale Speicherung konnte nicht verifiziert werden.');
       }catch(err){
         item.status='Fehler: Lokale Speicherung fehlgeschlagen: '+(err?.message||err);
         item.uploadFailed=true;
@@ -1550,10 +1870,10 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   function renderQueue(){
     scheduleQueuePersist();const q=$('#uploadQueue');if(!q)return;const active=document.activeElement;const activeId=active?.matches?.('[data-queue-result]')?active.dataset.id:'';const activeValue=activeId?active.value:'';const aStart=activeId?Number(active.selectionStart||activeValue.length):0;const aEnd=activeId?Number(active.selectionEnd||activeValue.length):0;
     $('#queueCount').textContent=`${state.queue.length} ${state.queue.length===1?'Datei':'Dateien'}`;
-    q.innerHTML=state.queue.map(item=>{const fileName=item.finalName||item.file?.name||'POV';const fileSize=Number(item.file?.size||item.result?.sourceSize||item.sourceSize||0);const missingFile=!item.file;const hasError=/^Fehler:/i.test(item.status||'');const retry=(!item.uploading&&!item.ocrProcessing&&((!!item.youtube&&!item.result)||hasError));const canAct=!!item.result&&!!item.file&&!item.uploading&&!item.processing&&!item.ocrProcessing;const label=item.youtube?'OCR erneut':'Erneut hochladen';const resultValue=String(item.manualResult||item.result?.manualResult||'');return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(fileName)}</strong><small>${fileSize?formatSize(fileSize)+' · ':''}${esc(missingFile?'Lokale Datei wird wiederhergestellt…':(item.status||'Wartet'))}</small><div class="queue-result-row"><label>Ergebnis</label><input type="text" class="queue-result-input" data-queue-result data-id="${esc(item.id)}" value="${esc(resultValue)}" placeholder="Ergebnis manuell eintragen"></div><div class="progress"><i style="width:${Number(item.progress)||0}%"></i></div></div><div class="queue-actions">${item.result?`<button type="button" class="mini" data-action="check" data-id="${esc(item.id)}" ${canAct?'':'disabled'}>Prüfen</button><button type="button" class="mini primary" data-action="next" data-id="${esc(item.id)}" ${canAct?'':'disabled'}>Nächste POV</button>`:''}${retry?`<button type="button" class="mini primary" data-action="retry" data-id="${esc(item.id)}">${label}</button>`:''}<button type="button" class="mini" data-action="remove" data-id="${esc(item.id)}">×</button></div></div>`;}).join('');
+    q.innerHTML=state.queue.map(item=>{const fileName=item.finalName||item.file?.name||'POV';const fileSize=Number(item.file?.size||item.result?.sourceSize||item.sourceSize||0);const hasError=/^Fehler:/i.test(item.status||'');const retry=(!item.uploading&&!item.ocrProcessing&&((!!item.youtube&&!item.result)||hasError));const canAct=!!item.result&&!item.uploading&&!item.processing&&!item.ocrProcessing;const label=item.youtube?'OCR erneut':'Erneut hochladen';const resultValue=String(item.manualResult||item.result?.manualResult||'');return `<div class="queue-item ${hasError?'has-error':''}"><div class="queue-icon">▶</div><div class="queue-name"><strong>${esc(fileName)}</strong><small>${fileSize?formatSize(fileSize)+' · ':''}${esc(item.status||'Wartet')}</small><div class="queue-result-row"><label>Ergebnis</label><input type="text" class="queue-result-input" data-queue-result data-id="${esc(item.id)}" value="${esc(resultValue)}" placeholder="Ergebnis manuell eintragen"></div><div class="progress"><i style="width:${Number(item.progress)||0}%"></i></div></div><div class="queue-actions">${item.result?`<button type="button" class="mini" data-action="check" data-id="${esc(item.id)}" ${canAct?'':'disabled'}>Prüfen</button><button type="button" class="mini primary" data-action="next" data-id="${esc(item.id)}" ${canAct?'':'disabled'}>Nächste POV</button>`:''}${retry?`<button type="button" class="mini primary" data-action="retry" data-id="${esc(item.id)}">${label}</button>`:''}<button type="button" class="mini" data-action="remove" data-id="${esc(item.id)}">×</button></div></div>`;}).join('');
     $$('[data-queue-result]').forEach(inp=>inp.addEventListener('input',()=>{const x=state.queue.find(i=>i.id===inp.dataset.id);if(!x)return;x.manualResult=String(inp.value||'').trim();if(x.result)x.result.manualResult=x.manualResult;scheduleQueuePersist();}));
     if(activeId){const restored=document.querySelector(`[data-queue-result][data-id="${CSS.escape(activeId)}"]`);if(restored){restored.value=activeValue;restored.focus();try{restored.setSelectionRange(aStart,aEnd);}catch{}}}
-    q.onclick=async e=>{const btn=e.target.closest('button[data-action]');if(!btn||!q.contains(btn))return;const id=btn.dataset.id;const x=state.queue.find(i=>i.id===id);if(!x)return;const action=btn.dataset.action;if(action==='check'){if(!x.result){toast('Für diese POV liegen noch keine OCR-Ergebnisse vor.');return;}openEditor(x);setTimeout(()=>{if(state.editing?.item?.id!==x.id)return;const target=clampId(x.result?.targetId||x.targetId||'');if(!/^\d{1,6}$/.test(target)){toast('Zuerst eine gültige Ziel-ID erkennen/eintragen.');return;}if(normalizeHexLoose(x.result?.sc||x.sc||'').length===40)openAcpReasonForCurrentId();else startAcpSequence();},80);return;}if(action==='next'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}if(x.processing||x.ocrProcessing){toast('Die POV wird noch verarbeitet. Bitte kurz warten.');return;}await nextQueueItem(id);return;}if(action==='retry'){await retryQueueItem(x);return;}if(action==='remove'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}x.cancelled=true;x.editingDone=true;x.ocrProcessing=false;x.processing=false;try{await delVideo(x.id,DESTRUCTIVE_TOKEN);}catch{}await delQueueFile(x.id);state.queue=state.queue.filter(i=>i.id!==id);persistQueueNow();renderQueue();toast('POV aus der Warteschlange entfernt. OCR wurde gestoppt.');}};
+    q.onclick=async e=>{const btn=e.target.closest('button[data-action]');if(!btn||!q.contains(btn))return;const id=btn.dataset.id;const x=state.queue.find(i=>i.id===id);if(!x)return;const action=btn.dataset.action;if(action==='check'){if(!x.result){toast('Für diese POV liegen noch keine OCR-Ergebnisse vor.');return;}openEditor(x);setTimeout(()=>{if(state.editing?.item?.id!==x.id)return;const target=clampId(x.result?.targetId||x.targetId||'');if(!/^\d{1,6}$/.test(target)){toast('Zuerst eine gültige Ziel-ID erkennen/eintragen.');return;}if(normalizeHexLoose(x.result?.sc||x.sc||'').length===40)openAcpReasonForCurrentId();else startAcpSequence();},80);return;}if(action==='next'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}if(x.processing||x.ocrProcessing){toast('Die POV wird noch verarbeitet. Bitte kurz warten.');return;}await nextQueueItem(id);return;}if(action==='retry'){await retryQueueItem(x);return;}if(action==='remove'){if(x.uploading){toast('YouTube-Upload läuft noch.');return;}x.cancelled=true;x.editingDone=true;x.ocrProcessing=false;x.processing=false;try{await delVideo(x.id,DESTRUCTIVE_TOKEN);}catch{}state.queue=state.queue.filter(i=>i.id!==id);persistQueueNow();renderQueue();toast('POV aus der Warteschlange entfernt. OCR wurde gestoppt.');}};
   }
   async function retryLocalOCR(item){
     if(item.processing||item.cancelled)return;
@@ -2277,8 +2597,8 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     if(ctx.item?.uploading){toast('YouTube-Upload läuft noch.');return false;}
     if(!window.confirm('Diesen POV wirklich löschen? Die lokale Datei wird gelöscht. Das YouTube-Video bleibt erhalten.'))return false;
     try{
-      if(ctx.item){ctx.item.cancelled=true;ctx.item.editingDone=true;ctx.item.processing=false;ctx.item.ocrProcessing=false;await delVideo(ctx.item.id,DESTRUCTIVE_TOKEN);await delQueueFile(ctx.item.id);state.queue=state.queue.filter(x=>x.id!==ctx.item.id);state.archiveSelected?.delete(ctx.item.id);persistQueueNow();}
-      else{await delVideo(ctx.entry.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==ctx.entry.id);state.archiveSelected?.delete(ctx.entry.id);saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});}
+      if(ctx.item){ctx.item.cancelled=true;ctx.item.editingDone=true;ctx.item.processing=false;ctx.item.ocrProcessing=false;await delVideo(ctx.item.id,DESTRUCTIVE_TOKEN);state.queue=state.queue.filter(x=>x.id!==ctx.item.id);state.archiveSelected?.delete(ctx.item.id);persistQueueNow();}
+      else{await delVideo(ctx.entry.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(x=>x.id!==ctx.entry.id);state.archiveSelected?.delete(ctx.entry.id);removeLocalArchiveMirror(ctx.entry.id);saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});}
       closeEditor();renderQueue();renderArchive();renderCases();renderCsv();toast('POV gelöscht. YouTube bleibt erhalten.');return true;
     }catch(err){console.error('Direktes Löschen fehlgeschlagen',err);toast('Löschen fehlgeschlagen: '+(err?.message||err));return false;}
   }
@@ -2321,6 +2641,30 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     }catch(err){console.error('Nächste POV fehlgeschlagen',err);toast('Nächste POV: '+(err?.message||err));return false;}
   }
 
+  function findDuplicateTargetId(targetId, currentId=''){
+    const id=String(targetId||'').trim();
+    if(!/^\d{1,6}$/.test(id))return [];
+    const current=String(currentId||'');
+    const found=[];
+    for(const entry of state.entries||[]){
+      if(String(entry?.id||'')===current)continue;
+      if(String(entry?.targetId||'').trim()===id)found.push(entry);
+    }
+    for(const item of state.queue||[]){
+      if(String(item?.id||'')===current)continue;
+      const itemId=String(item?.result?.targetId||item?.targetId||'').trim();
+      if(itemId===id)found.push(item);
+    }
+    return found;
+  }
+  function duplicateTargetIdWarning(targetId, matches){
+    const archiveCount=matches.filter(x=>x?.permaArchive===true).length;
+    const normalCount=matches.length-archiveCount;
+    const where=[];
+    if(normalCount)where.push(`${normalCount}x bereits hochgeladen`);
+    if(archiveCount)where.push(`${archiveCount}x im POV-Archiv`);
+    return `⚠️ ID bereits vorhanden\n\nID ${targetId} wurde bereits gespeichert: ${where.join(' und ')}.\n\nMöchtest du die neue POV trotzdem speichern?`;
+  }
   async function saveEditor(e){
     e.preventDefault(); const ctx=state.editing; if(!ctx)return;
     const targetId=clampId($('#targetId').value), reason=$('#reason').value, sc=normalizeHexLoose($('#sc').value), server=$('#server').value||'3', date=$('#date').value;
@@ -2331,7 +2675,18 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     const offline=sc.length===40?false:offlineFlag;
     const missing=[]; if(!/^\d{1,6}$/.test(targetId))missing.push('Ziel-ID'); if(!ALLOWED_REASONS.includes(reason))missing.push('Grund'); if(!resultText)missing.push('Ergebnis'); if(!/^[1-4]$/.test(server))missing.push('Server'); if(!validDate(date))missing.push('Datum'); if(!offline && sc.length!==40)missing.push('SC');
     if(missing.length){toast('Bitte fehlende Angaben prüfen: '+missing.join(', '));return false;}
-    const base=ctx.item||ctx.entry; const types=[...state.selectedTypes]; if(reason.startsWith('PC'))types.push('pccheck'); if(reason==='Cheater'||reason==='Cheating')types.push('cheater'); const finalTypes=[...new Set(types)];
+    const base=ctx.item||ctx.entry;
+    // Warn before saving a POV whose target ID already exists anywhere in the archive.
+    // The user may explicitly continue; cancelling leaves the existing entry untouched.
+    const duplicateMatches=findDuplicateTargetId(targetId,base.id||ctx.entry?.id||ctx.item?.id||'');
+    if(duplicateMatches.length){
+      const proceed=window.confirm(duplicateTargetIdWarning(targetId,duplicateMatches));
+      if(!proceed){
+        toast(`Speichern abgebrochen · ID ${targetId} bereits vorhanden.`);
+        return false;
+      }
+    }
+    const types=[...state.selectedTypes]; if(reason.startsWith('PC'))types.push('pccheck'); if(reason==='Cheater'||reason==='Cheating')types.push('cheater'); const finalTypes=[...new Set(types)];
     const finalName=`${targetId}, ${reason}, ${formatDateDE(date)}.mp4`;
     const namedFile=new File([base.file],finalName,{type:base.file.type||'video/mp4',lastModified:base.file.lastModified||Date.now()}); if(namedFile.size!==base.file.size)throw new Error('Die Dateigröße hat sich beim Umbenennen verändert. Speicherung abgebrochen.');
     const yt=base.youtube||ctx.item?.youtube||ctx.entry?.youtube||null;
@@ -2340,7 +2695,6 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     const stickyArchive=!!base.permaArchive||!!ctx.item?.result?.permaArchive||!!ctx.entry?.permaArchive||!!readArchivePlacement()[String(base.id||'')];
     const record={id:base.id||crypto.randomUUID(),originalName:base.originalName||base.file.name,finalName,targetId,reason,manualResult:resultText,sc:offline?'':sc,server,date,rid:'',types:finalTypes,perma:$('#perma').checked,permaArchive:stickyArchive||$('#permaArchive').checked,notBanned:$('#notBanned').checked,documentStatus:$('#documentStatus').value==='eingetragen'?'eingetragen':'nicht eingetragen',pcCheckers:getPcCheckers(),pcCheckerManual:[...pcCheckerCustom],discordId:'',proof:yt?.url||$('#proof').value.trim(),complete:true,saved:true,videoStored:true,offline,sourceSize:namedFile.size,sourceType:namedFile.type||'video/mp4',duration:Number(base.result?.duration||base.duration||0)||0,timestamps,infoPhotoField:'banner',missing:[],file:namedFile,youtube:yt};
     await putVideo(record.id,namedFile);
-    await delQueueFile(record.id);
     // YouTube must receive the exact final filename (including .mp4). The title update
     // is completed and verified before the saved POV is finalized in the UI.
     if(yt?.id){
@@ -2359,6 +2713,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       }
     }
     state.entries=[record,...state.entries.filter(x=>x.id!==record.id)];
+    clearLocalArchiveDeletion(record.id);
     saveMeta();
     // Sobald der POV vollständig gespeichert ist, sofort die Cloud-Sicherung anstoßen.
     // Falls Google Drive nicht verbunden ist, bleibt der Aufruf folgenlos; nach dem Verbinden
@@ -2901,20 +3256,23 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   function loadDriveState(){try{return JSON.parse(localStorage.getItem(DRIVE_STATE_KEY)||'null')||{connected:false,clientId:'',accessToken:'',tokenExpiresAt:0};}catch{return {connected:false,clientId:'',accessToken:'',tokenExpiresAt:0};}}
   function saveDriveState(v){try{localStorage.setItem(DRIVE_STATE_KEY,JSON.stringify({...v,updatedAt:Date.now()}));}catch(err){console.warn('Drive-Status konnte nicht gespeichert werden',err);}}
   function driveState(){return loadDriveState();}
-  function renderDriveStatus(){const st=driveState(),el=$('#driveStatus'),help=$('#driveHelp'),connect=$('#driveConnectBtn'),sync=$('#driveSyncBtn'),restore=$('#driveRestoreBtn');const linked=!!(st.clientId&&(st.connected||st.accessToken));const tokenValid=!!(st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+15000);if(el){el.className='connection '+(linked?'good':'');el.textContent=linked?(tokenValid?'● Verbunden':'● Verbunden · Erneuerung nötig'):'● Nicht verbunden';}if(connect)connect.textContent=linked?'Google Drive erneut verbinden':'Google Drive verbinden';if(sync)sync.disabled=!tokenValid||driveSyncInProgress;if(restore)restore.disabled=!tokenValid||driveSyncInProgress;if(help&&linked){help.textContent=tokenValid?'Google Drive verbunden. Automatisches Backup nach jedem gespeicherten POV. Es wird nur das Archiv als JSON gesichert – keine POV-Videodateien.':'Google Drive bleibt verbunden. Der aktuelle Zugriff ist abgelaufen; automatische Backups warten, bis du „Google Drive erneut verbinden“ klickst.';}}
+  function renderDriveStatus(){const st=driveState(),el=$('#driveStatus'),help=$('#driveHelp'),connect=$('#driveConnectBtn'),sync=$('#driveSyncBtn'),restore=$('#driveRestoreBtn');const linked=!!(st.clientId&&(st.connected||st.accessToken));const tokenValid=!!(st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+15000);if(el){el.className='connection '+(linked?'good':'');el.textContent=linked?(tokenValid?'● Verbunden':'● Verbunden · Erneuerung nötig'):'● Nicht verbunden';}if(connect)connect.textContent=linked?'Google Drive erneut verbinden':'Google Drive verbinden';if(sync)sync.disabled=!linked||driveSyncInProgress;if(restore)restore.disabled=!linked||driveSyncInProgress;if(help){if(!linked)help.textContent='Google Drive ist noch nicht verbunden. Klicke zuerst „Google Drive verbinden“. Danach kannst du „Jetzt alles sichern“ verwenden.';else help.textContent=tokenValid?'Google Drive verbunden. Automatisches Backup nach jedem gespeicherten POV. Es wird nur das Archiv als JSON gesichert – keine POV-Videodateien.':'Google Drive ist verbunden, aber der Zugriff ist abgelaufen. „Jetzt alles sichern“ oder „Cloud-Archiv wiederherstellen“ öffnet die Google-Anmeldung erneut.';}}
   async function driveTokenFresh(forceConsent=false){
     let st=driveState();
     if(st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+120000)return st.accessToken;
-    // Niemals aus einem Hintergrund-Backup heraus einen OAuth-Popup öffnen.
-    // Ein abgelaufener Zugriff beendet die gespeicherte Drive-Verknüpfung nicht.
-    throw new Error('Google-Drive-Zugriff ist abgelaufen. Bitte „Google Drive erneut verbinden“ klicken.');
+    if(forceConsent===false && !st.clientId)throw new Error('Bitte zuerst Google Drive verbinden.');
+    // Manueller Sync/Restore darf den Google-Popup-Flow zur Token-Erneuerung verwenden.
+    // Hintergrund-Syncs rufen diese Funktion nur mit bereits gültigem Token auf.
+    return await startDriveOAuth(st.clientId||'');
   }
-  function startDriveOAuth(){
+  async function startDriveOAuth(preferredClientId=''){
+    const saved=driveState();
     const c=state.ytConnections.find(x=>String(x?.clientId||'').trim())||connection(1)||state.ytConnections[0];
-    const clientId=String(c?.clientId||'').trim();
+    const clientId=String(preferredClientId||saved.clientId||c?.clientId||'').trim();
     if(!clientId)throw new Error('Bitte zuerst die Google OAuth Client-ID in YouTube-Verbindung 1 eintragen.');
     if(!validClientId(clientId))throw new Error('Die Google OAuth Client-ID sieht ungültig aus.');
-    if(!window.google?.accounts?.oauth2)throw new Error('Google-Anmeldung ist noch nicht geladen. Bitte kurz warten und erneut klicken.');
+    const ready=window.google?.accounts?.oauth2||await waitForGoogleGIS();
+    if(!ready)throw new Error('Google-Anmeldung ist noch nicht geladen. Bitte kurz warten und erneut klicken.');
     const st={purpose:'drive',clientId,createdAt:Date.now()};
     return new Promise((resolve,reject)=>{
       let finished=false;const done=(fn,v)=>{if(finished)return;finished=true;fn(v);};
@@ -2935,14 +3293,19 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
   async function driveFindFile(name,folderId){const q=encodeURIComponent(`name='${String(name).replace(/'/g,"\\'")}' and '${folderId}' in parents and trashed=false`);const r=await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=modifiedTime desc&pageSize=20&fields=files(id,name,size,mimeType,modifiedTime,appProperties)`);return (await r.json()).files?.[0]||null;}
   async function driveUploadJson(name,folderId,payload,existingId){const boundary='----grandrpDrive'+Math.random().toString(16).slice(2);const meta=existingId?{name}:{name,parents:[folderId],mimeType:'application/json'};const body=`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(payload)}\r\n--${boundary}--`;const url=existingId?`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(existingId)}?uploadType=multipart&fields=id,name,modifiedTime`:'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime';return (await driveApi(url,{method:existingId?'PATCH':'POST',headers:{'Content-Type':`multipart/related; boundary=${boundary}`},body})).json();}
   async function syncDriveBackup(options={}){if(driveSyncInProgress)return;driveSyncInProgress=true;renderDriveStatus();const help=$('#driveHelp');const interactive=options.interactive===true;try{
-    const st=driveState();
-    if(!st?.clientId||!st?.accessToken){return;}
-    // Automatische Backups dürfen niemals ungefragt ein Google-OAuth-Popup öffnen.
-    // Ist das Token abgelaufen, wird die Sicherung still übersprungen; ein manueller
-    // Klick auf „Backup“ darf dagegen die normale OAuth-Erneuerung durchführen.
+    let st=driveState();
+    if(!st?.clientId){
+      if(interactive)throw new Error('Bitte zuerst Google Drive verbinden.');
+      return;
+    }
+    // Automatische Backups öffnen niemals ungefragt ein OAuth-Popup.
+    // Ein manueller Klick darf einen abgelaufenen Zugriff dagegen direkt erneuern.
     let token='';
-    if(Number(st.tokenExpiresAt||0)>Date.now()+15000) token=String(st.accessToken||'');
-    else if(interactive) token=await driveTokenFresh(false);
+    if(st.accessToken&&Number(st.tokenExpiresAt||0)>Date.now()+15000) token=String(st.accessToken||'');
+    else if(interactive){
+      token=await driveTokenFresh(false);
+      st=driveState();
+    }
     else return;
     if(!token)return;
     const folder=await driveEnsureFolder();
@@ -3216,7 +3579,6 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       a.rel='noopener';
       a.style.position='fixed';a.style.left='-99999px';a.style.top='-99999px';a.style.width='1px';a.style.height='1px';
       document.body.appendChild(a);
-      document.body.appendChild(a);
       a.click();
       setTimeout(()=>{try{a.remove();}catch{};try{URL.revokeObjectURL(url);}catch{};},1500);
       return true;
@@ -3377,6 +3739,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       const key=String(id||'');const entry=state.entries.find(e=>String(e.id)===key);
       if(!entry)throw new Error('Archiv-Eintrag nicht gefunden.');
       await delVideo(entry.id,DESTRUCTIVE_TOKEN);state.entries=state.entries.filter(e=>String(e.id)!==key);state.archiveSelected.delete(entry.id);
+      removeLocalArchiveMirror(entry.id);
       saveMeta({allowEmpty:state.entries.length===0,explicitDelete:true});renderArchive();renderCases();renderCsv();return true;
     };
     window.grandrpClearLocalData=async()=>{
@@ -3405,15 +3768,15 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     }
     try{renderYoutubeConnections();}catch(err){console.error('YouTube-Einstellungen konnten nicht initialisiert werden',err);}
     $('#downloadArchiveBackup')?.addEventListener('click',downloadArchiveBackup);
-    $('#driveConnectBtn')?.addEventListener('click',()=>{try{startDriveOAuth();}catch(err){toast(err?.message||String(err));const h=$('#driveHelp');if(h)h.textContent='✕ '+(err?.message||String(err));}});
-    $('#driveSyncBtn')?.addEventListener('click',()=>{void syncDriveBackup();});
+    $('#driveConnectBtn')?.addEventListener('click',()=>{void startDriveOAuth().catch(err=>{toast(err?.message||String(err));const h=$('#driveHelp');if(h)h.textContent='✕ '+(err?.message||String(err));});});
+    $('#driveSyncBtn')?.addEventListener('click',()=>{void syncDriveBackup({interactive:true});});
     $('#driveRestoreBtn')?.addEventListener('click',()=>{void restoreDriveBackup();});
     updateDriveResult();
     const backupFile=$('#archiveBackupFile');
     // Public handlers are assigned even when an optional settings renderer failed.
     window.grandrpRestoreArchiveBackup=restoreArchiveBackup;
     window.grandrpDownloadArchiveBackup=downloadArchiveBackup;
-    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;state.entries=[];state.queue=[];try{localStorage.setItem(LOCAL_CLEAR_MARKER_KEY,String(Date.now()));localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(ARCHIVE_AUTHORITATIVE_KEY);localStorage.removeItem(DIRECT_RESTORE_KEY);localStorage.removeItem(LEGACY_DIRECT_RESTORE_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
+    $('#clearLocal').onclick=async()=>{if(!confirm('Lokales Archiv wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'))return;clearTimeout(queuePersistTimer);queuePersistTimer=0;clearLocalArchiveMirror();state.entries=[];state.queue=[];try{localStorage.setItem(LOCAL_CLEAR_MARKER_KEY,String(Date.now()));localStorage.removeItem(META_KEY);localStorage.removeItem(META_UPDATED_KEY);localStorage.removeItem(ARCHIVE_BACKUP_KEY);localStorage.removeItem(ARCHIVE_AUTHORITATIVE_KEY);localStorage.removeItem(DIRECT_RESTORE_KEY);localStorage.removeItem(LEGACY_DIRECT_RESTORE_KEY);localStorage.removeItem(QUEUE_STORAGE_KEY);localStorage.removeItem(QUEUE_UPDATED_KEY);localStorage.removeItem(YT_CONNECTIONS_KEY);localStorage.removeItem('yt_client_id');localStorage.removeItem('yt_access_token');}catch{}state.ytConnections=normalizeYoutubeConnections([]);state.activeYoutubeSlot=1;syncLegacyYoutubeState(1);await clearDB(DESTRUCTIVE_TOKEN);renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();toast('Lokale Daten gelöscht.');};
     updateYtStatus();
   }
 
@@ -3471,6 +3834,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     void pumpUploads();
     renderArchive();renderCases();renderCsv();renderQueue();renderYoutubeConnections();renderAuthUsers();
     restoreSavedView();
+    try{renderArchive();}catch(err){console.error('Archiv konnte beim finalen Startup-Rendern nicht angezeigt werden',err);}
     // Last startup step: an explicitly selected backup is authoritative and is re-applied
     // after every normal loader has finished. This prevents stale/empty stores from winning.
     try{await forceApplyDirectRestore({showStatus:false});}catch(err){console.error('Startup-Restore konnte nicht abgeschlossen werden',err);}
