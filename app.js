@@ -649,7 +649,7 @@
   const allowedArchiveFilters=new Set(['all','ban','pccheck','socban','hardban','cheater','negativ','novideo','permaarchive','duplicates']);
   let initialArchiveFilter='all';
   try{const value=localStorage.getItem(ARCHIVE_FILTER_KEY)||'';if(allowedArchiveFilters.has(value))initialArchiveFilter=value;}catch{}
-  const state={entries:[],queue:[],archiveSelected:new Set(),filter:initialArchiveFilter,editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:'',tokenClient:null,clientId:'',activeYoutubeSlot:1,ytConnections:loadYoutubeConnectionsLocal(),settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,localFallbackRunner:false,youtubeUploadBlocked:false,tokenExpiresAt:0,tokenRefreshPromise:null,tokenRefreshPromises:new Map()};
+  const state={entries:[],queue:[],archiveSelected:new Set(),filter:initialArchiveFilter,editing:null,worker:null,specialWorker:null,fastWorker:null,accessToken:'',tokenClient:null,clientId:'',activeYoutubeSlot:1,ytConnections:loadYoutubeConnectionsLocal(),settings:{frames:30,window:5,step:0.4},selectedTypes:new Set(),queueRunner:false,uploadRunner:false,localFallbackRunner:false,youtubeUploadBlocked:false,tokenExpiresAt:0,tokenRefreshPromise:null,tokenRefreshPromises:new Map(),savedQueueRecovery:[]};
   let archiveReadyPromise=Promise.resolve();
   const views={archive:['Archiv','POV-Fälle, Bans, PC-Checks und CSV-Export'],cases:['Verdachtsfälle','Fehlende oder widersprüchliche OCR-Angaben'],upload:['POVs hochladen','Mehrere Aufnahmen gleichzeitig verarbeiten'],csv:['CSV erstellen','Export für Proof, Datum, ID, SOC, RID, Discord ID, Familie und Grund'],settings:['Einstellungen','OCR und YouTube']};
   // Local authentication: plaintext passwords are never stored; only salted PBKDF2 hashes are persisted in this browser.
@@ -943,9 +943,19 @@
     let stored=[...mergedQueue.values()];
     if(!stored.length){state.queue=[];return;}
     const restored=[];
+    const savedRecovery=[];
     let changed=false;
     for(const meta of stored){
-      if(!meta?.id || meta.editingDone || meta.status==='Gespeichert'){changed=true;continue;}
+      // A save can finish just before a reload, while the old queue snapshot is still
+      // present in IndexedDB/localStorage. Never throw such an item away before the
+      // archive has had a chance to recover it. Keep a recovery copy and reconcile it
+      // with the durable archive after loadMeta().
+      if(meta?.id && (meta.editingDone===true || meta.status==='Gespeichert' || meta.result?.saved===true)){
+        savedRecovery.push(meta);
+        changed=true;
+        continue;
+      }
+      if(!meta?.id){changed=true;continue;}
       let file=null;
       try{file=await getVideo(meta.id);}catch{}
       if(!file){changed=true;continue;}
@@ -979,6 +989,7 @@
       }
       restored.push(item);
     }
+    state.savedQueueRecovery=savedRecovery;
     state.queue=restored;
     if(changed)persistQueueNow();
     else scheduleQueuePersist();
@@ -991,6 +1002,42 @@
     }catch(err){console.warn('Dauerhafte App-Einstellungen konnten nicht gespeichert werden',err);}
   }
   async function requestPersistentStorage(){try{if(navigator.storage?.persist)await navigator.storage.persist();const persisted=await navigator.storage?.persisted?.();const el=$('#persistentStorageStatus');if(el){el.textContent=persisted?'● Dauerhafter Browser-Speicher aktiv':'● Browser-Speicher nicht garantiert';el.className='connection '+(persisted?'good':'warn');}return !!persisted;}catch{const el=$('#persistentStorageStatus');if(el){el.textContent='● Browser-Speicherstatus nicht verfügbar';el.className='connection warn';}return false;}}
+  async function recoverSavedQueueIntoArchive(){
+    const recoveredItems=Array.isArray(state.savedQueueRecovery)?state.savedQueueRecovery:[];
+    if(!recoveredItems.length)return 0;
+    let changed=false;
+    const byId=new Map((state.entries||[]).filter(e=>e?.id).map(e=>[String(e.id),e]));
+    for(const item of recoveredItems){
+      const id=String(item?.id||'').trim();
+      if(!id)continue;
+      const result=(item?.result&&typeof item.result==='object')?item.result:{};
+      // The saved editor record is the authoritative shape when it exists. Fill any
+      // missing identity fields from the queue metadata so older queue snapshots are
+      // also recoverable.
+      const recovered={...item,...result,id};
+      delete recovered.file; delete recovered.videoUrl; delete recovered.ocrPromise;
+      recovered.saved=true;
+      recovered.videoStored=true;
+      recovered.editingDone=undefined;
+      recovered.status=undefined;
+      const existing=byId.get(id);
+      if(existing){
+        const merged={...existing,...recovered, file:undefined, videoUrl:undefined};
+        // Never downgrade an already archived placement during recovery.
+        merged.permaArchive=!!existing.permaArchive || !!recovered.permaArchive || !!readArchivePlacement()[id];
+        byId.set(id,merged);
+      }else{
+        byId.set(id,recovered);
+      }
+      changed=true;
+    }
+    state.savedQueueRecovery=[];
+    if(!changed)return 0;
+    const next=applyArchivePlacement([...byId.values()]);
+    state.entries=next;
+    saveMeta();
+    return recoveredItems.length;
+  }
   async function loadMeta(){
     const candidates=[];
     // The authoritative synchronous archive copy is the first local source consulted on every
@@ -2653,6 +2700,9 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
       ctx.item.editingDone=true;
       ctx.item.cancelled=true;
       state.queue=state.queue.filter(x=>x.id!==ctx.item.id);
+      // Persist the queue removal immediately. Otherwise a very fast page refresh can
+      // resurrect the just-saved POV from the old queue snapshot.
+      persistQueueNow();
       renderQueue();
     }
 
@@ -3722,6 +3772,7 @@ Das YouTube-Video wird NICHT gelöscht.`))return;try{await delVideo(e.id,DESTRUC
     archiveReadyPromise=(async()=>{
       await loadQueue().catch(err=>{console.error('Warteschlange konnte nicht geladen werden',err);state.queue=[];});
       try{await loadMeta();}catch(err){console.error('Archiv konnte nicht geladen werden',err);}
+      try{await recoverSavedQueueIntoArchive();}catch(err){console.error('Gespeicherte POVs aus der Warteschlange konnten nicht ins Archiv wiederhergestellt werden',err);}
     })();
     await archiveReadyPromise;
     renderYoutubeConnections();
